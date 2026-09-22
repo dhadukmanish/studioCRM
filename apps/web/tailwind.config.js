@@ -1,21 +1,31 @@
 /** @type {import('tailwindcss').Config} */
+// Every color resolves to a CSS variable defined in src/themes.css, so switching
+// data-theme (light | dark | olive) re-skins the whole app without touching components.
+const v = (name) => `rgb(var(--${name}) / <alpha-value>)`;
+const scale = (prefix, steps) => Object.fromEntries(steps.map((s) => [s, v(`${prefix}-${s}`)]));
+
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  darkMode: ['selector', '[data-theme="dark"]'],
   theme: {
     extend: {
       colors: {
-        primary: { DEFAULT: '#006CB8', dark: '#005A99', lighter: '#CCE2F2', 50: '#EAF3FA', 100: '#CCE2F2', 600: '#006CB8', 700: '#005A99' },
-        gray: { 0: '#FFFFFF', 50: '#FAFAFA', 100: '#F1F1F1', 200: '#E3E3E3', 300: '#DFDFDF', 400: '#929292', 500: '#666666', 600: '#484848', 700: '#333333', 800: '#222222', 900: '#111111', 1000: '#000000' },
-        muted: '#E3E3E3',
-        line: '#E2E8F0',
-        page: '#F8FAFC',
+        primary: { DEFAULT: v('primary'), dark: v('primary-dark'), lighter: v('primary-lighter'), 50: v('primary-50'), 100: v('primary-lighter'), 600: v('primary'), 700: v('primary-dark') },
+        gray: scale('gray', [0, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]),
+        white: v('surface'),
+        surface: v('surface'),
+        muted: v('gray-200'),
+        line: v('line'),
+        page: v('page'),
+        head: v('head'), // table header background
+        input: v('input-border'),
       },
       fontFamily: {
         sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         heading: ['"Lexend Deca"', 'Inter', 'sans-serif'],
       },
       fontSize: { xxs: ['11px', '14px'] },
-      boxShadow: { card: '0 1px 2px 0 rgba(0,0,0,0.05)', btn: '0 1px 2px 0 rgba(0,108,184,0.2)' },
+      boxShadow: { card: '0 1px 2px 0 rgb(var(--shadow) / 0.06)', btn: '0 1px 2px 0 rgb(var(--primary) / 0.25)' },
       borderRadius: { DEFAULT: '8px' },
     },
   },

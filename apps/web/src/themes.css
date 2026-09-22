@@ -1,0 +1,102 @@
+/* ---------------------------------------------------------------------------
+ * Theme tokens. Values are space-separated RGB so Tailwind can apply opacity
+ * (`bg-primary/10`). Add a new theme by copying a block and giving it a name;
+ * register it in src/lib/theme.ts.
+ * ------------------------------------------------------------------------- */
+
+/* ---------- Light (default) ---------- */
+:root, [data-theme='light'] {
+  color-scheme: light;
+  --primary: 0 108 184;
+  --primary-dark: 0 90 153;
+  --primary-lighter: 204 226 242;
+  --primary-50: 234 243 250;
+
+  --surface: 255 255 255;        /* cards, inputs, sidebar */
+  --page: 248 250 252;           /* app background */
+  --head: 248 250 252;           /* table header */
+  --line: 226 232 240;           /* borders */
+  --input-border: 209 213 219;
+  --shadow: 0 0 0;
+
+  --gray-0: 255 255 255;
+  --gray-50: 250 250 250;
+  --gray-100: 241 241 241;
+  --gray-200: 227 227 227;
+  --gray-300: 223 223 223;
+  --gray-400: 146 146 146;
+  --gray-500: 102 102 102;
+  --gray-600: 72 72 72;
+  --gray-700: 51 51 51;
+  --gray-800: 34 34 34;
+  --gray-900: 17 17 17;
+  --gray-1000: 0 0 0;
+}
+
+/* ---------- Dark ---------- */
+[data-theme='dark'] {
+  color-scheme: dark;
+  --primary: 77 163 230;
+  --primary-dark: 41 132 204;
+  --primary-lighter: 20 52 82;
+  --primary-50: 17 38 60;
+
+  --surface: 24 27 33;
+  --page: 16 18 22;
+  --head: 30 34 41;
+  --line: 44 49 58;
+  --input-border: 58 64 75;
+  --shadow: 0 0 0;
+
+  /* inverted neutral scale: gray-900 is light text, gray-50 is a dark tint */
+  --gray-0: 24 27 33;
+  --gray-50: 30 34 41;
+  --gray-100: 38 43 51;
+  --gray-200: 50 56 66;
+  --gray-300: 62 69 81;
+  --gray-400: 130 138 152;
+  --gray-500: 158 166 180;
+  --gray-600: 186 193 205;
+  --gray-700: 208 214 224;
+  --gray-800: 226 230 236;
+  --gray-900: 241 243 247;
+  --gray-1000: 255 255 255;
+}
+
+/* ---------- Olive (warm, earthy light theme) ---------- */
+[data-theme='olive'] {
+  color-scheme: light;
+  --primary: 96 122 30;          /* olive green */
+  --primary-dark: 76 98 22;
+  --primary-lighter: 220 228 196;
+  --primary-50: 240 244 228;
+
+  --surface: 253 253 249;
+  --page: 244 245 236;
+  --head: 240 242 229;
+  --line: 222 225 205;
+  --input-border: 204 208 184;
+  --shadow: 60 70 20;
+
+  --gray-0: 253 253 249;
+  --gray-50: 248 249 242;
+  --gray-100: 240 242 229;
+  --gray-200: 226 229 210;
+  --gray-300: 214 218 196;
+  --gray-400: 140 146 118;
+  --gray-500: 104 110 84;
+  --gray-600: 76 82 58;
+  --gray-700: 56 62 40;
+  --gray-800: 40 45 28;
+  --gray-900: 26 30 16;
+  --gray-1000: 0 0 0;
+}
+
+/* dark-mode tweaks for semantic badge colours (Tailwind's green/red/amber stay readable on dark) */
+[data-theme='dark'] .badge.bg-green-50 { background: rgb(22 101 52 / 0.25); color: rgb(134 239 172); }
+[data-theme='dark'] .badge.bg-red-50 { background: rgb(153 27 27 / 0.25); color: rgb(252 165 165); }
+[data-theme='dark'] .badge.bg-amber-50 { background: rgb(146 64 14 / 0.25); color: rgb(252 211 77); }
+[data-theme='dark'] .badge.bg-purple-50 { background: rgb(88 28 135 / 0.3); color: rgb(216 180 254); }
+[data-theme='dark'] .bg-red-50 { background: rgb(153 27 27 / 0.2); }
+[data-theme='dark'] .bg-amber-50 { background: rgb(146 64 14 / 0.2); }
+[data-theme='dark'] input[type='date'], [data-theme='dark'] input[type='time'], [data-theme='dark'] input[type='datetime-local'] { color-scheme: dark; }

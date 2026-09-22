@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, ChevronDown, ChevronRight, Boxes, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Search, Settings, User } from 'lucide-react';
+import { Bell, ChevronDown, ChevronRight, Boxes, Leaf, LogOut, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Search, Settings, Sun, User } from 'lucide-react';
+import { THEMES, type ThemePref } from '@/lib/theme';
+import { Dropdown } from '@/components/ui';
 import { NAV, type NavItem } from '@erp/shared';
 import { useAuthStore } from '@/store/auth';
 import { useUiStore } from '@/store/ui';
@@ -85,6 +87,14 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
   );
 }
 
+/** Theme switcher — light / dark / olive / system */
+export function ThemeSwitcher() {
+  const { theme, setTheme } = useUiStore();
+  const icons: Record<string, JSX.Element> = { light: <Sun className="h-4 w-4" />, dark: <Moon className="h-4 w-4" />, olive: <Leaf className="h-4 w-4" />, system: <Monitor className="h-4 w-4" /> };
+  const items = [...THEMES.map((t) => ({ label: <span className="flex items-center gap-2">{icons[t.key]}<span className="flex-1">{t.label}</span><span className="h-3 w-3 rounded-full border border-line" style={{ background: t.swatch }} />{theme === t.key && <span className="text-primary">✓</span>}</span>, onClick: () => setTheme(t.key) })), { divider: true, label: '' }, { label: <span className="flex items-center gap-2">{icons.system}<span className="flex-1">System</span>{theme === 'system' && <span className="text-primary">✓</span>}</span>, onClick: () => setTheme('system' as ThemePref) }];
+  return <Dropdown items={items} trigger={<button className="icon-btn rounded-full" title="Theme">{icons[theme] ?? icons.system}</button>} />;
+}
+
 function UserMenu() {
   const { user, logout, refreshToken } = useAuthStore();
   const nav = useNavigate();
@@ -142,6 +152,7 @@ export default function AppShell() {
             <input placeholder="Search anything..." className="input input-sm pl-9 bg-gray-50" />
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <ThemeSwitcher />
             <Link to="/modules/settings" className="icon-btn rounded-full" title="Settings"><Settings className="h-4 w-4" /></Link>
             <button className="icon-btn rounded-full" title="Notifications"><Bell className="h-4 w-4" /></button>
             <UserMenu />

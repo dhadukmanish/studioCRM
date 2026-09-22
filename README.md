@@ -63,9 +63,11 @@ pnpm dev
 
 Seeded roles pick up new permissions automatically the next time you edit them; `Super Admin` always has everything.
 
-## Theming
+## Theming — Light / Dark / Olive
 
-- Colors, fonts, radius and shadows live in `apps/web/tailwind.config.js` (`primary`, `gray`, `line`, `page`) and the component classes in `apps/web/src/index.css` (`.btn-*`, `.input`, `.card`, `.table-head` …). Change them once; every page follows.
+- Every Tailwind color maps to a CSS variable (`apps/web/tailwind.config.js` → `apps/web/src/themes.css`). Three themes ship: **light**, **dark**, **olive**; users switch from the top-bar sun/moon/leaf menu (persisted per browser, "System" follows the OS), and Settings → General sets the tenant default.
+- Add a theme: copy a `[data-theme='…']` block in `themes.css`, change the RGB tokens, and add one entry to `THEMES` in `apps/web/src/lib/theme.ts`. Nothing else changes — components only use semantic classes (`bg-surface`, `bg-page`, `bg-head`, `border-line`, `text-gray-*`, `bg-primary`).
+- Component classes (`.btn-*`, `.input`, `.card`, `.table-head` …) live in `apps/web/src/index.css`.
 - App name: `VITE_APP_NAME` in `apps/web/.env` (and per-tenant in Settings → General).
 - Icons are registered explicitly in `apps/web/src/lib/icons.tsx` to keep the bundle small (~110 KB gzip).
 

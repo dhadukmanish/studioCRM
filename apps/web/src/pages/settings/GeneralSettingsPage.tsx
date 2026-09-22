@@ -3,6 +3,7 @@ import { Save } from 'lucide-react';
 import { Field, Select, Spinner, Switch, TextInput } from '@/components/ui';
 import { useSave, useSettings } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
+import { THEMES } from '@/lib/theme';
 
 /** Tenant-wide settings. Keys mirror DEFAULT_SETTINGS in apps/api/src/services/settings.ts — add a control here when you add a key there. */
 export default function GeneralSettingsPage() {
@@ -23,6 +24,7 @@ export default function GeneralSettingsPage() {
           <div className="card p-5 space-y-4">
             <h3 className="section-title">Branding & locale</h3>
             <Field label="Application Name"><TextInput value={s.appName ?? ''} onChange={(e) => set('appName', e.target.value)} /></Field>
+            <Field label="Default Theme" hint="Users can still switch from the top bar"><div className="flex gap-2">{THEMES.map((t) => <button key={t.key} type="button" onClick={() => set('themeMode', t.key)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] ${s.themeMode === t.key ? 'border-primary bg-primary/5 text-primary' : 'border-line text-gray-600 hover:bg-gray-50'}`}><span className="h-4 w-4 rounded-full border border-line" style={{ background: t.swatch }} />{t.label}</button>)}</div></Field>
             <Field label="Primary Color" hint="Also change `primary` in apps/web/tailwind.config.js for the compiled theme"><div className="flex items-center gap-2"><input type="color" value={s.primaryColor ?? '#006CB8'} onChange={(e) => set('primaryColor', e.target.value)} className="h-10 w-14 rounded border border-line" /><TextInput value={s.primaryColor ?? ''} onChange={(e) => set('primaryColor', e.target.value)} className="w-[140px] font-mono" /></div></Field>
             <Field label="Date Format"><Select value={s.dateFormat} onChange={(v) => set('dateFormat', v)} placeholder="" options={['dd-MM-yyyy', 'dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd'].map((v) => ({ value: v, label: v }))} /></Field>
             <Field label="Time Format"><Select value={s.timeFormat} onChange={(v) => set('timeFormat', v)} placeholder="" options={[{ value: 'hh:mm tt', label: '12 hours' }, { value: 'HH:mm', label: '24 hours' }]} /></Field>

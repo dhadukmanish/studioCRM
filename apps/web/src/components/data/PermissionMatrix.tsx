@@ -34,7 +34,7 @@ export function PermissionMatrix({ value, onChange, readOnly, baseline }: { valu
       </div>
       <div className="mt-3 max-h-[440px] overflow-x-auto overflow-y-auto rounded-lg border border-line">
         <table className="min-w-full">
-          <thead className="sticky top-0 bg-[#F8FAFC]">
+          <thead className="sticky top-0 bg-head">
             <tr>
               <th className="table-head">Permission</th>
               <th className="table-head text-center">All</th>

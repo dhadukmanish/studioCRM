@@ -334,7 +334,7 @@ export function DataTable<T>({ columns, rows, total, loading, state, onStateChan
       {/* table */}
       <div className="overflow-x-auto">
         <table className="min-w-full">
-          <thead className="bg-[#F8FAFC] border-b border-line">
+          <thead className="bg-head border-b border-line">
             <tr>
               {selectable && (
                 <th className="table-head w-10 !px-4"><Checkbox checked={allChecked} onChange={toggleAll} /></th>
