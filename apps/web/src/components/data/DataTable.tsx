@@ -60,6 +60,8 @@ interface Props<T> {
   filterFields?: FilterFieldDef[] | false;
   /** persist column layout + saved filters under this module name */
   storageKey?: string;
+  /** show a visible "Columns" button next to the kebab (the kebab always has it too) */
+  columnsButton?: boolean;
   onRefresh?: () => void;
   onImport?: () => void;
   onExport?: () => void;
@@ -242,7 +244,7 @@ function CustomizeColumns({ open, onClose, columns, layout, onSave }: { open: bo
 /* ============================================================================
  * DataTable
  * ========================================================================== */
-export function DataTable<T>({ columns, rows, total, loading, state, onStateChange, rowKey, onRowClick, selectable, selected = [], onSelectedChange, toolbar, actions, filterFields, storageKey, onRefresh, onImport, onExport, emptyTitle, emptyDescription, rowActions, footer, dense, hideSearch, hidePagination, searchPlaceholder, clientSide }: Props<T>) {
+export function DataTable<T>({ columns, rows, total, loading, state, onStateChange, rowKey, onRowClick, selectable, selected = [], onSelectedChange, toolbar, actions, filterFields, storageKey, columnsButton, onRefresh, onImport, onExport, emptyTitle, emptyDescription, rowActions, footer, dense, hideSearch, hidePagination, searchPlaceholder, clientSide }: Props<T>) {
   const qc = useQueryClient();
   const [showFilters, setShowFilters] = useState(false);
   const [customize, setCustomize] = useState(false);
@@ -325,6 +327,9 @@ export function DataTable<T>({ columns, rows, total, loading, state, onStateChan
               <Dropdown trigger={<button type="button" className="btn-outline-primary rounded-l-none border-l-0 px-1.5"><ChevronDown className="h-4 w-4" /></button>} items={savedItems.length ? [...savedItems, { divider: true, label: '' }, { label: 'Clear filters', icon: <Trash2 className="h-4 w-4" />, onClick: () => onStateChange?.({ filters: [] }) }] : [{ label: 'No saved filters', disabled: true }]} />
             </span>
           )}
+          {columnsButton && (
+            <button type="button" onClick={() => setCustomize(true)} className="btn-outline"><Columns3 className="h-4 w-4" /> Columns</button>
+          )}
           {actions}
           <Dropdown items={kebab} trigger={<button type="button" className="icon-btn"><MoreVertical className="h-4 w-4" /></button>} />
         </div>
@@ -365,11 +370,11 @@ export function DataTable<T>({ columns, rows, total, loading, state, onStateChan
                     </td>
                   )}
                   {cols.map((c) => (
-                    <td key={c.key} className={cx('table-cell', dense && '!py-2', c.align === 'right' && 'text-right', c.align === 'center' && 'text-center', c.className)}>
+                    <td key={c.key} className={cx('table-cell', dense && '!py-2.5', c.align === 'right' && 'text-right', c.align === 'center' && 'text-center', c.className)}>
                       {c.render ? c.render(r, i) : ((r as any)[c.key] ?? '-') as ReactNode}
                     </td>
                   ))}
-                  {rowActions && <td className="table-cell text-right" onClick={(e) => e.stopPropagation()}>{rowActions(r)}</td>}
+                  {rowActions && <td className={cx('table-cell text-right', dense && '!py-2.5')} onClick={(e) => e.stopPropagation()}>{rowActions(r)}</td>}
                 </tr>
               );
             })}

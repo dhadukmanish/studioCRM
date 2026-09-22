@@ -24,4 +24,22 @@ export const CUSTOM_FIELD_MODULES: { name: string; label: string }[] = [
   { name: 'categories', label: 'Categories (sample module)' },
 ];
 
+/**
+ * GST slabs an item may be configured with — the statutory Indian set, so a new rate never
+ * needs a code change. Item Master only stores the rate; nothing here calculates tax.
+ */
+export const GST_RATES = [0, 5, 12, 18, 28] as const;
+export type GstRate = (typeof GST_RATES)[number];
+/**
+ * "18" -> "18%" (whole numbers stay whole, fractional slabs keep their decimals).
+ * A missing rate renders as "-", never as "0%" — 0% is a real slab and must not stand in
+ * for absent data.
+ */
+export const formatGst = (rate: number | string | null | undefined) => {
+  if (rate === null || rate === undefined || rate === '') return '-';
+  const n = Number(rate);
+  if (Number.isNaN(n)) return '-';
+  return `${n % 1 === 0 ? n : n.toFixed(2)}%`;
+};
+
 export const THEME_MODES = ['light', 'dark', 'system'] as const;

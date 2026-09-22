@@ -16,6 +16,10 @@ in git history is boilerplate, not project code.
   (Vite + React 18 + Tailwind), `packages/shared` (enums, permission catalog, nav, zod schemas)
 - `README.md` documents the boilerplate's architecture and the ~10-minute "add a module" recipe.
   Read it before adding modules — it is still accurate for how the code works.
+- **Phase 0 (done, 2026-09-22): the Claude Code development environment.** `CLAUDE.md` holds the
+  always-loaded rules; `docs/ARCHITECTURE.md`, `docs/UI_DESIGN_SYSTEM.md` and `docs/DEVELOPMENT.md`
+  hold the detail; `.claude/agents/` has five specialists and `.claude/skills/studio-*` the
+  workflows; `.claude/hooks/guard-bash.mjs` blocks destructive commands. No business code changed.
 
 ## Git
 
@@ -101,11 +105,16 @@ file for how to launch Chrome and run it.
 
 Nothing here is broken — these are boilerplate leftovers to deal with when real work starts:
 
-- `VITE_APP_NAME=ERP` in `apps/web/.env` — the UI still says "ERP", not "Studio CRM"
+- Workspace packages are still named `@erp/*` (the UI says StudioCRM) — renaming them is its
+  own task and touches every import
 - `README.md` is still the boilerplate's README
 - `JWT_SECRET=change-me-in-production` in `apps/api/.env` — fine for dev, must change before deploy
 - The sample module (`apps/api/src/routes/sample.ts`, `apps/web/src/pages/sample/CategoriesPage.tsx`,
   `apps/api/src/db/schema/sample.ts`) is a template meant to be deleted once real modules exist
-- No project-specific modules, schema or requirements defined yet. `studio form image.pdf` in the
-  working directory is the form reference the user brought for this project — ask about it before
-  guessing at the data model
+- **Item Master is built** (`masters_items` permission, `items` table, `/api/masters/items`,
+  `/modules/masters/items`). Two follow-ups: existing roles other than Super Admin need the
+  new permission ticked in Settings → Roles (role grants are stored JSON, seeded before the
+  permission existed), and the item list starts empty — no business data was invented.
+- Sub Item Master, Book Master, Appointments, Billing and Reports are not started.
+  `studio form image.pdf` in the working directory is the client's form reference — read it
+  before guessing at the next module's data model

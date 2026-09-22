@@ -3,4 +3,5 @@ export * from './org.js';
 export * from './users.js';
 export * from './roles.js';
 export * from './customFields.js';
+export * from './items.js';
 export * from './sample.js';
