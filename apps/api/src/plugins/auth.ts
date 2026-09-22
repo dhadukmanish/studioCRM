@@ -33,7 +33,13 @@ declare module 'fastify' {
   }
 }
 
-/** Load user + role and compute effective grants. Cached per request only — keep it cheap. */
+/**
+ * Load user + role and compute effective grants. Cached per request only — keep it cheap.
+ *
+ * Permissions come from the role. `permissionOverrides` is retired and can no longer be set
+ * (see docs/ARCHITECTURE.md); it is still merged so rows that already carry overrides keep
+ * the access they had.
+ */
 export async function loadAuthUser(userId: string): Promise<AuthUser | null> {
   const [row] = await db
     .select({ u: schema.users, r: schema.roles })

@@ -13,6 +13,17 @@
 export type PermissionAction = 'read' | 'create' | 'update' | 'delete';
 export const PERMISSION_ACTIONS: PermissionAction[] = ['read', 'create', 'update', 'delete'];
 
+/**
+ * Labels shown to administrators. The identifiers above are the contract used by the API,
+ * the database and every permission check — only the wording differs in the UI.
+ */
+export const PERMISSION_ACTION_LABELS: Record<PermissionAction, string> = {
+  read: 'View',
+  create: 'Create',
+  update: 'Edit',
+  delete: 'Delete',
+};
+
 export interface PermissionDef {
   /** unique key, e.g. `admin_users` */
   name: string;
@@ -24,12 +35,15 @@ export interface PermissionDef {
 }
 
 export const PERMISSION_MODULE_LABELS: Record<string, string> = {
+  masters: 'Masters',
   admin: 'Administration',
   settings: 'Settings',
   sample: 'Sample Module',
 };
 
 export const PERMISSIONS: PermissionDef[] = [
+  // Masters
+  { name: 'masters_items', displayName: 'Item Master', module: 'masters' },
   // Administration
   { name: 'admin_companies', displayName: 'Companies', module: 'admin' },
   { name: 'admin_branches', displayName: 'Branches', module: 'admin' },

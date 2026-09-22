@@ -26,6 +26,9 @@
   .btn-danger { @apply btn bg-red-600 text-white hover:bg-red-700; }
   .btn-ghost { @apply btn text-gray-600 hover:bg-gray-100; }
   .icon-btn { @apply inline-flex items-center justify-center h-8 w-8 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition; }
+  /* quiet in-row action — visible, but never competing with the page's primary button */
+  .row-action { @apply inline-flex items-center justify-center h-7 w-7 rounded-lg text-gray-500 transition duration-150 hover:bg-gray-100 hover:text-gray-900; }
+  .row-action-danger { @apply row-action hover:bg-red-50 hover:text-red-600; }
   .table-head { @apply text-[12px] font-bold uppercase tracking-[0.6px] text-gray-500 px-5 py-2.5 text-left whitespace-nowrap; }
   .table-cell { @apply px-5 py-3 text-[14px] text-gray-700 whitespace-nowrap; }
   .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-[12px] font-medium leading-4; }

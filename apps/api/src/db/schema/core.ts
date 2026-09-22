@@ -51,7 +51,10 @@ export const users = pgTable(
     mobile: text('mobile'),
     passwordHash: text('password_hash').notNull(),
     avatarUrl: text('avatar_url'),
-    /** extra grants on top of the role (union) */
+    /**
+     * Retired: extra grants on top of the role. Still merged for rows that already carry them,
+     * but no longer settable through the API or the UI — see docs/ARCHITECTURE.md.
+     */
     permissionOverrides: jsonb('permission_overrides').$type<Record<string, string[]>>().notNull().default({}),
     companyIds: jsonb('company_ids').$type<string[]>().notNull().default([]),
     branchIds: jsonb('branch_ids').$type<string[]>().notNull().default([]),

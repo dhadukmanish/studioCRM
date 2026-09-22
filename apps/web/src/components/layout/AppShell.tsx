@@ -66,7 +66,7 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
         <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-white"><Boxes className="h-5 w-5" /></span>
         {!collapsed && (
           <div className="min-w-0">
-            <div className="font-heading text-[15px] font-semibold text-gray-900 leading-tight">{import.meta.env.VITE_APP_NAME ?? 'ERP'}</div>
+            <div className="font-heading text-[15px] font-semibold text-gray-900 leading-tight">{import.meta.env.VITE_APP_NAME ?? 'StudioCRM'}</div>
             <div className="truncate text-[11px] text-gray-500">{tenantName || 'Workspace'}</div>
           </div>
         )}

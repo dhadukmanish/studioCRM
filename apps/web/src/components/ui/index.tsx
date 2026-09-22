@@ -36,15 +36,65 @@ export function Modal({ open, onClose, title, children, footer, size = 'md', cla
 
 /* ---------------- Drawer (right side panel) ---------------- */
 export function Drawer({ open, onClose, title, children, footer, width = 'w-[480px]' }: { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; footer?: ReactNode; width?: string }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const restoreTo = useRef<HTMLElement | null>(null);
+  // kept in a ref so the effect below runs once per open, not on every parent re-render
+  const close = useRef(onClose);
+  close.current = onClose;
+
+  /**
+   * Remember what had focus outside the panel. Reading document.activeElement when the
+   * drawer opens is too late: React applies a field's autoFocus during commit, before any
+   * effect runs, so by then focus is already inside.
+   */
+  useEffect(() => {
+    const onFocusIn = (e: FocusEvent) => {
+      const el = e.target as HTMLElement;
+      // `closest`, not the panel ref: refs attach after React has already applied autoFocus,
+      // so the ref is still null for the very first focus event inside a freshly opened drawer.
+      if (el !== document.body && !el.closest?.('[role="dialog"]')) restoreTo.current = el;
+    };
+    document.addEventListener('focusin', onFocusIn);
+    return () => document.removeEventListener('focusin', onFocusIn);
+  }, []);
+
+  // A drawer is a modal dialog: it owns focus while open and hands it back on close.
+  useEffect(() => {
+    if (!open) return;
+    const within = (root: HTMLElement | null) => Array.from(root?.querySelectorAll<HTMLElement>('input:not([type=hidden]), select, textarea, button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])') ?? []).filter((el) => el.offsetParent !== null);
+    const focusables = () => within(panel.current);
+    // Open on the first field, not on the header's close button.
+    (within(body.current)[0] ?? focusables()[0] ?? panel.current)?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); close.current(); return; }
+      if (e.key !== 'Tab') return;
+      const els = focusables();
+      if (!els.length) return;
+      const [first, last] = [els[0], els[els.length - 1]];
+      const active = document.activeElement as HTMLElement;
+      if (!panel.current?.contains(active)) { e.preventDefault(); first.focus(); return; }
+      if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      // after the list behind it has re-rendered, so focus is not stolen back by the refresh
+      const target = restoreTo.current;
+      setTimeout(() => { if (target && document.contains(target)) target.focus(); }, 0);
+    };
+  }, [open]);
+
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-[80] bg-black/40" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={cx('absolute right-0 top-0 h-full bg-white shadow-xl flex flex-col max-w-full', width)}>
+      <div ref={panel} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined} tabIndex={-1} className={cx('absolute right-0 top-0 h-full bg-white shadow-xl flex flex-col max-w-full outline-none', width)}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-line">
           <h3 className="text-[18px] font-semibold text-gray-900">{title}</h3>
-          <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-900"><X className="h-5 w-5" /></button>
+          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-500 transition hover:text-gray-900"><X className="h-5 w-5" /></button>
         </div>
-        <div className="px-6 py-5 overflow-y-auto flex-1">{children}</div>
+        <div ref={body} className="px-6 py-5 overflow-y-auto flex-1">{children}</div>
         {footer && <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-line">{footer}</div>}
       </div>
     </div>,
@@ -191,10 +241,10 @@ export function Combobox({ value, onChange, options, placeholder = 'Select...', 
 }
 
 /* ---------------- Checkbox / Switch / Radio ---------------- */
-export function Checkbox({ checked, onChange, label, disabled, className }: { checked: boolean; onChange: (v: boolean) => void; label?: ReactNode; disabled?: boolean; className?: string }) {
+export function Checkbox({ checked, onChange, label, disabled, className, ariaLabel }: { checked: boolean; onChange: (v: boolean) => void; label?: ReactNode; disabled?: boolean; className?: string; /** accessible name when the checkbox has no visible label (e.g. a grid cell) */ ariaLabel?: string }) {
   return (
     <label className={cx('inline-flex items-center gap-2 text-[14px] text-gray-700 cursor-pointer select-none', disabled && 'opacity-50 cursor-not-allowed', className)}>
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary/40 accent-primary" />
+      <input type="checkbox" checked={checked} disabled={disabled} aria-label={label ? undefined : ariaLabel} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary/40 accent-primary" />
       {label}
     </label>
   );

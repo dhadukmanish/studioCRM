@@ -55,15 +55,15 @@ export default function RolesPage() {
   return (
     <>
       <h2 className="mb-1 text-[20px] font-semibold text-gray-900">Roles & Permissions</h2>
-      <p className="mb-4 text-[13px] text-gray-500">Each user has one role. A role grants read / create / update / delete per module; users can get extra per-user overrides.</p>
+      <p className="mb-4 text-[13px] text-gray-500">Each user has one role. A role decides what its users can view, create, edit and delete in each module.</p>
       <DataTable storageKey="roles" clientSide hidePagination columns={columns} rows={q.data?.rows ?? []} loading={q.isFetching} state={state} onStateChange={setState} rowKey={(r) => r.id} onRefresh={() => q.refetch()}
         onRowClick={(r) => can('admin_roles', 'update') && setEdit(r)}
         actions={can('admin_roles', 'create') && <button className="btn-primary" onClick={() => setEdit(null)}><Plus className="h-4 w-4" /> Add Role</button>}
         rowActions={(r) => (
           <span className="inline-flex gap-1">
-            <button className="icon-btn h-7 w-7" title="Edit" onClick={() => setEdit(r)}><Pencil className="h-3.5 w-3.5" /></button>
-            {can('admin_roles', 'create') && r.key !== 'super_admin' && <button className="icon-btn h-7 w-7" title="Clone" onClick={() => clone.mutate({ method: 'post', url: `/api/admin/roles/${r.id}/clone` })}><Copy className="h-3.5 w-3.5" /></button>}
-            {!r.isSystem && can('admin_roles', 'delete') && <button className="icon-btn h-7 w-7 text-red-600" title="Delete" onClick={() => setDel(r)}><Trash2 className="h-3.5 w-3.5" /></button>}
+            {can('admin_roles', 'update') && <button className="row-action" title="Edit" aria-label={`Edit ${r.name}`} onClick={() => setEdit(r)}><Pencil className="h-3.5 w-3.5" /></button>}
+            {can('admin_roles', 'create') && r.key !== 'super_admin' && <button className="row-action" title="Clone" aria-label={`Clone ${r.name}`} onClick={() => clone.mutate({ method: 'post', url: `/api/admin/roles/${r.id}/clone` })}><Copy className="h-3.5 w-3.5" /></button>}
+            {!r.isSystem && can('admin_roles', 'delete') && <button className="row-action-danger" title="Delete" aria-label={`Delete ${r.name}`} onClick={() => setDel(r)}><Trash2 className="h-3.5 w-3.5" /></button>}
           </span>
         )} />
       <RoleForm open={edit !== undefined} onClose={() => setEdit(undefined)} row={edit} />
