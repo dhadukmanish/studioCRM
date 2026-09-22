@@ -23,7 +23,10 @@ export const NAV: NavSection[] = [
   },
   {
     title: 'Masters',
-    items: [{ label: 'Item Master', href: '/modules/masters/items', icon: 'Package', permission: 'masters_items' }],
+    items: [
+      { label: 'Item Master', href: '/modules/masters/items', icon: 'Package', permission: 'masters_items' },
+      { label: 'Sub Item Master', href: '/modules/masters/sub-items', icon: 'Boxes', permission: 'masters_sub_items' },
+    ],
   },
   {
     title: 'Sample Module',

@@ -24,6 +24,8 @@ export const useCompanies = () => useQuery({ queryKey: ['lookup', 'companies'], 
 export const useBranches = (companyId?: string) => useQuery({ queryKey: ['lookup', 'branches', companyId], queryFn: () => api.get<{ id: string; companyId: string; name: string; isDefault: boolean }[]>(`/api/common/lookups/branches${qs({ companyId })}`), staleTime: 60_000 });
 export const useRoles = () => useQuery({ queryKey: ['lookup', 'roles'], queryFn: () => api.get<{ id: string; name: string; key: string | null; isSystem: boolean }[]>('/api/common/lookups/roles'), staleTime: 60_000 });
 export const useUsersLookup = () => useQuery({ queryKey: ['lookup', 'users'], queryFn: () => api.get<{ id: string; name: string; email: string }[]>('/api/common/lookups/users'), staleTime: 60_000 });
+/** Active Item Master rows, for the Sub Item parent picker and the list's item filter. */
+export const useItemsLookup = () => useQuery({ queryKey: ['lookup', 'items'], queryFn: () => api.get<{ id: string; itemName: string }[]>('/api/common/lookups/items'), staleTime: 60_000 });
 export const useSettings = () => useQuery({ queryKey: ['settings'], queryFn: () => api.get<Record<string, any>>('/api/settings'), staleTime: 60_000 });
 export const useCustomFields = (moduleName: string) => useQuery({ queryKey: ['custom-fields', moduleName], queryFn: () => api.get<{ fields: any[] }>(`/api/custom-fields/${moduleName}`), staleTime: 60_000, select: (d) => d.fields });
 

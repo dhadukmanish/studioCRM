@@ -15,6 +15,13 @@
       "when": 1790103669799,
       "tag": "0001_old_toxin",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790107389146,
+      "tag": "0002_strong_spiral",
+      "breakpoints": true
     }
   ]
 }

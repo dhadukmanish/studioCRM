@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, asc, count, eq, ne, sql } from 'drizzle-orm';
 import { db, schema } from '../db/client';
 import { itemSchema } from '@erp/shared';
 import { crudRoutes } from '../lib/crud';
 import { validation } from '../lib/errors';
+import { ok } from '../lib/respond';
 
 /** API shape: gstRate is numeric in Postgres, which Drizzle returns as a string. */
 const shape = (row: typeof schema.items.$inferSelect) => ({ ...row, gstRate: Number(row.gstRate) });
@@ -49,5 +50,30 @@ export async function itemRoutes(app: FastifyInstance) {
         .limit(1);
       if (clash) throw validation(`An item named "${body.itemName}" already exists`, [{ path: ['itemName'], message: 'This item name is already used' }]);
     },
+    /**
+     * `sub_items` references this row with ON DELETE RESTRICT, so the database would refuse
+     * anyway — but as an opaque 500. Say what is actually in the way instead.
+     */
+    beforeDelete: async (row, req) => {
+      const [{ total }] = await db
+        .select({ total: count() })
+        .from(schema.subItems)
+        .where(and(eq(schema.subItems.tenantId, req.user.tenantId), eq(schema.subItems.itemId, row.id)));
+      if (Number(total) > 0) throw validation(`"${row.itemName}" still has ${total} sub item${Number(total) === 1 ? '' : 's'}. Delete those first, or set this item to Inactive instead.`);
+    },
+  });
+
+  /**
+   * Lookup for pickers (Sub Item Master's parent selector). Active items only — a new record
+   * should not be hung off a retired item. Editing a record whose parent has since been
+   * deactivated still works: the form keeps showing the parent it already has.
+   */
+  app.get('/api/common/lookups/items', { preHandler: app.authenticate }, async (req) => {
+    const rows = await db
+      .select({ id: schema.items.id, itemName: schema.items.itemName })
+      .from(schema.items)
+      .where(and(eq(schema.items.tenantId, req.user.tenantId), eq(schema.items.isActive, true)))
+      .orderBy(asc(schema.items.itemName));
+    return ok(rows);
   });
 }

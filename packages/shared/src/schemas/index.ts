@@ -4,4 +4,5 @@ export * from './users.js';
 export * from './roles.js';
 export * from './customFields.js';
 export * from './items.js';
+export * from './subItems.js';
 export * from './sample.js';

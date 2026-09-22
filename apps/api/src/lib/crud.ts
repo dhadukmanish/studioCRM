@@ -7,7 +7,7 @@ import { parse } from './validate';
 import { notFound, validation } from './errors';
 import { ok } from './respond';
 import { parseListQuery } from './list';
-import { filterWhere, sortBy, tableColumns } from './filters';
+import { filterWhere, sortBy, tableColumns, type ColumnMap } from './filters';
 import { logActivity } from '../services/activity';
 
 type AnyTable = PgTable & { id: PgColumn; tenantId: PgColumn; createdAt: PgColumn };
@@ -21,6 +21,12 @@ export interface CrudOptions<T extends AnyTable> {
   searchColumns?: PgColumn[];
   defaultSort?: PgColumn;
   sortable?: Record<string, PgColumn>;
+  /**
+   * Left join applied to the list query only, so a list can carry a parent's display name
+   * without a query per row. `columns` are added to the selected row, and become searchable,
+   * sortable and filterable like the table's own columns.
+   */
+  join?: { table: PgTable; on: SQL; columns: ColumnMap };
   /** extra WHERE from query (filters) */
   filter?: (req: FastifyRequest, q: Record<string, any>) => (SQL | undefined)[];
   /** transform validated body → row (both create and update) */
@@ -46,7 +52,13 @@ export interface CrudOptions<T extends AnyTable> {
 export function crudRoutes<T extends AnyTable>(app: FastifyInstance, o: CrudOptions<T>) {
   const t = o.table as any;
   const shape = o.shape ?? ((r: any) => r);
-  const cols = { ...tableColumns(t), ...(o.sortable ?? {}) };
+  const cols = { ...tableColumns(t), ...(o.join?.columns ?? {}), ...(o.sortable ?? {}) };
+  /** One place that knows about the optional join, so count and rows can never disagree. */
+  const from = (fields?: ColumnMap) => {
+    const q: any = fields ? db.select(fields as any).from(t) : db.select().from(t);
+    return o.join ? q.leftJoin(o.join.table, o.join.on) : q;
+  };
+  const listFields = o.join ? { ...tableColumns(t), ...o.join.columns } : undefined;
 
   app.get(o.base, { preHandler: app.requirePermission(o.permission) }, async (req) => {
     const q = parseListQuery(req.query as any);
@@ -58,11 +70,11 @@ export function crudRoutes<T extends AnyTable>(app: FastifyInstance, o: CrudOpti
     );
     const order = sortBy(q.sortBy, q.sortOrder, cols, o.defaultSort || t.createdAt);
     if (o.listAll) {
-      const rows = await db.select().from(t).where(where).orderBy(order);
+      const rows = await from(listFields).where(where).orderBy(order);
       return ok({ rows: rows.map(shape), total: rows.length, page: 1, pageSize: rows.length }, `${o.label}s retrieved successfully`);
     }
-    const [{ total }] = await db.select({ total: count() }).from(t).where(where);
-    const rows = await db.select().from(t).where(where).orderBy(order).limit(q.limit).offset((q.page - 1) * q.limit);
+    const [{ total }] = await from({ total: count() as any }).where(where);
+    const rows = await from(listFields).where(where).orderBy(order).limit(q.limit).offset((q.page - 1) * q.limit);
     return ok({ rows: rows.map(shape), total: Number(total), page: q.page, pageSize: q.limit }, `${o.label}s retrieved successfully`);
   });
 

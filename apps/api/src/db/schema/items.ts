@@ -1,4 +1,4 @@
-import { pgTable, text, numeric, boolean, uniqueIndex, index, check } from 'drizzle-orm/pg-core';
+import { pgTable, text, numeric, boolean, unique, uniqueIndex, index, check } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { id, ts, tenantRef } from './core';
 
@@ -27,6 +27,10 @@ export const items = pgTable(
     uniqueIndex('items_tenant_name_lower_idx').on(t.tenantId, sql`lower(${t.itemName})`),
     // List screen: tenant predicate + default "recently updated first" sort.
     index('items_tenant_updated_idx').on(t.tenantId, t.updatedAt),
+    // Redundant on its own (id is already the primary key), but it is the target a child table
+    // needs in order to reference (id, tenant_id) together — see `sub_items`, whose composite
+    // foreign key makes attaching a product to another tenant's item structurally impossible.
+    unique('items_id_tenant_uk').on(t.id, t.tenantId),
     check('items_gst_rate_range_check', sql`${t.gstRate} >= 0 AND ${t.gstRate} <= 100`),
     check('items_item_name_not_blank_check', sql`length(btrim(${t.itemName})) > 0`),
     check('items_hsn_code_not_blank_check', sql`length(btrim(${t.hsnCode})) > 0`),
