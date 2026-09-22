@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-size: 14px; }
+  body { @apply bg-page text-gray-600 antialiased; }
+  h1, h2, h3, h4 { @apply font-heading text-gray-900; }
+  * { scrollbar-width: thin; scrollbar-color: #DFDFDF transparent; }
+  ::-webkit-scrollbar { height: 8px; width: 8px; }
+  ::-webkit-scrollbar-thumb { background: #DFDFDF; border-radius: 8px; }
+}
+
+@layer components {
+  .card { @apply bg-white border border-line rounded-lg shadow-card; }
+  .label { @apply block text-[13px] font-medium text-gray-600 mb-1; }
+  .label-req::after { content: ' *'; @apply text-red-500; }
+  .input { @apply w-full h-10 rounded-lg border border-[#D1D5DB] bg-white px-3 text-[14px] text-gray-800 placeholder:text-gray-400 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/40 disabled:bg-gray-50 disabled:text-gray-500; }
+  .input-sm { @apply h-8 text-[13px]; }
+  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-lg font-medium text-[14px] h-8 px-3 transition active:translate-y-px disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap; }
+  .btn-lg { @apply h-10 px-5; }
+  .btn-primary { @apply btn bg-primary text-white shadow-btn hover:bg-primary-dark; }
+  .btn-outline { @apply btn bg-white border border-gray-200 text-gray-600 hover:bg-gray-50; }
+  .btn-outline-primary { @apply btn bg-white border border-primary text-primary hover:bg-primary/5; }
+  .btn-danger { @apply btn bg-red-600 text-white hover:bg-red-700; }
+  .btn-ghost { @apply btn text-gray-600 hover:bg-gray-100; }
+  .icon-btn { @apply inline-flex items-center justify-center h-8 w-8 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition; }
+  .table-head { @apply text-[12px] font-bold uppercase tracking-[0.6px] text-[#64748B] px-5 py-2.5 text-left whitespace-nowrap; }
+  .table-cell { @apply px-5 py-3 text-[14px] text-[#334155] whitespace-nowrap; }
+  .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-[12px] font-medium leading-4; }
+  .section-title { @apply flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide text-gray-700 font-heading; }
+  .link { @apply text-primary font-medium hover:underline; }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "erp-boilerplate",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ERP boilerplate — multi-tenant, RBAC, custom fields, data-table kit (React + Fastify + Postgres)",
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter ./apps/* dev",
+    "dev:api": "pnpm --filter @erp/api dev",
+    "dev:web": "pnpm --filter @erp/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "db:generate": "pnpm --filter @erp/api db:generate",
+    "db:migrate": "pnpm --filter @erp/api db:migrate",
+    "db:seed": "pnpm --filter @erp/api db:seed"
+  },
+  "engines": { "node": ">=20" }
+}
