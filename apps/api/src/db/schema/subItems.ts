@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, numeric, boolean, uniqueIndex, index, check, foreignKey } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, numeric, boolean, unique, uniqueIndex, index, check, foreignKey } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { id, ts, tenantRef } from './core';
 import { items } from './items';
@@ -36,6 +36,12 @@ export const subItems = pgTable(
     uniqueIndex('sub_items_item_product_lower_idx').on(t.tenantId, t.itemId, sql`lower(${t.productName})`),
     // List screen: tenant predicate + default "recently updated first" sort.
     index('sub_items_tenant_updated_idx').on(t.tenantId, t.updatedAt),
+    /**
+     * Redundant on its own (id is already the primary key), but it is the target `bill_items`
+     * needs in order to reference (sub_item_id, tenant_id) together — the same tenant-safe
+     * composite key the rest of the schema uses. Billing references these rows with RESTRICT.
+     */
+    unique('sub_items_id_tenant_uk').on(t.id, t.tenantId),
     check('sub_items_rate_non_negative_check', sql`${t.rate} >= 0`),
     check('sub_items_product_name_not_blank_check', sql`length(btrim(${t.productName})) > 0`),
   ],

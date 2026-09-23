@@ -1,9 +1,12 @@
 import type { FastifyInstance } from 'fastify';
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, asc, count, eq, ne, sql } from 'drizzle-orm';
 import { db, schema } from '../db/client';
 import { subItemSchema } from '@erp/shared';
 import { crudRoutes } from '../lib/crud';
 import { validation } from '../lib/errors';
+import { ok } from '../lib/respond';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** API shape: rate is numeric in Postgres, which Drizzle returns as a string. */
 const shape = (row: Record<string, any>) => ({ ...row, rate: Number(row.rate) });
@@ -75,5 +78,38 @@ export async function subItemRoutes(app: FastifyInstance) {
         .limit(1);
       if (clash) throw validation(`"${productName}" already exists under this item`, [{ path: ['productName'], message: 'This product already exists under the selected item' }]);
     },
+    /**
+     * `bill_items` references this row with ON DELETE RESTRICT, so the database would refuse
+     * anyway — but as an opaque 500. Say what is actually in the way, and name the alternative:
+     * a product that has been billed is deactivated, never deleted out from under its history.
+     */
+    beforeDelete: async (row, req) => {
+      const [{ total }] = await db
+        .select({ total: count() })
+        .from(schema.billItems)
+        .where(and(eq(schema.billItems.tenantId, req.user.tenantId), eq(schema.billItems.subItemId, row.id)));
+      if (Number(total) > 0) throw validation(`"${row.productName}" is used on ${total} bill line${Number(total) === 1 ? '' : 's'} and cannot be deleted. Set this product to Inactive instead.`);
+    },
+  });
+  /**
+   * Lookup for pickers — Billing's product column, which asks for the products of ONE item at
+   * a time. A blank `itemId` returns nothing rather than every product in the tenant: the
+   * grid always knows which item it is filling in, and a whole price list is not a picker's
+   * business.
+   *
+   * Active products only, because this offers choices for a NEW line. The rate and the remark
+   * come with them because they are exactly what selecting a product fills in — and both are
+   * only DEFAULTS: what a bill stores is what the operator saved, snapshotted on the line.
+   */
+  app.get('/api/common/lookups/sub-items', { preHandler: app.authenticate }, async (req) => {
+    const { itemId } = req.query as { itemId?: string };
+    // A malformed id is not a lookup for anything — answering [] beats a 500 from uuid parsing.
+    if (!itemId || !UUID_RE.test(itemId)) return ok([]);
+    const rows = await db
+      .select({ id: schema.subItems.id, itemId: schema.subItems.itemId, productName: schema.subItems.productName, rate: schema.subItems.rate, remark: schema.subItems.remark })
+      .from(schema.subItems)
+      .where(and(eq(schema.subItems.tenantId, req.user.tenantId), eq(schema.subItems.itemId, itemId), eq(schema.subItems.isActive, true)))
+      .orderBy(asc(schema.subItems.productName));
+    return ok(rows.map((r) => ({ ...r, rate: Number(r.rate) })));
   });
 }

@@ -9,7 +9,7 @@ Last updated: 2026-09-23.
 
 `studioCRM` — a business app for a photography/video studio, built **on top of an ERP
 boilerplate**. The boilerplate provides multi-tenant auth, RBAC, custom fields, an audit log and
-a data-table kit; the Masters layer on top of it is project code.
+a data-table kit; the Masters layer, Appointments and Billing on top of it are project code.
 
 - Working directory: `C:\Dhaval Bhai\Studio Billing` (Windows 11, PowerShell + Git Bash)
 - Stack: pnpm monorepo — `apps/api` (Fastify 5 + Drizzle + Postgres), `apps/web`
@@ -54,19 +54,57 @@ large modal rather than a drawer.
 | Module | Permission | API | Screen |
 | --- | --- | --- | --- |
 | Appointments | `operations_appointments` | `/api/appointments` | `/modules/appointments` |
+| Billing (Phase 1) | `operations_billing` | `/api/bills` | `/modules/billing`, `/new`, `/:id` |
 
-The studio's booking record, and the first module that is not a master: customer calls, a date
-and usually a time are agreed, and the customer name, mobile and baby name are noted so Billing
-can pick them up instead of asking again. Fields: system-issued Appointment No., date, optional
+**Appointments** — the studio's booking record, and the first module that was not a master: a
+customer calls, a date and usually a time are agreed, and the customer name, mobile and baby
+name are noted so Billing can pick them up instead of asking again. Fields: system-issued Appointment No., date, optional
 time, customer name, mobile, optional baby name, optional remark. Hand-written routes (not
 `crudRoutes`) because creation takes its number inside the insert's own transaction. Its form is
 a 760px modal; the list defaults to newest-first with a Today quick filter.
 
-### Bill Number Series foundation
+### Billing — Phase 1 (core bill + lines + GST snapshot)
 
-`allocateBillNumber` (`apps/api/src/services/billNumbers.ts`) exists, is documented and is
-concurrency-proven — but **nothing calls it yet**, because bills do not exist. Appointments do
-NOT use it; they have their own tenant-level counter. See the sections below.
+The invoice document: a header with its own customer snapshot, at least one line, and totals the
+server derives. `bills` + `bill_items`, hand-written routes (creation takes its number inside the
+insert's transaction), and a full-page workspace rather than a dialog — a document with lines
+needs the header, the grid and the totals on screen together.
+
+What Phase 1 establishes, and what the next phases must not break:
+
+- **Identity is (tenant, book, bill number).** The number comes from `allocateBillNumber`, which
+  Billing is now the only caller of, inside the create transaction. Two books can each hold a
+  Bill No. 1. Opening the form allocates nothing — it shows `Auto on Save`.
+- **The number and the book are immutable.** `billUpdateSchema` has no `bookId`, so no edit can
+  renumber a bill or move a counter. Deleting a bill does NOT rewind the counter.
+- **A bill is history.** It stores its own customer name, mobile and baby name, and every line
+  snapshots the item name, product name, HSN and GST rate it was built from. Editing an
+  Appointment or an Item Master row afterwards never rewrites an issued bill, and re-saving a
+  bill keeps the snapshots of the lines it already had.
+- **The appointment is optional and traceability only** — a walk-in bill has none.
+- **One calculation, in `packages/shared/src/billing.ts`**, used by the browser for preview and
+  by the API inside the transaction. The rate is treated as tax-EXCLUSIVE (an assumption —
+  see below), rounding is half-up per line on integer paise, and totals are the sums of the
+  already-rounded lines. WITHOUT_GST charges no tax but keeps each line's GST snapshot.
+- **Nothing a client sends can become a snapshot or an amount.** Those fields do not exist in
+  the schemas; the server reads the masters and recomputes every figure.
+- **A billed master cannot be deleted.** `bill_items` references Item and Sub Item with
+  RESTRICT, and both masters now explain the refusal ("used on N bill lines … set it Inactive
+  instead") instead of letting the database raise a 500 — the same guard Book Master got.
+- **Re-saving a bill keeps the snapshot of a product the bill already carries**, keyed by
+  item+product rather than by line, so one invoice can never print two different GST rates for
+  the same product. The trade-off is written down in `resolveLines` (`services/bills.ts`).
+- **The quantity and rate ceilings are business limits, not column limits** (`BILL_QUANTITY_MAX`
+  9999.99, `BILL_RATE_MAX` 999999.99). They are what keeps every accepted payload inside the
+  amount columns AND inside exact integer arithmetic. Raising either means re-checking both.
+
+Full contract: `docs/BILL_NUMBERING.md`, which is now the implemented record, not a plan.
+
+### Bill numbering
+
+`allocateBillNumber` (`apps/api/src/services/billNumbers.ts`) is unchanged from the phase that
+introduced it, and now has exactly one caller: `createBill` in `services/bills.ts`. Appointments
+do NOT use it; they have their own tenant-level counter.
 
 ### The sample module is gone
 
@@ -83,8 +121,11 @@ These are load-bearing. Changing any of them is a deliberate decision, not a ref
   parent carries `unique(id, tenant_id)` (`accounts_id_tenant_uk`, `books_id_tenant_uk`, the
   same on `items`), and every child references the **pair** `(parent_id, tenant_id)`. Pointing
   at another tenant's row is structurally impossible, not merely checked for. Live examples:
-  `sub_items → items`, `accounts → account_groups`, `account_party_details → items` (all
-  RESTRICT), and the detail tables → `accounts` (CASCADE). RESTRICT is the rule for anything
+  `sub_items → items`, `accounts → account_groups`, `account_party_details → items`,
+  `bills → books`, `bills → appointments` (nullable, so a walk-in bill passes), `bill_items →
+  items` and `bill_items → sub_items` (all RESTRICT), and the detail tables → `accounts` plus
+  `bill_items → bills` (CASCADE, because a line is part of its bill rather than a row that
+  outlives it). RESTRICT is the rule for anything
   with history: such a row is deactivated, never deleted out from under its children.
 - **Typed Account detail extension tables, not a JSON blob.** `account_bank_details`,
   `account_employee_details`, `account_loan_details`, `account_partner_details` and
@@ -169,9 +210,9 @@ bills under it run 1, 2, 3 … and a new book starts again from its own `seriesS
   `books_id_tenant_uk` with RESTRICT — is written down in `docs/BILL_NUMBERING.md`. Read it
   before starting Billing.
 
-## The Billing lookup contract (written, not implemented)
+## The Billing lookup contract (now in use)
 
-`GET /api/common/lookups/appointments?mobile=...` is what the future Billing screen will call.
+`GET /api/common/lookups/appointments?mobile=...` is what the Billing screen calls.
 
 - Tenant-scoped and guarded by `operations_appointments` read — it carries a customer's name
   and number, so it is not an open lookup like books or items.
@@ -181,11 +222,20 @@ bills under it run 1, 2, 3 … and a new book starts again from its own `seriesS
   `mobileNumber`, `babyName` — no counters, no `mobileSearch`, no `tenantId`.
 - Ordered appointment date desc, then appointment number desc; capped at 20 candidates.
 
-Intended (NOT built) Billing behaviour: the operator types a mobile, Billing offers the
-candidates, the operator picks one, and the bill prefills customer/baby/mobile and stores
-`appointment_id`. It must never silently overwrite what the operator already typed, and the
-bill must keep its OWN snapshot of those values — an issued invoice is history and must not
-change when someone later edits the appointment. See `docs/BILL_NUMBERING.md`.
+Built exactly as intended: the operator types a mobile (debounced, from four digits), Billing
+offers the candidates and never picks one, and selecting a candidate prefills customer, mobile
+and baby name and stores `appointment_id`. Clearing the link leaves the typed values alone, and
+the bill keeps its OWN snapshot — an issued invoice is history and does not change when someone
+later edits the appointment. Verified in a browser, including the later-edit case.
+
+Two more lookups were added for Billing, both tenant-scoped:
+
+- `GET /api/common/lookups/items` now also returns `gstRate` — a bill line has to show the tax
+  the chosen item carries. It stays a display DEFAULT; the rate that reaches a bill is the one
+  the server snapshots.
+- `GET /api/common/lookups/sub-items?itemId=...` — active products of ONE item, with their rate
+  and remark (the defaults selecting a product fills in). A blank `itemId` returns `[]` rather
+  than the tenant's whole price list.
 
 ## Git
 
@@ -200,11 +250,17 @@ change when someone later edits the appointment. See `docs/BILL_NUMBERING.md`.
 embeds the username (`https://dhadukmanish@github.com/...`) so git picks the right account.
 Keep the `dhadukmanish@` in the URL. Nothing needs to be deleted from Credential Manager.
 
-**Nothing has been pushed yet.** As of this update the working tree is clean, the current branch
-is `masters/account-master` (no upstream), and **6 commits are unpushed**: `main` is 4 ahead of
-`origin/main`, and this branch is 2 ahead of `main` (`6731507` Account Group + Account Master,
-`6599fc5` Book Master + sample-module removal). Whoever picks this up should decide whether to
+**Nothing has been pushed yet.** As of this update the current branch is `masters/account-master`
+(no upstream) and **8 commits are unpushed**: `main` is 4 ahead of `origin/main`, and this branch
+is 4 ahead of `main` (Account Group + Account Master, Book Master + sample-module removal, the
+HANDOFF refresh, and the Appointment module). Whoever picks this up should decide whether to
 merge into `main` and push, rather than assume the remote is current.
+
+**Billing Phase 1 is NOT committed.** It sits uncommitted in the working tree — the whole
+`bills`/`bill_items` stack, the billing screens, the tests and the docs — because the
+instruction for that phase was not to commit. It is nonetheless applied to the database
+(migrations `0008`–`0010`), so a fresh clone of the repo would not match this machine's schema
+until it is committed.
 
 Untracked in the working tree and **intentionally left untouched — never add, move or delete
 them**: `erp-boilerplate.bundle` (the original boilerplate delivery, now redundant) and
@@ -232,9 +288,15 @@ this machine. The app points at a **hosted Postgres 18.4** instead:
 - The password contains `@@`, which **must stay percent-encoded** as `%40%40` inside the URL,
   or the connection string parses wrong
 - No SSL parameters needed
-- **22 tables** in `public`; migrations `0000` … `0007` all applied (8 rows in
+- **24 tables** in `public`; migrations `0000` … `0010` all applied (11 rows in
   `drizzle.__drizzle_migrations`). `0005` created `books`; `0006` dropped the sample
-  `categories` table; `0007` added `appointments` and `document_counters` (purely additive).
+  `categories` table; `0007` added `appointments` and `document_counters`; `0008` added
+  `sub_items_id_tenant_uk`; `0009` added `bills` and `bill_items`; `0010` widened the three
+  `bill_items` amount columns to `numeric(16, 2)`. All additive.
+- **Generator gotcha worth remembering:** drizzle-kit put the new `sub_items` unique key AFTER
+  the foreign key that references it, so the single migration failed (and rolled back cleanly).
+  The fix was to split it into two migrations — the key first, then the tables — not to
+  hand-edit generated SQL.
 - The demo users `admin@example.com` and `viewer@example.com` are present
 
 This is a **shared hosted database, not a scratch one.** It holds real entered data — there is
@@ -270,13 +332,15 @@ Dev servers are usually already running in the background from an earlier sessio
 ## Testing
 
 Vitest runs in `apps/api` only (pinned to v3 — v5 needs Vite 6, this repo is on Vite 5).
-Six files (items, sub-items, account groups, accounts, books, appointments), 504 tests. Each
-has two sections:
+Seven files (items, sub-items, account groups, accounts, books, appointments, bills), 706 tests.
+Each has two sections:
 
-- **A — pure validation** (zod schemas, `normalizeMobile`). Always runs. **272 tests pass today.**
+- **A — pure validation and calculation** (zod schemas, `normalizeMobile`, the bill money
+  functions). Always runs. **406 tests pass today.**
 - **B — database-backed** (tenant isolation, RBAC, duplicate guards, lookup field exposure, the
   allocators' sequences and concurrency, the rollback that keeps a failed create from burning a
-  number). `describe.skipIf(!TEST_DATABASE_URL)`, so it **skips by default** — 232 skipped.
+  number, bill snapshots and the atomic line replacement). `describe.skipIf(!TEST_DATABASE_URL)`,
+  so it **skips by default** — 300 skipped.
 
 Section B creates and deletes tenants, roles and users. `TEST_DATABASE_URL` must point at a
 **throwaway** database — never at the hosted `DATABASE_URL` above. Because no throwaway database
@@ -314,7 +378,34 @@ Confirmed end-to-end against the live API / in a real browser, not just by readi
 - All 33 verification appointments, their 36 activity-log entries and the appointment counter
   row were deleted afterwards — the table is empty again, so the studio's first real
   appointment will be #1.
-- `pnpm typecheck`, `pnpm test` (272 passed) and `pnpm build` all clean.
+- **Billing Phase 1 (2026-09-23), against the live API — 47 checks:** the first bill takes the
+  book's `seriesStartsAt`, the next increments, a second book holds its own Bill No. 1, reads
+  allocate nothing, snapshots (item name / product / HSN / GST / rate / remark) are stored,
+  `2 x 2500.50 @ 12%` gives exactly `5001.00 / 600.12 / 5601.12`, mixed slabs and a 0% line add
+  up, WITHOUT_GST charges 0 while keeping the 12% snapshot, a forged payload (bill number,
+  snapshots, totals) is ignored, an inactive book / a product from another item / an inactive
+  product / an empty bill / qty 0 / a 3-decimal rate / a ticked Birthdate with no date are all
+  refused, an appointment link survives the appointment being renamed, Item Master changing to
+  18% leaves the old bill at 12%, an edit keeps the number and the snapshot, deleting a bill
+  does not rewind the counter, a book with bills cannot be deleted, **25 parallel bills returned
+  1…25 gapless**, search/filter/pagination work, and a role without `operations_billing` gets
+  403.
+- **Billing Phase 1 in a real browser — 36 checks, zero console errors:** nav entry, list, the
+  full-page New Bill, `Auto on Save`, today's local date, the book picker, appointment
+  suggestions from a differently formatted mobile and the prefill, item → product → qty → rate
+  with the rate and remark defaulted, live line and bill totals, Enter opening the next line
+  with focus, removing a line, the With/Without GST toggle, save issuing the book-wise number,
+  edit (book read-only, number unchanged, no second allocation), delete with confirmation, all
+  three themes, and no sideways page scroll at 390px.
+- Three defects were found by that browser pass and fixed: the line preview stayed at 0.00
+  while the operator typed (`watch` → `useWatch`), a removed line desynced the grid from the
+  field array (React key warning, then a crash on save), and the grid's `sr-only` header span
+  escaped its scroller and dragged the page sideways on a phone.
+- Every temporary bill, book, item, sub item and appointment created by those runs was deleted,
+  the appointment counter row was removed and the verification audit entries were cleaned up:
+  `bills`, `bill_items` and `appointments` are all empty, and the owner's `2026-27` book is
+  still on `next_bill_number = 1`.
+- `pnpm typecheck`, `pnpm test` (406 passed, 300 skipped) and `pnpm build` all clean.
 
 Demo logins: `admin@example.com` (Super Admin, everything) and `viewer@example.com`
 (read-only, useful for testing RBAC) — both password `Admin@1234`.
@@ -327,10 +418,23 @@ assumes one and will throw. Guard the login step when reusing it.
 
 ## Known pending work
 
-- **Billing, Payment, Ledger, Voucher and Reports are NOT implemented.** Nothing posts a
-  transaction anywhere yet. Billing is the next step and must start from
-  `docs/BILL_NUMBERING.md` plus the lookup contract above: a Bill picks an Appointment up by
-  mobile instead of retyping it.
+- **Payment, Ledger, Voucher and Reports are NOT implemented.** Nothing posts an accounting
+  transaction anywhere yet — a bill is a document, not a journal entry.
+- **Billing beyond Phase 1 is NOT implemented**, deliberately and by instruction: discount,
+  advance, paid and outstanding; rate-wise GST summary and the CGST/SGST/IGST split; the
+  delivery workflow (the `delivery_date` column exists, the statuses do not); Invoice Template
+  Master, invoice preview and PDF; WhatsApp sharing; a draft/cancelled bill status; a Customer
+  Master. The Phase 1 data was shaped so each of these is an addition, not a rewrite.
+- **Two business questions were NOT guessed at and need an answer before the next phase:**
+  1. **Is the line Rate tax-exclusive or tax-inclusive?** Phase 1 treats it as EXCLUSIVE
+     (GST added on top of Qty x Rate). The legacy billing screens are scanned images with no
+     text layer and could not be read here, and nothing else in the repo settles it. The policy
+     is isolated in `lineAmounts` (`packages/shared/src/billing.ts`); changing it means
+     recalculating bills already issued.
+  2. **What is "Item Description" in the legacy requirement?** Phase 1 keeps only the per-line
+     `remark` (defaulted from the Sub Item). Whether Item Description is a separate line field,
+     a bill-level field, or just another name for the same thing is unresolved, so nothing was
+     invented for it.
 - **Deliberately NOT built into Appointments, because no requirement establishes them:** a
   status workflow (Scheduled / Confirmed / Completed / Cancelled / No Show), a Customer Master
   or any customer deduplication, calendar or scheduler views, slot-conflict detection (two
@@ -338,8 +442,9 @@ assumes one and will throw. Guard the login step when reusing it.
   the model), and WhatsApp reminders. Each is a real later decision, not an oversight.
 - **New permissions need existing roles re-saved.** Role grants are stored JSON, written before
   the newer permissions existed, so roles other than Super Admin (which bypasses everything)
-  do not have `masters_items` … `masters_books` or `operations_appointments` ticked. Per the
-  README, opening a role in
+  do not have `masters_items` … `masters_books`, `operations_appointments` or the new
+  `operations_billing` ticked — verified: the `viewer@example.com` role gets 403 on every
+  billing route until its role is re-saved. Per the README, opening a role in
   Settings → Roles and saving it picks up new permissions. A stale `sample_categories` key may
   still sit in that JSON; it is harmless (no route checks it) and clears on the next save.
 - Workspace packages are still named `@erp/*` (the UI says StudioCRM). Renaming them is its own

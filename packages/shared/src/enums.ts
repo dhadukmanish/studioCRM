@@ -102,3 +102,16 @@ export function accountDetailFor(groupName: string | null | undefined) {
   if (!groupName) return null;
   return ACCOUNT_DETAIL_BY_GROUP[normalizeGroupName(groupName)] ?? null;
 }
+
+/**
+ * How a bill presents tax. The business issues both kinds of invoice, so this is an explicit
+ * mode on the bill rather than a guess made at print time.
+ *
+ * WITH_GST charges the GST rate each line snapshotted from Item Master. WITHOUT_GST charges
+ * no tax at all — but the line keeps its GST snapshot, because that snapshot is a record of
+ * the Item Master configuration the line was built from, not a tax that was charged. Nothing
+ * about either mode edits Item Master, and the split into CGST/SGST/IGST is a later phase.
+ */
+export const INVOICE_TAX_MODES = ['WITH_GST', 'WITHOUT_GST'] as const;
+export type InvoiceTaxMode = (typeof INVOICE_TAX_MODES)[number];
+export const INVOICE_TAX_MODE_LABELS: Record<InvoiceTaxMode, string> = { WITH_GST: 'With GST', WITHOUT_GST: 'Without GST' };

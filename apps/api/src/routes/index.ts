@@ -12,6 +12,7 @@ import { accountGroupRoutes } from './accountGroups';
 import { accountRoutes } from './accounts';
 import { bookRoutes } from './books';
 import { appointmentRoutes } from './appointments';
+import { billRoutes } from './bills';
 
 /** Register every route module here. Feature modules: add one line. */
 export async function registerRoutes(app: FastifyInstance) {
@@ -28,4 +29,5 @@ export async function registerRoutes(app: FastifyInstance) {
   await app.register(accountRoutes);
   await app.register(bookRoutes);
   await app.register(appointmentRoutes);
+  await app.register(billRoutes);
 }

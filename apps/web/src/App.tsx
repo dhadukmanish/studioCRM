@@ -24,6 +24,8 @@ const AccountGroupsPage = lazy(() => import('@/pages/masters/AccountGroupsPage')
 const AccountsPage = lazy(() => import('@/pages/masters/AccountsPage'));
 const BooksPage = lazy(() => import('@/pages/masters/BooksPage'));
 const AppointmentsPage = lazy(() => import('@/pages/appointments/AppointmentsPage'));
+const BillsPage = lazy(() => import('@/pages/billing/BillsPage'));
+const BillFormPage = lazy(() => import('@/pages/billing/BillFormPage'));
 
 /** Redirects to /signin when logged out. */
 function Protected() {
@@ -67,6 +69,10 @@ export default function App() {
               <Route path="/modules/masters/books" element={<Guard permission="masters_books"><BooksPage /></Guard>} />
               {/* ---- Operations ---- */}
               <Route path="/modules/appointments" element={<Guard permission="operations_appointments"><AppointmentsPage /></Guard>} />
+              {/* "new" is declared before ":id" so the literal path can never be read as a bill id. */}
+              <Route path="/modules/billing" element={<Guard permission="operations_billing"><BillsPage /></Guard>} />
+              <Route path="/modules/billing/new" element={<Guard permission="operations_billing"><BillFormPage /></Guard>} />
+              <Route path="/modules/billing/:id" element={<Guard permission="operations_billing"><BillFormPage /></Guard>} />
               {/* ---- Settings ---- */}
               <Route path="/modules/settings" element={<SettingsHub />} />
               <Route path="/modules/settings" element={<SettingsLayout />}>

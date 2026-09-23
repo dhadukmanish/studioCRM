@@ -23,7 +23,10 @@ export const NAV: NavSection[] = [
   },
   {
     title: 'Operations',
-    items: [{ label: 'Appointments', href: '/modules/appointments', icon: 'CalendarClock', permission: 'operations_appointments' }],
+    items: [
+      { label: 'Appointments', href: '/modules/appointments', icon: 'CalendarClock', permission: 'operations_appointments' },
+      { label: 'Billing', href: '/modules/billing', icon: 'ReceiptText', permission: 'operations_billing' },
+    ],
   },
   {
     title: 'Masters',

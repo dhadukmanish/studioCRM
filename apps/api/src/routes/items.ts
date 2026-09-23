@@ -60,20 +60,32 @@ export async function itemRoutes(app: FastifyInstance) {
         .from(schema.subItems)
         .where(and(eq(schema.subItems.tenantId, req.user.tenantId), eq(schema.subItems.itemId, row.id)));
       if (Number(total) > 0) throw validation(`"${row.itemName}" still has ${total} sub item${Number(total) === 1 ? '' : 's'}. Delete those first, or set this item to Inactive instead.`);
+      // `bill_items` references the item too (RESTRICT), and a billed item is history.
+      const [{ billed }] = await db
+        .select({ billed: count() })
+        .from(schema.billItems)
+        .where(and(eq(schema.billItems.tenantId, req.user.tenantId), eq(schema.billItems.itemId, row.id)));
+      if (Number(billed) > 0) throw validation(`"${row.itemName}" is used on ${billed} bill line${Number(billed) === 1 ? '' : 's'} and cannot be deleted. Set this item to Inactive instead.`);
     },
   });
 
   /**
-   * Lookup for pickers (Sub Item Master's parent selector). Active items only — a new record
-   * should not be hung off a retired item. Editing a record whose parent has since been
-   * deactivated still works: the form keeps showing the parent it already has.
+   * Lookup for pickers (Sub Item Master's parent selector, Billing's item column). Active
+   * items only — a new record should not be hung off a retired item. Editing a record whose
+   * parent has since been deactivated still works: the form keeps showing the parent it
+   * already has.
+   *
+   * The GST rate rides along because a billing line has to show the operator what tax the
+   * chosen item carries. It is configuration, not sensitive data, and it is only ever a
+   * DEFAULT: the rate that reaches a bill is the one the server snapshots off this row inside
+   * the bill's own transaction, never a value a client sent back.
    */
   app.get('/api/common/lookups/items', { preHandler: app.authenticate }, async (req) => {
     const rows = await db
-      .select({ id: schema.items.id, itemName: schema.items.itemName })
+      .select({ id: schema.items.id, itemName: schema.items.itemName, gstRate: schema.items.gstRate })
       .from(schema.items)
       .where(and(eq(schema.items.tenantId, req.user.tenantId), eq(schema.items.isActive, true)))
       .orderBy(asc(schema.items.itemName));
-    return ok(rows);
+    return ok(rows.map((r) => ({ ...r, gstRate: Number(r.gstRate) })));
   });
 }

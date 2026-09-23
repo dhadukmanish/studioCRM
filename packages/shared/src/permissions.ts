@@ -50,6 +50,7 @@ export const PERMISSIONS: PermissionDef[] = [
   { name: 'masters_books', displayName: 'Book Master', module: 'masters' },
   // Operations
   { name: 'operations_appointments', displayName: 'Appointments', module: 'operations' },
+  { name: 'operations_billing', displayName: 'Billing', module: 'operations' },
   // Administration
   { name: 'admin_companies', displayName: 'Companies', module: 'admin' },
   { name: 'admin_branches', displayName: 'Branches', module: 'admin' },

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { and, asc, eq, ne, sql } from 'drizzle-orm';
+import { and, asc, count, eq, ne, sql } from 'drizzle-orm';
 import { db, schema } from '../db/client';
 import { bookSchema } from '@erp/shared';
 import { crudRoutes } from '../lib/crud';
@@ -64,6 +64,18 @@ export async function bookRoutes(app: FastifyInstance) {
           { path: ['seriesStartsAt'], message: `This book has already issued bill numbers (next is ${existing.nextBillNumber})` },
         ]);
       }
+    },
+    /**
+     * `bills` references this row with ON DELETE RESTRICT, so the database would refuse
+     * anyway — but as an opaque 500. Say what is actually in the way, and point at what the
+     * studio should do instead: a book that has issued bills is deactivated, never deleted.
+     */
+    beforeDelete: async (row, req) => {
+      const [{ total }] = await db
+        .select({ total: count() })
+        .from(schema.bills)
+        .where(and(eq(schema.bills.tenantId, req.user.tenantId), eq(schema.bills.bookId, row.id)));
+      if (Number(total) > 0) throw validation(`"${row.bookNumber}" has ${total} bill${Number(total) === 1 ? '' : 's'} under it and cannot be deleted. Set this book to Inactive instead.`);
     },
     /**
      * The only place `nextBillNumber` is ever written outside the allocator. On create it is

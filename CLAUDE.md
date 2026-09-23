@@ -2,9 +2,11 @@
 
 Business app for a photography/video studio, built on an in-house ERP boilerplate
 (multi-tenant auth, RBAC, custom fields, audit log, data-table kit).
-**Status: Masters layer + Appointments built** — Item, Sub Item, Account Group, Account and
-Book Master, plus the Appointment module. Billing and Reports are not started; Book Master
-already defines the bill number series Billing will draw from (`docs/BILL_NUMBERING.md`).
+**Status: Masters + Appointments + Billing Phase 1 built** — Item, Sub Item, Account Group,
+Account and Book Master, the Appointment module, and the core Bill (header, lines, master
+snapshots, book-wise numbering). Payment, ledger, GST summary, PDF and reports are not started.
+The numbering and snapshot contract Billing honours is `docs/BILL_NUMBERING.md`; current
+implementation status lives in `.claude/HANDOFF.md`.
 
 The app presents itself as StudioCRM, but the workspace packages are still named `@erp/*`.
 That is intentional for now; renaming the packages is a separate task.

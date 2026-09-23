@@ -1,0 +1,1422 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { ZodTypeAny } from 'zod';
+import {
+  BILL_LIMITS,
+  BILL_QUANTITY_MAX,
+  BILL_RATE_MAX,
+  billItemSchema,
+  billSchema,
+  billTotals,
+  billUpdateSchema,
+  calculateBill,
+  lineAmounts,
+  normalizeMobile,
+} from '@erp/shared';
+
+/**
+ * Billing — the studio's invoice document: what a client may send, what the money works out
+ * to, and what the server refuses to take from the browser.
+ *
+ * Section A is pure — the payload schema and the shared calculation, no database, always runs.
+ * The money lives here: every amount a bill stores comes out of `calculateBill`, so the
+ * rounding policy (per line, half-up, totals as sums of already-rounded lines) is pinned with
+ * exact values rather than through HTTP.
+ *
+ * Section B needs a database and is skipped unless TEST_DATABASE_URL is set. The bill number
+ * series, the master snapshots, tenant isolation and permission enforcement can only be proved
+ * against real rows.
+ */
+
+/* --------------------------------------------------------------- helpers -- */
+
+/** Ids the schema only has to see as well-formed uuids — section B uses real ones. */
+const ITEM_ID = '11111111-1111-4111-8111-111111111111';
+const SUB_ITEM_ID = '22222222-2222-4222-8222-222222222222';
+const BOOK_ID = '33333333-3333-4333-8333-333333333333';
+const APPOINTMENT_ID = '44444444-4444-4444-8444-444444444444';
+
+/** Minimal valid bill line; override only what the test is about. */
+const makeLine = (overrides: Record<string, unknown> = {}) => ({ itemId: ITEM_ID, subItemId: SUB_ITEM_ID, quantity: 1, rate: 100, ...overrides });
+
+/** Minimal valid create payload — one line, no optional header field set. */
+const makeBill = (overrides: Record<string, unknown> = {}) => ({
+  bookId: BOOK_ID,
+  billDate: '2026-09-23',
+  customerName: 'Ramesh Patel',
+  mobileNumber: '9876543210',
+  items: [makeLine()],
+  ...overrides,
+});
+
+/** The update payload is the same document without its identity. */
+const makeUpdate = (overrides: Record<string, unknown> = {}) => {
+  const body = makeBill(overrides) as Record<string, unknown>;
+  delete body.bookId;
+  return body;
+};
+
+const parseBill = (input: unknown, schema: ZodTypeAny = billSchema) => schema.parse(input);
+
+/** The issues zod raised, flattened to `{ path, message }` — fails if the input was accepted. */
+function issuesFor(input: unknown, schema: ZodTypeAny = billSchema) {
+  const r = schema.safeParse(input);
+  if (r.success) throw new Error(`expected validation to fail, but it accepted ${JSON.stringify(input)}`);
+  return r.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
+}
+
+/* ---------------------------------------------- A1. the shared calculation -- */
+
+describe('lineAmounts (one line of a WITH_GST bill)', () => {
+  it('bills quantity x rate and adds GST on top of it', () => {
+    expect(lineAmounts({ quantity: 3, rate: 250, gstRate: 18 }, 'WITH_GST')).toEqual({ taxableAmount: 750, gstAmount: 135, lineTotal: 885 });
+  });
+
+  /** The policy the whole module rests on: the typed rate is what is charged BEFORE tax. */
+  it('treats the rate as tax-exclusive, so the line total is more than quantity x rate', () => {
+    expect(lineAmounts({ quantity: 1, rate: 100, gstRate: 18 }, 'WITH_GST')).toEqual({ taxableAmount: 100, gstAmount: 18, lineTotal: 118 });
+  });
+
+  it('rounds the taxable value to 2 decimals', () => {
+    expect(lineAmounts({ quantity: 3, rate: 33.33, gstRate: 18 }, 'WITH_GST')).toEqual({ taxableAmount: 99.99, gstAmount: 18, lineTotal: 117.99 });
+  });
+
+  it('rounds the GST to 2 decimals', () => {
+    expect(lineAmounts({ quantity: 1, rate: 999.99, gstRate: 18 }, 'WITH_GST')).toEqual({ taxableAmount: 999.99, gstAmount: 180, lineTotal: 1179.99 });
+  });
+
+  /** Exactly half a paisa of tax goes up, never silently down. */
+  it('rounds exactly half a paisa of GST up', () => {
+    expect(lineAmounts({ quantity: 1, rate: 1, gstRate: 0.5 }, 'WITH_GST')).toEqual({ taxableAmount: 1, gstAmount: 0.01, lineTotal: 1.01 });
+  });
+
+  it('rounds exactly half a paisa of taxable value up', () => {
+    expect(lineAmounts({ quantity: 0.5, rate: 0.01, gstRate: 18 }, 'WITH_GST')).toEqual({ taxableAmount: 0.01, gstAmount: 0, lineTotal: 0.01 });
+  });
+
+  it('bills a fractional quantity against a fractional rate', () => {
+    expect(lineAmounts({ quantity: 2.5, rate: 199.99, gstRate: 12 }, 'WITH_GST')).toEqual({ taxableAmount: 499.98, gstAmount: 60, lineTotal: 559.98 });
+  });
+
+  /** 0.1 * 0.2 is 0.020000000000000004 in binary floating point. It must never reach an amount. */
+  it('keeps binary floating-point error out of the amounts', () => {
+    expect(lineAmounts({ quantity: 0.1, rate: 0.2, gstRate: 0 }, 'WITH_GST').taxableAmount).toBe(0.02);
+  });
+
+  it('charges nothing on a 0% GST item', () => {
+    expect(lineAmounts({ quantity: 4, rate: 25, gstRate: 0 }, 'WITH_GST')).toEqual({ taxableAmount: 100, gstAmount: 0, lineTotal: 100 });
+  });
+
+  /** A complimentary line is a real line: it prints, it just costs nothing. */
+  it('bills a zero rate as a zero line', () => {
+    expect(lineAmounts({ quantity: 2, rate: 0, gstRate: 18 }, 'WITH_GST')).toEqual({ taxableAmount: 0, gstAmount: 0, lineTotal: 0 });
+  });
+
+  /**
+   * The largest line the schema's limits allow — the point where the hundredths arithmetic is
+   * closest to losing integer precision, computed exactly.
+   */
+  it('stays exact at the largest quantity and rate the limits allow', () => {
+    // 9999.99 x 999999.99 = 9,999,989,900.0001 -> 9,999,989,900.00, and 18% of that is exact.
+    expect(lineAmounts({ quantity: BILL_QUANTITY_MAX, rate: BILL_RATE_MAX, gstRate: 18 }, 'WITH_GST')).toEqual({
+      taxableAmount: 9999989900,
+      gstAmount: 1799998182,
+      lineTotal: 11799988082,
+    });
+  });
+});
+
+describe('lineAmounts (one line of a WITHOUT_GST bill)', () => {
+  it('charges no tax, so the line total is the taxable value alone', () => {
+    expect(lineAmounts({ quantity: 3, rate: 250, gstRate: 18 }, 'WITHOUT_GST')).toEqual({ taxableAmount: 750, gstAmount: 0, lineTotal: 750 });
+  });
+
+  it('charges no tax however high the item GST rate is', () => {
+    expect(lineAmounts({ quantity: 1, rate: 100, gstRate: 28 }, 'WITHOUT_GST').gstAmount).toBe(0);
+  });
+});
+
+describe('billTotals and calculateBill (the bill money)', () => {
+  it('adds the lines up into the header totals', () => {
+    expect(calculateBill([{ quantity: 1, rate: 100, gstRate: 18 }, { quantity: 2, rate: 50, gstRate: 18 }], 'WITH_GST').totals).toEqual({
+      subTotal: 200,
+      gstAmount: 36,
+      grandTotal: 236,
+    });
+  });
+
+  it('taxes each line at its own item rate when the rates differ', () => {
+    const { lines, totals } = calculateBill(
+      [
+        { quantity: 1, rate: 100, gstRate: 18 },
+        { quantity: 2, rate: 50, gstRate: 5 },
+        { quantity: 1, rate: 10, gstRate: 0 },
+      ],
+      'WITH_GST',
+    );
+    expect(lines.map((l) => l.gstAmount)).toEqual([18, 5, 0]);
+    expect(totals).toEqual({ subTotal: 210, gstAmount: 23, grandTotal: 233 });
+  });
+
+  /**
+   * The total is the sum of the ALREADY ROUNDED lines, not the tax on the summed taxable
+   * value: taxing 2.00 at 0.5% would give 0.01, but the invoice prints 0.01 twice, so the
+   * bottom of the invoice has to say 0.02 or the document does not add up.
+   */
+  it('sums the rounded lines rather than re-taxing their total', () => {
+    expect(calculateBill([{ quantity: 1, rate: 1, gstRate: 0.5 }, { quantity: 1, rate: 1, gstRate: 0.5 }], 'WITH_GST').totals).toEqual({
+      subTotal: 2,
+      gstAmount: 0.02,
+      grandTotal: 2.02,
+    });
+  });
+
+  it('makes the grand total the sum of the printed line totals', () => {
+    const { lines, totals } = calculateBill([{ quantity: 3, rate: 33.33, gstRate: 18 }, { quantity: 2.5, rate: 199.99, gstRate: 12 }], 'WITH_GST');
+    expect(lines.map((l) => l.lineTotal)).toEqual([117.99, 559.98]);
+    expect(totals).toEqual({ subTotal: 599.97, gstAmount: 78, grandTotal: 677.97 });
+  });
+
+  it('charges a WITHOUT_GST bill no tax at all', () => {
+    expect(calculateBill([{ quantity: 1, rate: 100, gstRate: 18 }, { quantity: 2, rate: 50, gstRate: 5 }], 'WITHOUT_GST').totals).toEqual({
+      subTotal: 200,
+      gstAmount: 0,
+      grandTotal: 200,
+    });
+  });
+
+  it('gives the same taxable value in both tax modes, so only the tax differs', () => {
+    const lines = [{ quantity: 2.5, rate: 199.99, gstRate: 12 }];
+    expect(calculateBill(lines, 'WITHOUT_GST').totals.subTotal).toBe(calculateBill(lines, 'WITH_GST').totals.subTotal);
+  });
+
+  it('adds ten already-rounded lines without drifting a paisa', () => {
+    expect(billTotals(Array.from({ length: 10 }, () => ({ taxableAmount: 0.07, gstAmount: 0.01, lineTotal: 0.08 })))).toEqual({
+      subTotal: 0.7,
+      gstAmount: 0.1,
+      grandTotal: 0.8,
+    });
+  });
+});
+
+/* -------------------------------------------------- A2. the create payload -- */
+
+describe('billSchema (create payload)', () => {
+  it('accepts a minimal bill and leaves every optional field empty', () => {
+    expect(parseBill(makeBill())).toEqual({
+      bookId: BOOK_ID,
+      appointmentId: null,
+      billDate: '2026-09-23',
+      deliveryDate: null,
+      customerName: 'Ramesh Patel',
+      mobileNumber: '9876543210',
+      babyName: null,
+      hasBirthDate: false,
+      birthDate: null,
+      remark: null,
+      taxMode: 'WITH_GST',
+      items: [{ itemId: ITEM_ID, subItemId: SUB_ITEM_ID, quantity: 1, rate: 100, remark: null }],
+    });
+  });
+
+  it('accepts a full bill', () => {
+    expect(
+      parseBill(
+        makeBill({
+          appointmentId: APPOINTMENT_ID,
+          deliveryDate: '2026-10-02',
+          babyName: 'Aarav',
+          hasBirthDate: true,
+          birthDate: '2025-04-11',
+          remark: 'Album delivery by Diwali',
+          taxMode: 'WITHOUT_GST',
+        }),
+      ),
+    ).toMatchObject({
+      appointmentId: APPOINTMENT_ID,
+      deliveryDate: '2026-10-02',
+      babyName: 'Aarav',
+      hasBirthDate: true,
+      birthDate: '2025-04-11',
+      remark: 'Album delivery by Diwali',
+      taxMode: 'WITHOUT_GST',
+    });
+  });
+
+  /**
+   * The number, the search key, the line snapshots and every amount belong to the server.
+   * zod strips unknown keys, so a payload that carries them loses them before any route code
+   * runs — the route never has to remember to ignore them.
+   */
+  it.each(['billNumber', 'mobileSearch', 'subTotal', 'gstAmount', 'grandTotal'])('drops a client-supplied %s from the header', (field) => {
+    expect(parseBill(makeBill({ [field]: 9999 }))).not.toHaveProperty(field);
+  });
+
+  it.each(['itemNameSnapshot', 'subItemNameSnapshot', 'hsnCodeSnapshot', 'gstRateSnapshot', 'taxableAmount', 'gstAmount', 'lineTotal', 'lineNumber'])(
+    'drops a client-supplied %s from a line',
+    (field) => {
+      expect(parseBill(makeBill({ items: [makeLine({ [field]: 'forged' })] })).items[0]).not.toHaveProperty(field);
+    },
+  );
+
+  describe('items', () => {
+    it('rejects a bill with no lines, because a document with nothing on it is not a bill', () => {
+      expect(issuesFor(makeBill({ items: [] }))).toContainEqual({ path: 'items', message: 'Add at least one item' });
+    });
+
+    it('rejects a bill with no items field at all', () => {
+      const body = makeBill();
+      delete (body as Record<string, unknown>).items;
+      expect(issuesFor(body).map((i) => i.path)).toContain('items');
+    });
+
+    it(`accepts a bill of exactly ${BILL_LIMITS.maxLines} lines`, () => {
+      expect(parseBill(makeBill({ items: Array.from({ length: BILL_LIMITS.maxLines }, () => makeLine()) })).items).toHaveLength(BILL_LIMITS.maxLines);
+    });
+
+    it('rejects a runaway payload of more lines than the limit', () => {
+      expect(issuesFor(makeBill({ items: Array.from({ length: BILL_LIMITS.maxLines + 1 }, () => makeLine()) }))).toContainEqual({
+        path: 'items',
+        message: `A bill cannot have more than ${BILL_LIMITS.maxLines} items`,
+      });
+    });
+
+    /** The operator has to be told WHICH line is wrong, so the issue path names its position. */
+    it('reports a bad line against that line position', () => {
+      expect(issuesFor(makeBill({ items: [makeLine(), makeLine({ quantity: 0 })] }))).toContainEqual({
+        path: 'items.1.quantity',
+        message: 'Qty must be greater than 0',
+      });
+    });
+  });
+
+  describe('the birthdate checkbox and its date', () => {
+    it('drops a birth date left behind when the checkbox is unticked', () => {
+      expect(parseBill(makeBill({ hasBirthDate: false, birthDate: '2025-04-11' }))).toMatchObject({ hasBirthDate: false, birthDate: null });
+    });
+
+    it('requires the date once the checkbox is ticked', () => {
+      expect(issuesFor(makeBill({ hasBirthDate: true }))).toContainEqual({ path: 'birthDate', message: 'Birth date is required' });
+    });
+
+    it('rejects a ticked checkbox with a blank date', () => {
+      expect(issuesFor(makeBill({ hasBirthDate: true, birthDate: '   ' }))).toContainEqual({ path: 'birthDate', message: 'Birth date is required' });
+    });
+
+    it('keeps the date when the checkbox is ticked', () => {
+      expect(parseBill(makeBill({ hasBirthDate: true, birthDate: '2025-04-11' }))).toMatchObject({ hasBirthDate: true, birthDate: '2025-04-11' });
+    });
+
+    it('defaults the checkbox to unticked', () => {
+      expect(parseBill(makeBill())).toMatchObject({ hasBirthDate: false });
+    });
+
+    it.each(['2025-02-30', '2025-13-01', '11-04-2025'])('rejects the impossible birth date %p', (d) => {
+      expect(issuesFor(makeBill({ hasBirthDate: true, birthDate: d }))).toContainEqual({ path: 'birthDate', message: 'Enter a valid birth date' });
+    });
+  });
+
+  describe('billDate', () => {
+    it('is required', () => {
+      const body = makeBill();
+      delete (body as Record<string, unknown>).billDate;
+      expect(issuesFor(body)).toContainEqual({ path: 'billDate', message: 'Bill date is required' });
+    });
+
+    it.each(['23-09-2026', '2026/09/23', '2026-9-3', 'today'])('rejects %p, which is not an ISO calendar date', (d) => {
+      expect(issuesFor(makeBill({ billDate: d }))).toContainEqual({ path: 'billDate', message: 'Enter a valid bill date' });
+    });
+
+    /** A date that does not exist must be refused, never rolled over into the next month. */
+    it.each(['2026-02-30', '2026-13-01', '2026-04-31', '2026-00-10', '2027-02-29'])('rejects the impossible date %p', (d) => {
+      expect(issuesFor(makeBill({ billDate: d }))).toContainEqual({ path: 'billDate', message: 'Enter a valid bill date' });
+    });
+
+    it('accepts 29 February in a leap year', () => {
+      expect(parseBill(makeBill({ billDate: '2028-02-29' }))).toMatchObject({ billDate: '2028-02-29' });
+    });
+  });
+
+  describe('deliveryDate', () => {
+    it.each([undefined, null, '', '   '])('treats %p as no promised date rather than as an error', (d) => {
+      expect(parseBill(makeBill({ deliveryDate: d }))).toMatchObject({ deliveryDate: null });
+    });
+
+    it('rejects an impossible delivery date', () => {
+      expect(issuesFor(makeBill({ deliveryDate: '2026-11-31' }))).toContainEqual({ path: 'deliveryDate', message: 'Enter a valid delivery date' });
+    });
+
+    /** Nothing in this phase says delivery must follow the bill; billing a delivered job is real. */
+    it('accepts a delivery date before the bill date', () => {
+      expect(parseBill(makeBill({ billDate: '2026-09-23', deliveryDate: '2026-09-01' }))).toMatchObject({ deliveryDate: '2026-09-01' });
+    });
+  });
+
+  describe('bookId', () => {
+    it('is required, because the book is the number series', () => {
+      const body = makeBill();
+      delete (body as Record<string, unknown>).bookId;
+      expect(issuesFor(body)).toContainEqual({ path: 'bookId', message: 'Book is required' });
+    });
+
+    it('must be a uuid', () => {
+      expect(issuesFor(makeBill({ bookId: 'book-2026-27' }))).toContainEqual({ path: 'bookId', message: 'Select a valid book' });
+    });
+  });
+
+  describe('appointmentId', () => {
+    it.each([undefined, null, '', '   '])('treats %p as a walk-in customer with no booking', (a) => {
+      expect(parseBill(makeBill({ appointmentId: a }))).toMatchObject({ appointmentId: null });
+    });
+
+    it('must be a uuid when it is given', () => {
+      expect(issuesFor(makeBill({ appointmentId: '42' }))).toContainEqual({ path: 'appointmentId', message: 'Select a valid appointment' });
+    });
+  });
+
+  describe('customerName', () => {
+    it('is required', () => {
+      const body = makeBill();
+      delete (body as Record<string, unknown>).customerName;
+      expect(issuesFor(body)).toContainEqual({ path: 'customerName', message: 'Customer name is required' });
+    });
+
+    it('rejects a whitespace-only name, because it is trimmed before it is measured', () => {
+      expect(issuesFor(makeBill({ customerName: '   ' }))).toContainEqual({ path: 'customerName', message: 'Customer name is required' });
+    });
+
+    it('trims the stored name', () => {
+      expect(parseBill(makeBill({ customerName: '  Ramesh Patel  ' }))).toMatchObject({ customerName: 'Ramesh Patel' });
+    });
+
+    it(`accepts a name of exactly ${BILL_LIMITS.customerName} characters`, () => {
+      expect(parseBill(makeBill({ customerName: 'a'.repeat(BILL_LIMITS.customerName) }))).toMatchObject({ customerName: 'a'.repeat(BILL_LIMITS.customerName) });
+    });
+
+    it('rejects a longer name', () => {
+      expect(issuesFor(makeBill({ customerName: 'a'.repeat(BILL_LIMITS.customerName + 1) }))).toContainEqual({
+        path: 'customerName',
+        message: `Customer name cannot exceed ${BILL_LIMITS.customerName} characters`,
+      });
+    });
+  });
+
+  describe('mobileNumber', () => {
+    it('is required', () => {
+      const body = makeBill();
+      delete (body as Record<string, unknown>).mobileNumber;
+      expect(issuesFor(body)).toContainEqual({ path: 'mobileNumber', message: 'Mobile no. is required' });
+    });
+
+    it('rejects a number with no digit in it at all', () => {
+      expect(issuesFor(makeBill({ mobileNumber: 'call the studio' }))).toContainEqual({ path: 'mobileNumber', message: 'Enter a valid mobile no.' });
+    });
+
+    /** The same latitude Appointment gives: a prefix, a landline or the operator spacing are real. */
+    it.each(['9876543210', '+91 98765 43210', '98765-43210', '0281 2451234'])('accepts %p exactly as typed', (m) => {
+      expect(parseBill(makeBill({ mobileNumber: m }))).toMatchObject({ mobileNumber: m });
+    });
+
+    it('rejects a number longer than the limit', () => {
+      expect(issuesFor(makeBill({ mobileNumber: '9'.repeat(BILL_LIMITS.mobileNumber + 1) }))).toContainEqual({
+        path: 'mobileNumber',
+        message: `Mobile no. cannot exceed ${BILL_LIMITS.mobileNumber} characters`,
+      });
+    });
+  });
+
+  describe('babyName and remark', () => {
+    it.each(['babyName', 'remark'])('%s is optional and stores blank as null', (field) => {
+      expect(parseBill(makeBill({ [field]: '  ' }))).toMatchObject({ [field]: null });
+    });
+
+    it('rejects a remark longer than the limit', () => {
+      expect(issuesFor(makeBill({ remark: 'a'.repeat(BILL_LIMITS.remark + 1) }))).toContainEqual({ path: 'remark', message: `Remark cannot exceed ${BILL_LIMITS.remark} characters` });
+    });
+  });
+
+  describe('taxMode', () => {
+    it('defaults to WITH_GST', () => {
+      expect(parseBill(makeBill())).toMatchObject({ taxMode: 'WITH_GST' });
+    });
+
+    it.each(['WITH_GST', 'WITHOUT_GST'])('accepts %p', (m) => {
+      expect(parseBill(makeBill({ taxMode: m }))).toMatchObject({ taxMode: m });
+    });
+
+    it.each(['IGST', 'with_gst', ''])('rejects %p', (m) => {
+      expect(issuesFor(makeBill({ taxMode: m }))).toContainEqual({ path: 'taxMode', message: 'Select a valid tax mode' });
+    });
+  });
+});
+
+/* ---------------------------------------------------------- A3. one line -- */
+
+describe('billItemSchema (one line)', () => {
+  it('accepts a line and leaves its remark empty', () => {
+    expect(billItemSchema.parse(makeLine())).toEqual({ itemId: ITEM_ID, subItemId: SUB_ITEM_ID, quantity: 1, rate: 100, remark: null });
+  });
+
+  describe('itemId and subItemId', () => {
+    it('requires the item', () => {
+      const line = makeLine();
+      delete (line as Record<string, unknown>).itemId;
+      expect(issuesFor(line, billItemSchema)).toContainEqual({ path: 'itemId', message: 'Item is required' });
+    });
+
+    /** A line bills a Product under an Item — there is no item-only line with no rate of its own. */
+    it('requires the product', () => {
+      const line = makeLine();
+      delete (line as Record<string, unknown>).subItemId;
+      expect(issuesFor(line, billItemSchema)).toContainEqual({ path: 'subItemId', message: 'Product is required' });
+    });
+
+    it('rejects an item id that is not a uuid', () => {
+      expect(issuesFor(makeLine({ itemId: 'album' }), billItemSchema)).toContainEqual({ path: 'itemId', message: 'Select a valid item' });
+    });
+
+    it('rejects a product id that is not a uuid', () => {
+      expect(issuesFor(makeLine({ subItemId: '17' }), billItemSchema)).toContainEqual({ path: 'subItemId', message: 'Select a valid product' });
+    });
+  });
+
+  describe('quantity', () => {
+    it('is required', () => {
+      const line = makeLine();
+      delete (line as Record<string, unknown>).quantity;
+      expect(issuesFor(line, billItemSchema)).toContainEqual({ path: 'quantity', message: 'Qty is required' });
+    });
+
+    /** Blank must never coerce to 0 — a zero-quantity line is a free line nobody asked for. */
+    it.each([null, '', '   '])('treats %p as missing rather than as zero', (q) => {
+      expect(issuesFor(makeLine({ quantity: q }), billItemSchema)).toContainEqual({ path: 'quantity', message: 'Qty is required' });
+    });
+
+    it('rejects a quantity of 0', () => {
+      expect(issuesFor(makeLine({ quantity: 0 }), billItemSchema)).toContainEqual({ path: 'quantity', message: 'Qty must be greater than 0' });
+    });
+
+    it('rejects a negative quantity', () => {
+      expect(issuesFor(makeLine({ quantity: -1 }), billItemSchema)).toContainEqual({ path: 'quantity', message: 'Qty must be greater than 0' });
+    });
+
+    it('accepts a fractional quantity', () => {
+      expect(billItemSchema.parse(makeLine({ quantity: 0.5 }))).toMatchObject({ quantity: 0.5 });
+    });
+
+    /** A form posts strings; "2.50" is the operator typing two and a half, not a type error. */
+    it('reads a numeric string from the form', () => {
+      expect(billItemSchema.parse(makeLine({ quantity: '2.50' }))).toMatchObject({ quantity: 2.5 });
+    });
+
+    /** A silently rounded quantity is a changed bill, so a third decimal is refused, not dropped. */
+    it('rejects a quantity with three decimals', () => {
+      expect(issuesFor(makeLine({ quantity: 1.005 }), billItemSchema)).toContainEqual({ path: 'quantity', message: 'Qty can have at most 2 decimal places' });
+    });
+
+    it(`accepts the largest quantity the column holds (${BILL_QUANTITY_MAX})`, () => {
+      expect(billItemSchema.parse(makeLine({ quantity: BILL_QUANTITY_MAX }))).toMatchObject({ quantity: BILL_QUANTITY_MAX });
+    });
+
+    it('rejects a quantity past the column ceiling', () => {
+      expect(issuesFor(makeLine({ quantity: BILL_QUANTITY_MAX + 0.01 }), billItemSchema)).toContainEqual({ path: 'quantity', message: 'Qty is too large' });
+    });
+
+    it.each([Infinity, NaN])('rejects %p', (q) => {
+      expect(issuesFor(makeLine({ quantity: q }), billItemSchema).map((i) => i.path)).toContain('quantity');
+    });
+  });
+
+  describe('rate', () => {
+    it('is required', () => {
+      const line = makeLine();
+      delete (line as Record<string, unknown>).rate;
+      expect(issuesFor(line, billItemSchema)).toContainEqual({ path: 'rate', message: 'Rate is required' });
+    });
+
+    it.each([null, '', '   '])('treats %p as missing rather than as free', (r) => {
+      expect(issuesFor(makeLine({ rate: r }), billItemSchema)).toContainEqual({ path: 'rate', message: 'Rate is required' });
+    });
+
+    /** Unlike quantity, 0 is legitimate: a complimentary line still prints. */
+    it('accepts a rate of 0', () => {
+      expect(billItemSchema.parse(makeLine({ rate: 0 }))).toMatchObject({ rate: 0 });
+    });
+
+    it('rejects a negative rate', () => {
+      expect(issuesFor(makeLine({ rate: -100 }), billItemSchema)).toContainEqual({ path: 'rate', message: 'Rate cannot be negative' });
+    });
+
+    it('rejects a rate with three decimals', () => {
+      expect(issuesFor(makeLine({ rate: 33.333 }), billItemSchema)).toContainEqual({ path: 'rate', message: 'Rate can have at most 2 decimal places' });
+    });
+
+    it(`accepts the largest rate the column holds (${BILL_RATE_MAX})`, () => {
+      expect(billItemSchema.parse(makeLine({ rate: BILL_RATE_MAX }))).toMatchObject({ rate: BILL_RATE_MAX });
+    });
+
+    it('rejects a rate past the column ceiling', () => {
+      expect(issuesFor(makeLine({ rate: BILL_RATE_MAX + 0.01 }), billItemSchema)).toContainEqual({ path: 'rate', message: 'Rate is too large' });
+    });
+  });
+
+  describe('remark', () => {
+    it('stores a blank line remark as null', () => {
+      expect(billItemSchema.parse(makeLine({ remark: '   ' }))).toMatchObject({ remark: null });
+    });
+
+    it('trims the line remark', () => {
+      expect(billItemSchema.parse(makeLine({ remark: '  Matte finish  ' }))).toMatchObject({ remark: 'Matte finish' });
+    });
+
+    it('rejects a line remark longer than the limit', () => {
+      expect(issuesFor(makeLine({ remark: 'a'.repeat(BILL_LIMITS.lineRemark + 1) }), billItemSchema)).toContainEqual({
+        path: 'remark',
+        message: `Remark cannot exceed ${BILL_LIMITS.lineRemark} characters`,
+      });
+    });
+  });
+});
+
+/* ------------------------------------------------- A4. the update payload -- */
+
+describe('billUpdateSchema (update payload)', () => {
+  it('accepts the full document without a book', () => {
+    expect(parseBill(makeUpdate(), billUpdateSchema)).toMatchObject({ billDate: '2026-09-23', customerName: 'Ramesh Patel' });
+  });
+
+  /**
+   * The book decides the number series and therefore the document's identity. The field is
+   * ABSENT from this schema rather than merely ignored, so a payload carrying it loses it in
+   * validation and no edit can move a bill into another series.
+   */
+  it('has no book field at all, so a bookId in the payload is dropped', () => {
+    expect(parseBill(makeUpdate({ bookId: BOOK_ID }), billUpdateSchema)).not.toHaveProperty('bookId');
+  });
+
+  it('does not require a book', () => {
+    expect(billUpdateSchema.safeParse(makeUpdate()).success).toBe(true);
+  });
+
+  it('drops a client-supplied billNumber, so no edit can renumber a bill', () => {
+    expect(parseBill(makeUpdate({ billNumber: 1 }), billUpdateSchema)).not.toHaveProperty('billNumber');
+  });
+
+  it.each(['mobileSearch', 'subTotal', 'gstAmount', 'grandTotal'])('drops a client-supplied %s', (field) => {
+    expect(parseBill(makeUpdate({ [field]: 1 }), billUpdateSchema)).not.toHaveProperty(field);
+  });
+
+  /** An update carries the FULL line set — the lines are replaced, never patched. */
+  it('still requires at least one line', () => {
+    expect(issuesFor(makeUpdate({ items: [] }), billUpdateSchema)).toContainEqual({ path: 'items', message: 'Add at least one item' });
+  });
+
+  it('applies the same birthdate rule as a create', () => {
+    expect(issuesFor(makeUpdate({ hasBirthDate: true }), billUpdateSchema)).toContainEqual({ path: 'birthDate', message: 'Birth date is required' });
+  });
+
+  it('drops a birth date left behind by unticking the checkbox', () => {
+    expect(parseBill(makeUpdate({ hasBirthDate: false, birthDate: '2025-04-11' }), billUpdateSchema)).toMatchObject({ birthDate: null });
+  });
+});
+
+/* ------------------------------------------ B. database-backed behaviour -- */
+
+const TEST_DB = process.env.TEST_DATABASE_URL;
+
+/**
+ * The bill number series, the master snapshots a bill freezes, tenant isolation, permission
+ * enforcement and the transactions that keep all of it honest can only be proved against a
+ * real database, so this suite is SKIPPED unless TEST_DATABASE_URL is set.
+ *
+ * Point it at a THROWAWAY database only. It creates and deletes tenants, roles, users, books,
+ * items, sub items, appointments and bills, and must never run against the shared hosted
+ * DATABASE_URL in apps/api/.env.
+ *
+ *   TEST_DATABASE_URL=postgres://... pnpm --filter @erp/api test
+ */
+describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', () => {
+  type App = Awaited<ReturnType<typeof import('../server').buildApp>>;
+  let app: App;
+  let db: typeof import('../db/client').db;
+  let sqlClient: typeof import('../db/client').sql;
+  let schema: typeof import('../db/client').schema;
+  let and: typeof import('drizzle-orm').and;
+  let asc: typeof import('drizzle-orm').asc;
+  let eq: typeof import('drizzle-orm').eq;
+  let inArray: typeof import('drizzle-orm').inArray;
+  let allocateBillNumber: typeof import('../services/billNumbers').allocateBillNumber;
+
+  /** Everything seeded here is deleted in afterAll, tenant by tenant. */
+  const tenantIds: string[] = [];
+  const FULL = { operations_billing: ['read', 'create', 'update', 'delete'] };
+
+  /* ------------------------------------------------------ HTTP shorthand -- */
+
+  const auth = (token: string) => ({ authorization: `Bearer ${token}` });
+  const post = (token: string, payload: unknown) => app.inject({ method: 'POST', url: '/api/bills', headers: auth(token), payload: payload as object });
+  const put = (token: string, id: string, payload: unknown) => app.inject({ method: 'PUT', url: `/api/bills/${id}`, headers: auth(token), payload: payload as object });
+  const del = (token: string, id: string) => app.inject({ method: 'DELETE', url: `/api/bills/${id}`, headers: auth(token) });
+  const get = (token: string, path = '') => app.inject({ method: 'GET', url: `/api/bills${path}`, headers: auth(token) });
+
+  interface Line {
+    id: string;
+    lineNumber: number;
+    itemId: string;
+    subItemId: string;
+    itemNameSnapshot: string;
+    subItemNameSnapshot: string;
+    hsnCodeSnapshot: string;
+    gstRateSnapshot: number;
+    quantity: number;
+    rate: number;
+    taxableAmount: number;
+    gstAmount: number;
+    lineTotal: number;
+    remark: string | null;
+  }
+  interface Bill {
+    id: string;
+    bookId: string;
+    bookNumber: string;
+    billNumber: number;
+    appointmentId: string | null;
+    appointmentNumber: number | null;
+    billDate: string;
+    customerName: string;
+    mobileNumber: string;
+    babyName: string | null;
+    taxMode: string;
+    subTotal: number;
+    gstAmount: number;
+    grandTotal: number;
+    items: Line[];
+  }
+
+  const created = async (token: string, payload: unknown) => (await post(token, payload)).json().data as Bill;
+  const detail = async (token: string, id: string) => (await get(token, `/${id}`)).json().data as Bill;
+  const rowsOf = (res: Awaited<ReturnType<typeof get>>) => res.json().data.rows as Bill[];
+  const numbersOf = (res: Awaited<ReturnType<typeof get>>) => rowsOf(res).map((r) => r.billNumber);
+
+  /* ---------------------------------------------------------- fixtures -- */
+
+  /** Unique per test, so one test's rows never satisfy another's search. */
+  const uniqueName = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+  /** Letters only — used where a digit in the value would also match a bill-number search. */
+  const uniqueWord = (prefix: string) => `${prefix}${Array.from({ length: 8 }, () => 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)]).join('')}`;
+
+  /** One tenant + one role with the given grants + one user; returns a signed access token. */
+  async function seedTenant(name: string, grants: Record<string, string[]> = FULL) {
+    const [tenant] = await db.insert(schema.tenants).values({ name, slug: `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }).returning();
+    tenantIds.push(tenant.id);
+    return { tenantId: tenant.id, token: await seedUser(tenant.id, name, grants) };
+  }
+
+  /** Another user of an EXISTING tenant, with its own grants — how the read-only tests get one. */
+  async function seedUser(tenantId: string, name: string, grants: Record<string, string[]>) {
+    const [role] = await db.insert(schema.roles).values({ tenantId, name: `${name} role ${Math.random().toString(36).slice(2, 6)}`, permissions: grants }).returning();
+    const [user] = await db
+      .insert(schema.users)
+      .values({ tenantId, roleId: role.id, firstName: name, lastName: 'Tester', email: `${name}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@test.local`, passwordHash: 'not-a-real-hash' })
+      .returning();
+    return app.jwt.sign({ sub: user.id, tenantId });
+  }
+
+  async function seedBook(tenantId: string, overrides: { bookNumber?: string; seriesStartsAt?: number; isActive?: boolean } = {}) {
+    const seriesStartsAt = overrides.seriesStartsAt ?? 1;
+    const [book] = await db
+      .insert(schema.books)
+      .values({ tenantId, bookNumber: overrides.bookNumber ?? uniqueWord('BK'), seriesStartsAt, nextBillNumber: seriesStartsAt, isActive: overrides.isActive ?? true })
+      .returning();
+    return book;
+  }
+
+  /** An Item and one of its Sub Items — the pair every bill line needs. */
+  async function seedProduct(
+    tenantId: string,
+    overrides: { itemName?: string; hsnCode?: string; gstRate?: string; productName?: string; rate?: string; itemActive?: boolean; productActive?: boolean } = {},
+  ) {
+    const [item] = await db
+      .insert(schema.items)
+      .values({ tenantId, itemName: overrides.itemName ?? uniqueName('Item'), hsnCode: overrides.hsnCode ?? '9983', gstRate: overrides.gstRate ?? '18.00', isActive: overrides.itemActive ?? true })
+      .returning();
+    const [subItem] = await db
+      .insert(schema.subItems)
+      .values({ tenantId, itemId: item.id, productName: overrides.productName ?? uniqueName('Product'), rate: overrides.rate ?? '100.00', isActive: overrides.productActive ?? true })
+      .returning();
+    return { item, subItem };
+  }
+  type Product = Awaited<ReturnType<typeof seedProduct>>;
+
+  let appointmentSeq = 0;
+  async function seedAppointment(tenantId: string, overrides: { customerName?: string; mobileNumber?: string; appointmentDate?: string } = {}) {
+    const mobileNumber = overrides.mobileNumber ?? '9876500000';
+    const [appointment] = await db
+      .insert(schema.appointments)
+      .values({
+        tenantId,
+        appointmentNumber: ++appointmentSeq,
+        appointmentDate: overrides.appointmentDate ?? '2026-09-20',
+        customerName: overrides.customerName ?? 'Booking Customer',
+        mobileNumber,
+        mobileSearch: normalizeMobile(mobileNumber),
+      })
+      .returning();
+    return appointment;
+  }
+
+  /* ------------------------------------------------------ payload shapes -- */
+
+  const lineOf = (product: Product, quantity: number, rate: number, overrides: Record<string, unknown> = {}) => ({
+    itemId: product.item.id,
+    subItemId: product.subItem.id,
+    quantity,
+    rate,
+    ...overrides,
+  });
+  const billOf = (bookId: string, items: unknown[], overrides: Record<string, unknown> = {}) => ({
+    bookId,
+    billDate: '2026-09-23',
+    customerName: 'Ramesh Patel',
+    mobileNumber: '9876543210',
+    items,
+    ...overrides,
+  });
+  const updateOf = (items: unknown[], overrides: Record<string, unknown> = {}) => {
+    const body = billOf('unused', items, overrides) as Record<string, unknown>;
+    delete body.bookId;
+    return body;
+  };
+
+  /* ---------------------------------------------------------- DB probes -- */
+
+  /** The number the book will hand out next — the counter no read and no edit may move. */
+  const nextNumberOf = async (bookId: string) => {
+    const [row] = await db.select({ next: schema.books.nextBillNumber }).from(schema.books).where(eq(schema.books.id, bookId));
+    return row?.next ?? null;
+  };
+  /** The lines as POSTGRES holds them, so the stored decimal representation can be asserted. */
+  const storedLines = async (billId: string) => db.select().from(schema.billItems).where(eq(schema.billItems.billId, billId)).orderBy(asc(schema.billItems.lineNumber));
+  const storedBill = async (billId: string) => (await db.select().from(schema.bills).where(eq(schema.bills.id, billId)))[0];
+
+  /* ------------------------------------------------------------- state -- */
+
+  let tenantAId = '';
+  let tokenA = '';
+  let tokenAReadOnly = '';
+  let bookA: Awaited<ReturnType<typeof seedBook>>;
+  /** 18% GST, HSN 9983, master rate 100.00. */
+  let productA: Product;
+  let tenantBId = '';
+  let tokenB = '';
+  let bookB: Awaited<ReturnType<typeof seedBook>>;
+  let productB: Product;
+  let billB: Bill;
+
+  beforeAll(async () => {
+    process.env.DATABASE_URL = TEST_DB;
+    process.env.PORT = '0'; // server.ts boots a listener on import; keep it off a real port
+    ({ and, asc, eq, inArray } = await import('drizzle-orm'));
+    const client = await import('../db/client');
+    db = client.db;
+    sqlClient = client.sql;
+    schema = client.schema;
+    ({ allocateBillNumber } = await import('../services/billNumbers'));
+    app = await (await import('../server')).buildApp();
+    await app.ready();
+
+    ({ tenantId: tenantAId, token: tokenA } = await seedTenant('bill-tenant-a'));
+    tokenAReadOnly = await seedUser(tenantAId, 'bill-tenant-a-readonly', { operations_billing: ['read'] });
+    bookA = await seedBook(tenantAId);
+    productA = await seedProduct(tenantAId);
+
+    ({ tenantId: tenantBId, token: tokenB } = await seedTenant('bill-tenant-b'));
+    bookB = await seedBook(tenantBId);
+    productB = await seedProduct(tenantBId);
+    billB = await created(tokenB, billOf(bookB.id, [lineOf(productB, 1, 100)], { customerName: 'Tenant B Customer' }));
+  });
+
+  afterAll(async () => {
+    if (tenantIds.length) {
+      // Lines first, then the documents, then the masters they reference (those FKs are
+      // RESTRICT on purpose), then the tenant's own rows.
+      await db.delete(schema.billItems).where(inArray(schema.billItems.tenantId, tenantIds));
+      await db.delete(schema.bills).where(inArray(schema.bills.tenantId, tenantIds));
+      await db.delete(schema.appointments).where(inArray(schema.appointments.tenantId, tenantIds));
+      await db.delete(schema.subItems).where(inArray(schema.subItems.tenantId, tenantIds));
+      await db.delete(schema.items).where(inArray(schema.items.tenantId, tenantIds));
+      await db.delete(schema.books).where(inArray(schema.books.tenantId, tenantIds));
+      await db.delete(schema.documentCounters).where(inArray(schema.documentCounters.tenantId, tenantIds));
+      await db.delete(schema.activityLogs).where(inArray(schema.activityLogs.tenantId, tenantIds));
+      await db.delete(schema.users).where(inArray(schema.users.tenantId, tenantIds));
+      await db.delete(schema.roles).where(inArray(schema.roles.tenantId, tenantIds));
+      await db.delete(schema.tenants).where(inArray(schema.tenants.id, tenantIds));
+    }
+    await app?.close();
+    await sqlClient?.end();
+  });
+
+  /* ------------------------------------------------------------ numbering -- */
+
+  describe('the bill number series', () => {
+    it('starts a book at the number its series was configured to start from', async () => {
+      const book = await seedBook(tenantAId, { seriesStartsAt: 501 });
+      expect((await created(tokenA, billOf(book.id, [lineOf(productA, 1, 100)]))).billNumber).toBe(501);
+    });
+
+    it('numbers the next bill in the same book one higher', async () => {
+      const book = await seedBook(tenantAId, { seriesStartsAt: 501 });
+      const first = await created(tokenA, billOf(book.id, [lineOf(productA, 1, 100)]));
+      const second = await created(tokenA, billOf(book.id, [lineOf(productA, 1, 100)]));
+      expect([first.billNumber, second.billNumber]).toEqual([501, 502]);
+    });
+
+    /** A Book IS the series, so two books of the same tenant each hold their own Bill No. 1. */
+    it('lets two books each hold a Bill No. 1', async () => {
+      const one = await seedBook(tenantAId);
+      const two = await seedBook(tenantAId);
+      const billOne = await created(tokenA, billOf(one.id, [lineOf(productA, 1, 100)]));
+      const billTwo = await created(tokenA, billOf(two.id, [lineOf(productA, 1, 100)]));
+      expect([billOne.billNumber, billTwo.billNumber]).toEqual([1, 1]);
+      expect(billOne.id).not.toBe(billTwo.id);
+      expect((await detail(tokenA, billOne.id)).bookNumber).toBe(one.bookNumber);
+      expect((await detail(tokenA, billTwo.id)).bookNumber).toBe(two.bookNumber);
+    });
+
+    /** The counter is a document identity, not a hint: 25 at once still means 1..25 exactly once. */
+    it('gives 25 simultaneous creates 25 distinct gapless numbers', async () => {
+      const book = await seedBook(tenantAId);
+      const bills = await Promise.all(
+        Array.from({ length: 25 }, (_, i) => created(tokenA, billOf(book.id, [lineOf(productA, 1, 100)], { customerName: `Race ${i}` }))),
+      );
+      const numbers = bills.map((b) => b.billNumber).sort((a, b) => a - b);
+      expect(new Set(numbers).size).toBe(25);
+      expect(numbers).toEqual(Array.from({ length: 25 }, (_, i) => i + 1));
+      expect(await nextNumberOf(book.id)).toBe(26);
+    });
+
+    /**
+     * The allocator runs inside the caller's transaction, so a bill that fails after taking a
+     * number rolls the counter back with it instead of burning one.
+     */
+    it('does not consume a number when the surrounding transaction fails', async () => {
+      const book = await seedBook(tenantAId, { seriesStartsAt: 10 });
+      await expect(
+        db.transaction(async (tx) => {
+          await allocateBillNumber(tx, tenantAId, book.id);
+          throw new Error('rolled back on purpose');
+        }),
+      ).rejects.toThrow('rolled back on purpose');
+      expect(await nextNumberOf(book.id)).toBe(10);
+    });
+
+    it('does not consume a number when the bill is rejected', async () => {
+      const book = await seedBook(tenantAId);
+      const foreign = await seedProduct(tenantAId);
+      // A product that hangs off a different item — refused before the number is taken.
+      const res = await post(tokenA, billOf(book.id, [{ itemId: productA.item.id, subItemId: foreign.subItem.id, quantity: 1, rate: 100 }]));
+      expect(res.statusCode).toBe(400);
+      expect(await nextNumberOf(book.id)).toBe(1);
+    });
+
+    /** Opening the list or a bill must never spend a number — nothing previews one. */
+    it('allocates nothing when bills are merely read', async () => {
+      const book = await seedBook(tenantAId);
+      const bill = await created(tokenA, billOf(book.id, [lineOf(productA, 1, 100)]));
+      const before = await nextNumberOf(book.id);
+      await get(tokenA);
+      await get(tokenA, `/${bill.id}`);
+      expect(await nextNumberOf(book.id)).toBe(before);
+    });
+
+    it('allocates no second number when a bill is updated', async () => {
+      const book = await seedBook(tenantAId);
+      const bill = await created(tokenA, billOf(book.id, [lineOf(productA, 1, 100)]));
+      const before = await nextNumberOf(book.id);
+      const res = await put(tokenA, bill.id, updateOf([lineOf(productA, 2, 100)], { customerName: 'Edited' }));
+      expect(res.statusCode).toBe(200);
+      expect((res.json().data as Bill).billNumber).toBe(bill.billNumber);
+      expect(await nextNumberOf(book.id)).toBe(before);
+    });
+
+    /**
+     * An issued number is spent. If Bill No. 2 is deleted the next bill is still 3 — reusing 2
+     * would give a second document the identity of one that may already have been printed.
+     */
+    it('never rewinds the counter when a bill is deleted', async () => {
+      const book = await seedBook(tenantAId);
+      const first = await created(tokenA, billOf(book.id, [lineOf(productA, 1, 100)]));
+      const second = await created(tokenA, billOf(book.id, [lineOf(productA, 1, 100)]));
+      expect((await del(tokenA, second.id)).statusCode).toBe(200);
+      const third = await created(tokenA, billOf(book.id, [lineOf(productA, 1, 100)]));
+      expect([first.billNumber, second.billNumber, third.billNumber]).toEqual([1, 2, 3]);
+      expect(await nextNumberOf(book.id)).toBe(4);
+    });
+  });
+
+  /* ----------------------------------------------------------------- book -- */
+
+  describe('the book a bill is numbered under', () => {
+    /** Deactivating a book is how the studio closes a series, so nothing new may go into it. */
+    it('refuses an inactive book for a new bill', async () => {
+      const book = await seedBook(tenantAId, { isActive: false });
+      const res = await post(tokenA, billOf(book.id, [lineOf(productA, 1, 100)]));
+      expect(res.statusCode).toBe(400);
+      expect(await nextNumberOf(book.id)).toBe(1);
+    });
+
+    it('refuses a book belonging to another tenant', async () => {
+      const before = await nextNumberOf(bookB.id);
+      expect((await post(tokenA, billOf(bookB.id, [lineOf(productA, 1, 100)]))).statusCode).toBe(400);
+      expect(await nextNumberOf(bookB.id)).toBe(before);
+    });
+
+    /**
+     * Changing the book would move the bill into another series and make it another document.
+     * The update schema has no such field, so the payload loses it in validation.
+     */
+    it('ignores a bookId sent in an update payload', async () => {
+      const other = await seedBook(tenantAId);
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100)]));
+      const res = await put(tokenA, bill.id, { ...updateOf([lineOf(productA, 1, 100)]), bookId: other.id });
+      expect(res.statusCode).toBe(200);
+      const reloaded = await detail(tokenA, bill.id);
+      expect(reloaded.bookId).toBe(bill.bookId);
+      expect(reloaded.billNumber).toBe(bill.billNumber);
+      expect(reloaded.bookNumber).toBe(bookA.bookNumber);
+      expect(await nextNumberOf(other.id)).toBe(1);
+    });
+
+    /** An edit does not re-check the book: a series closed later must not make its own history unsaveable. */
+    it('still lets an existing bill be edited after its book is deactivated', async () => {
+      const book = await seedBook(tenantAId);
+      const bill = await created(tokenA, billOf(book.id, [lineOf(productA, 1, 100)]));
+      await db.update(schema.books).set({ isActive: false }).where(eq(schema.books.id, book.id));
+      expect((await put(tokenA, bill.id, updateOf([lineOf(productA, 1, 150)], { customerName: 'Corrected' }))).statusCode).toBe(200);
+    });
+  });
+
+  /* ---------------------------------------------------------- appointment -- */
+
+  describe('the booking a bill came from', () => {
+    it('creates a walk-in bill with no appointment at all', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100)]));
+      expect(bill.appointmentId).toBeNull();
+      expect(bill.appointmentNumber).toBeNull();
+    });
+
+    it('links a booking of the same tenant and reports its number', async () => {
+      const appointment = await seedAppointment(tenantAId);
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100)], { appointmentId: appointment.id }));
+      expect(bill.appointmentId).toBe(appointment.id);
+      expect((await detail(tokenA, bill.id)).appointmentNumber).toBe(appointment.appointmentNumber);
+    });
+
+    it('refuses a booking belonging to another tenant', async () => {
+      const foreign = await seedAppointment(tenantBId);
+      expect((await post(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100)], { appointmentId: foreign.id }))).statusCode).toBe(400);
+    });
+
+    /** A bill is history: its customer fields are its own snapshot, not a view of the booking. */
+    describe('the customer snapshot', () => {
+      let appointment: Awaited<ReturnType<typeof seedAppointment>>;
+      let bill: Bill;
+
+      beforeAll(async () => {
+        appointment = await seedAppointment(tenantAId, { customerName: 'Booking Name', mobileNumber: '9800000001' });
+        bill = await created(
+          tokenA,
+          billOf(bookA.id, [lineOf(productA, 1, 100)], { appointmentId: appointment.id, customerName: 'Bill Name', mobileNumber: '+91 98111 11111', babyName: 'Aarav' }),
+        );
+      });
+
+      it('stores what the operator confirmed on the bill, not what the booking says', async () => {
+        expect(bill).toMatchObject({ customerName: 'Bill Name', mobileNumber: '+91 98111 11111', babyName: 'Aarav' });
+      });
+
+      it('leaves the saved bill untouched when the booking is edited afterwards', async () => {
+        await db.update(schema.appointments).set({ customerName: 'Renamed Later', mobileNumber: '9999999999' }).where(eq(schema.appointments.id, appointment.id));
+        expect(await detail(tokenA, bill.id)).toMatchObject({ customerName: 'Bill Name', mobileNumber: '+91 98111 11111' });
+      });
+    });
+  });
+
+  /* ------------------------------------------------- items and snapshots -- */
+
+  describe('the masters a line is built from', () => {
+    it('accepts an item together with one of its own products', async () => {
+      const res = await post(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100)]));
+      expect(res.statusCode).toBe(200);
+    });
+
+    /** Only the database knows which item a product hangs off; the browser is never trusted with it. */
+    it('refuses a product that belongs to a different item', async () => {
+      const other = await seedProduct(tenantAId);
+      const res = await post(tokenA, billOf(bookA.id, [{ itemId: productA.item.id, subItemId: other.subItem.id, quantity: 1, rate: 100 }]));
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('refuses an item belonging to another tenant', async () => {
+      expect((await post(tokenA, billOf(bookA.id, [lineOf(productB, 1, 100)]))).statusCode).toBe(400);
+    });
+
+    it('refuses a product belonging to another tenant', async () => {
+      const res = await post(tokenA, billOf(bookA.id, [{ itemId: productA.item.id, subItemId: productB.subItem.id, quantity: 1, rate: 100 }]));
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('refuses an inactive item on a new line', async () => {
+      const retired = await seedProduct(tenantAId, { itemActive: false });
+      expect((await post(tokenA, billOf(bookA.id, [lineOf(retired, 1, 100)]))).statusCode).toBe(400);
+    });
+
+    it('refuses an inactive product on a new line', async () => {
+      const retired = await seedProduct(tenantAId, { productActive: false });
+      expect((await post(tokenA, billOf(bookA.id, [lineOf(retired, 1, 100)]))).statusCode).toBe(400);
+    });
+
+    it('snapshots the item name, product name, HSN and GST rate, and stores what was typed', async () => {
+      const product = await seedProduct(tenantAId, { itemName: uniqueName('Album'), hsnCode: '9989', gstRate: '12.00', productName: uniqueName('Premium'), rate: '250.00' });
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(product, 2, 300, { remark: 'Matte finish' })]));
+      expect(bill.items[0]).toMatchObject({
+        itemNameSnapshot: product.item.itemName,
+        subItemNameSnapshot: product.subItem.productName,
+        hsnCodeSnapshot: '9989',
+        gstRateSnapshot: 12,
+        quantity: 2,
+        // The master's 250.00 is only a default; the bill charges what was saved on the line.
+        rate: 300,
+        remark: 'Matte finish',
+      });
+    });
+
+    describe('after Item Master changes', () => {
+      let product: Product;
+      let bill: Bill;
+
+      beforeAll(async () => {
+        product = await seedProduct(tenantAId, { itemName: uniqueName('Before'), hsnCode: '9983', gstRate: '12.00' });
+        bill = await created(tokenA, billOf(bookA.id, [lineOf(product, 1, 100)]));
+        await db.update(schema.items).set({ itemName: uniqueName('After'), hsnCode: '0000', gstRate: '28.00' }).where(eq(schema.items.id, product.item.id));
+      });
+
+      it('leaves an issued bill reading exactly as it was issued', async () => {
+        const reloaded = await detail(tokenA, bill.id);
+        expect(reloaded.items[0]).toMatchObject({ itemNameSnapshot: product.item.itemName, hsnCodeSnapshot: '9983', gstRateSnapshot: 12, gstAmount: 12, lineTotal: 112 });
+        expect(reloaded.grandTotal).toBe(112);
+      });
+
+      /** Re-saving a bill is an edit of that document, not a repricing of it. */
+      it('keeps the original snapshot when the bill is re-saved', async () => {
+        const res = await put(tokenA, bill.id, updateOf([lineOf(product, 2, 100)], { customerName: 'Edited' }));
+        expect(res.statusCode).toBe(200);
+        const reloaded = await detail(tokenA, bill.id);
+        expect(reloaded.items[0]).toMatchObject({ gstRateSnapshot: 12, itemNameSnapshot: product.item.itemName, hsnCodeSnapshot: '9983' });
+        expect(reloaded).toMatchObject({ subTotal: 200, gstAmount: 24, grandTotal: 224 });
+      });
+    });
+
+    it('numbers the lines 1..n in payload order and keeps that order on reload', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 10), lineOf(productA, 1, 20), lineOf(productA, 1, 30)]));
+      expect(bill.items.map((l) => [l.lineNumber, l.rate])).toEqual([
+        [1, 10],
+        [2, 20],
+        [3, 30],
+      ]);
+      const reloaded = await detail(tokenA, bill.id);
+      expect(reloaded.items.map((l) => l.lineNumber)).toEqual([1, 2, 3]);
+      expect(reloaded.items.map((l) => l.rate)).toEqual([10, 20, 30]);
+    });
+
+    /** The client sends identifiers and typed values. Everything else it sends is noise. */
+    it('ignores client-sent snapshots and amounts and stores the server values', async () => {
+      const bill = await created(
+        tokenA,
+        billOf(
+          bookA.id,
+          [
+            lineOf(productA, 2, 100, {
+              itemNameSnapshot: 'Forged Item',
+              subItemNameSnapshot: 'Forged Product',
+              hsnCodeSnapshot: '0000',
+              gstRateSnapshot: 0,
+              taxableAmount: 1,
+              gstAmount: 1,
+              lineTotal: 1,
+            }),
+          ],
+          { billNumber: 9999, subTotal: 1, gstAmount: 1, grandTotal: 1 },
+        ),
+      );
+      expect(bill.items[0]).toMatchObject({
+        itemNameSnapshot: productA.item.itemName,
+        subItemNameSnapshot: productA.subItem.productName,
+        hsnCodeSnapshot: productA.item.hsnCode,
+        gstRateSnapshot: 18,
+        taxableAmount: 200,
+        gstAmount: 36,
+        lineTotal: 236,
+      });
+      expect(bill).toMatchObject({ subTotal: 200, gstAmount: 36, grandTotal: 236 });
+      expect(bill.billNumber).not.toBe(9999);
+      expect(await storedBill(bill.id)).toMatchObject({ subTotal: '200.00', gstAmount: '36.00', grandTotal: '236.00' });
+    });
+  });
+
+  /* ------------------------------------------------------ what is stored -- */
+
+  describe('the money a bill stores', () => {
+    it('stores quantity x rate and its GST at the scale the columns hold', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 5, 100)]));
+      const [stored] = await storedLines(bill.id);
+      expect(stored).toMatchObject({ quantity: '5.00', rate: '100.00', gstRateSnapshot: '18.00', taxableAmount: '500.00', gstAmount: '90.00', lineTotal: '590.00' });
+      expect(await storedBill(bill.id)).toMatchObject({ subTotal: '500.00', gstAmount: '90.00', grandTotal: '590.00' });
+    });
+
+    it('taxes each line at its own item rate when a bill mixes GST slabs', async () => {
+      const at5 = await seedProduct(tenantAId, { gstRate: '5.00' });
+      const at0 = await seedProduct(tenantAId, { gstRate: '0.00' });
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100), lineOf(at5, 2, 50), lineOf(at0, 1, 10)]));
+      expect(bill.items.map((l) => l.gstAmount)).toEqual([18, 5, 0]);
+      expect(bill).toMatchObject({ subTotal: 210, gstAmount: 23, grandTotal: 233 });
+    });
+
+    it('charges no tax on a 0% GST item but still records its 0 rate', async () => {
+      const exempt = await seedProduct(tenantAId, { gstRate: '0.00' });
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(exempt, 3, 75)]));
+      expect(bill.items[0]).toMatchObject({ gstRateSnapshot: 0, taxableAmount: 225, gstAmount: 0, lineTotal: 225 });
+      expect(bill.grandTotal).toBe(225);
+    });
+
+    it('rounds a fractional line half-up before it is stored', async () => {
+      const at12 = await seedProduct(tenantAId, { gstRate: '12.00' });
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(at12, 2.5, 199.99)]));
+      const [stored] = await storedLines(bill.id);
+      expect(stored).toMatchObject({ quantity: '2.50', rate: '199.99', taxableAmount: '499.98', gstAmount: '60.00', lineTotal: '559.98' });
+      expect(bill.grandTotal).toBe(559.98);
+    });
+
+    it.each([
+      ['quantity', { quantity: 1.005, rate: 100 }],
+      ['rate', { quantity: 1, rate: 33.333 }],
+    ])('refuses a %s with three decimals', async (_field, values) => {
+      expect((await post(tokenA, billOf(bookA.id, [{ itemId: productA.item.id, subItemId: productA.subItem.id, ...values }]))).statusCode).toBe(400);
+    });
+
+    /** WITHOUT_GST charges nothing, but the line keeps the Item Master rate it was built from. */
+    it('charges a WITHOUT_GST bill no tax while keeping the GST snapshot on its lines', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 2, 100)], { taxMode: 'WITHOUT_GST' }));
+      expect(bill.items[0]).toMatchObject({ gstRateSnapshot: 18, taxableAmount: 200, gstAmount: 0, lineTotal: 200 });
+      expect(bill).toMatchObject({ taxMode: 'WITHOUT_GST', subTotal: 200, gstAmount: 0, grandTotal: 200 });
+    });
+
+    it('makes the header totals the sum of the stored lines', async () => {
+      const at5 = await seedProduct(tenantAId, { gstRate: '5.00' });
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100), lineOf(at5, 2, 50), lineOf(productA, 3, 33.33)]));
+      const lines = await storedLines(bill.id);
+      expect(bill.subTotal).toBe(lines.reduce((t, l) => t + Number(l.taxableAmount), 0));
+      expect(bill.gstAmount).toBe(lines.reduce((t, l) => t + Number(l.gstAmount), 0));
+      expect(bill.grandTotal).toBe(lines.reduce((t, l) => t + Number(l.lineTotal), 0));
+    });
+  });
+
+  /* ------------------------------------------------ create, read, update -- */
+
+  describe('creating, reading, updating and deleting a bill', () => {
+    it('creates a bill and returns it with its book number and its lines', async () => {
+      const res = await post(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100)]));
+      expect(res.statusCode).toBe(200);
+      const bill = res.json().data as Bill;
+      expect(bill.bookNumber).toBe(bookA.bookNumber);
+      expect(bill.items).toHaveLength(1);
+    });
+
+    it('reads a bill back with its lines in print order', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 10), lineOf(productA, 2, 20)]));
+      const reloaded = await detail(tokenA, bill.id);
+      expect(reloaded.id).toBe(bill.id);
+      expect(reloaded.items.map((l) => l.lineNumber)).toEqual([1, 2]);
+    });
+
+    it('returns 404 for a bill that does not exist', async () => {
+      expect((await get(tokenA, '/11111111-2222-4333-8444-555555555555')).statusCode).toBe(404);
+    });
+
+    /** The lines are replaced as a SET, so removing one really removes it and the totals follow. */
+    it('replaces the whole line set and recomputes the totals on update', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100), lineOf(productA, 1, 200)]));
+      expect((await put(tokenA, bill.id, updateOf([lineOf(productA, 3, 50)], { customerName: 'Edited' }))).statusCode).toBe(200);
+      const reloaded = await detail(tokenA, bill.id);
+      expect(reloaded.items).toHaveLength(1);
+      expect(reloaded.items[0]).toMatchObject({ lineNumber: 1, quantity: 3, rate: 50, taxableAmount: 150, gstAmount: 27, lineTotal: 177 });
+      expect(reloaded).toMatchObject({ customerName: 'Edited', subTotal: 150, gstAmount: 27, grandTotal: 177 });
+    });
+
+    /** One transaction: a rejected edit must not leave the bill half-rewritten. */
+    it('leaves the old lines and totals intact when an update is rejected', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 2, 100)]));
+      const foreign = await seedProduct(tenantAId);
+      const res = await put(tokenA, bill.id, updateOf([lineOf(productA, 1, 10), { itemId: productA.item.id, subItemId: foreign.subItem.id, quantity: 1, rate: 500 }]));
+      expect(res.statusCode).toBe(400);
+      const reloaded = await detail(tokenA, bill.id);
+      expect(reloaded.items).toHaveLength(1);
+      expect(reloaded.items[0]).toMatchObject({ quantity: 2, rate: 100 });
+      expect(reloaded.grandTotal).toBe(bill.grandTotal);
+    });
+
+    it('deletes a bill and its lines with it', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100), lineOf(productA, 2, 50)]));
+      expect((await del(tokenA, bill.id)).statusCode).toBe(200);
+      expect((await get(tokenA, `/${bill.id}`)).statusCode).toBe(404);
+      expect(await storedLines(bill.id)).toEqual([]);
+    });
+  });
+
+  /* -------------------------------------------------------------- the list -- */
+
+  describe('the list', () => {
+    let token = '';
+    let book: Awaited<ReturnType<typeof seedBook>>;
+    let product: Product;
+    let customer = '';
+    let byName: Bill;
+    let byMobile: Bill;
+    let first: Bill;
+    let second: Bill;
+
+    beforeAll(async () => {
+      let tenantId = '';
+      ({ tenantId, token } = await seedTenant('bill-tenant-list'));
+      // A letters-only book number, so a digit search can only be reading a bill number.
+      book = await seedBook(tenantId, { bookNumber: uniqueWord('BOOK') });
+      product = await seedProduct(tenantId);
+      customer = uniqueWord('Customer');
+      first = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { billDate: '2030-03-15', customerName: uniqueWord('First') }));
+      byName = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { billDate: '2030-04-20', customerName: customer }));
+      byMobile = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { billDate: '2030-05-25', customerName: uniqueWord('Mobile'), mobileNumber: '+91 98765 43277' }));
+      second = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { billDate: '2030-05-25', customerName: uniqueWord('Same') }));
+    });
+
+    it('finds a bill by its exact number', async () => {
+      expect(numbersOf(await get(token, `?search=${byName.billNumber}`))).toEqual([byName.billNumber]);
+    });
+
+    it('finds a bill by customer name', async () => {
+      expect(numbersOf(await get(token, `?search=${customer}`))).toEqual([byName.billNumber]);
+    });
+
+    /** However the number was typed, and however it is searched for. */
+    it.each(['9876543277', '+91 98765 43277', '98765-43277'])('finds a bill searching its mobile as %p', async (term) => {
+      expect(numbersOf(await get(token, `?search=${encodeURIComponent(term)}`))).toContain(byMobile.billNumber);
+    });
+
+    /**
+     * Regression guard: a twelve-digit mobile typed into the search box is all digits, but
+     * comparing it to the `integer` bill number would ask Postgres to cast out of range and
+     * fail the whole request. It has to be read as a phone number instead.
+     */
+    it('survives a digit string larger than the bill number column holds', async () => {
+      const res = await get(token, '?search=919876543277');
+      expect(res.statusCode).toBe(200);
+      expect(numbersOf(res)).toContain(byMobile.billNumber);
+    });
+
+    it('finds every bill of a book by the book number', async () => {
+      expect(numbersOf(await get(token, `?search=${book.bookNumber}`)).sort((a, b) => a - b)).toEqual([first, byName, byMobile, second].map((b) => b.billNumber).sort((a, b) => a - b));
+    });
+
+    it('filters by bill date', async () => {
+      const filters = encodeURIComponent(JSON.stringify([{ field: 'billDate', op: 'equals', value: '2030-03-15' }]));
+      expect(numbersOf(await get(token, `?filters=${filters}`))).toEqual([first.billNumber]);
+    });
+
+    it('filters by a date range', async () => {
+      const filters = encodeURIComponent(JSON.stringify([{ field: 'billDate', op: 'between', value: ['2030-03-01', '2030-04-30'] }]));
+      const found = numbersOf(await get(token, `?filters=${filters}`));
+      expect(found.sort((a, b) => a - b)).toEqual([first.billNumber, byName.billNumber].sort((a, b) => a - b));
+      expect(found).not.toContain(byMobile.billNumber);
+    });
+
+    /** Billing work reads newest first, with the bill number as the stable tie-breaker. */
+    it('defaults to the latest bill date first, newest number first within a date', async () => {
+      expect(numbersOf(await get(token))).toEqual([second.billNumber, byMobile.billNumber, byName.billNumber, first.billNumber]);
+    });
+
+    it('paginates without repeating or dropping a row', async () => {
+      const page1 = numbersOf(await get(token, '?page=1&limit=2'));
+      const page2 = numbersOf(await get(token, '?page=2&limit=2'));
+      expect(page1).toHaveLength(2);
+      expect(page2).toHaveLength(2);
+      expect(new Set([...page1, ...page2]).size).toBe(4);
+    });
+
+    it('reports the total independently of the page size', async () => {
+      expect((await get(token, '?page=1&limit=2')).json().data.total).toBe(4);
+    });
+  });
+
+  /* ------------------------------------------------------ tenant isolation -- */
+
+  describe('tenant isolation', () => {
+    it("never lists another tenant's bill", async () => {
+      expect(rowsOf(await get(tokenA)).map((r) => r.id)).not.toContain(billB.id);
+    });
+
+    it("returns 404 for another tenant's bill", async () => {
+      expect((await get(tokenA, `/${billB.id}`)).statusCode).toBe(404);
+    });
+
+    it("cannot update another tenant's bill", async () => {
+      expect((await put(tokenA, billB.id, updateOf([lineOf(productA, 1, 1)], { customerName: 'Hijacked' }))).statusCode).toBe(404);
+    });
+
+    it("cannot delete another tenant's bill", async () => {
+      expect((await del(tokenA, billB.id)).statusCode).toBe(404);
+    });
+
+    it("leaves the other tenant's bill intact after those attempts", async () => {
+      expect(await detail(tokenB, billB.id)).toMatchObject({ id: billB.id, customerName: 'Tenant B Customer' });
+    });
+  });
+
+  /* ------------------------------------------------------------ permissions -- */
+
+  describe('permissions', () => {
+    it('lets a read-only user list bills', async () => {
+      expect((await get(tokenAReadOnly)).statusCode).toBe(200);
+    });
+
+    it('refuses a create without the create action', async () => {
+      expect((await post(tokenAReadOnly, billOf(bookA.id, [lineOf(productA, 1, 100)]))).statusCode).toBe(403);
+    });
+
+    it('refuses an update without the update action', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100)]));
+      expect((await put(tokenAReadOnly, bill.id, updateOf([lineOf(productA, 1, 100)]))).statusCode).toBe(403);
+    });
+
+    it('refuses a delete without the delete action', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100)]));
+      expect((await del(tokenAReadOnly, bill.id)).statusCode).toBe(403);
+    });
+
+    it('refuses a user with no billing grant at all', async () => {
+      const token = await seedUser(tenantAId, 'bill-tenant-a-nogrant', { masters_books: ['read'] });
+      expect((await get(token)).statusCode).toBe(403);
+    });
+
+    it('refuses an unauthenticated list', async () => {
+      expect((await app.inject({ method: 'GET', url: '/api/bills' })).statusCode).toBe(401);
+    });
+
+    it('refuses an unauthenticated create', async () => {
+      expect((await app.inject({ method: 'POST', url: '/api/bills', payload: billOf(bookA.id, [lineOf(productA, 1, 100)]) })).statusCode).toBe(401);
+    });
+
+    /** A refused create must not have moved the series on its way to the 403. */
+    it('spends no bill number on a refused create', async () => {
+      const book = await seedBook(tenantAId);
+      await post(tokenAReadOnly, billOf(book.id, [lineOf(productA, 1, 100)]));
+      expect(await nextNumberOf(book.id)).toBe(1);
+    });
+  });
+});

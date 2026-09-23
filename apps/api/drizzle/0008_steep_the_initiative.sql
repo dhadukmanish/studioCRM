@@ -1,0 +1,1 @@
+ALTER TABLE "sub_items" ADD CONSTRAINT "sub_items_id_tenant_uk" UNIQUE("id","tenant_id");

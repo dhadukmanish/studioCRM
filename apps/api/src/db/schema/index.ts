@@ -6,3 +6,4 @@ export * from './accounts';
 export * from './books';
 export * from './counters';
 export * from './appointments';
+export * from './bills';
