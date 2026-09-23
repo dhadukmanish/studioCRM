@@ -18,7 +18,8 @@ a data-table kit; the Masters layer, Appointments and Billing on top of it are p
   recipe is still accurate — read it before adding a module.
 - `CLAUDE.md` holds the always-loaded engineering rules — stable rules only; current
   implementation status lives in THIS file. `docs/ARCHITECTURE.md`, `docs/UI_DESIGN_SYSTEM.md`,
-  `docs/DEVELOPMENT.md` and `docs/BILL_NUMBERING.md` hold the detail; `.claude/agents/` has five
+  `docs/DEVELOPMENT.md`, `docs/BILL_NUMBERING.md` and `docs/BILLING_CALCULATION.md` hold the
+  detail; `.claude/agents/` has five
   specialists, `.claude/skills/studio-*` the workflows, `.claude/hooks/guard-bash.mjs` blocks
   destructive commands.
 
@@ -54,7 +55,7 @@ large modal rather than a drawer.
 | Module | Permission | API | Screen |
 | --- | --- | --- | --- |
 | Appointments | `operations_appointments` | `/api/appointments` | `/modules/appointments` |
-| Billing (Phase 1) | `operations_billing` | `/api/bills` | `/modules/billing`, `/new`, `/:id` |
+| Billing (Phase 2) | `operations_billing` | `/api/bills` | `/modules/billing`, `/new`, `/:id` |
 
 **Appointments** — the studio's booking record, and the first module that was not a master: a
 customer calls, a date and usually a time are agreed, and the customer name, mobile and baby
@@ -64,6 +65,9 @@ time, customer name, mobile, optional baby name, optional remark. Hand-written r
 a 760px modal; the list defaults to newest-first with a Today quick filter.
 
 ### Billing — Phase 1 (core bill + lines + GST snapshot)
+
+Phase 2 (discount, GST detail, final totals) is described after it. Phase 1 is the foundation
+everything below still rests on, so it is kept here rather than rewritten.
 
 The invoice document: a header with its own customer snapshot, at least one line, and totals the
 server derives. `bills` + `bill_items`, hand-written routes (creation takes its number inside the
@@ -83,9 +87,9 @@ What Phase 1 establishes, and what the next phases must not break:
   bill keeps the snapshots of the lines it already had.
 - **The appointment is optional and traceability only** — a walk-in bill has none.
 - **One calculation, in `packages/shared/src/billing.ts`**, used by the browser for preview and
-  by the API inside the transaction. The rate is treated as tax-EXCLUSIVE (an assumption —
-  see below), rounding is half-up per line on integer paise, and totals are the sums of the
-  already-rounded lines. WITHOUT_GST charges no tax but keeps each line's GST snapshot.
+  by the API inside the transaction. The rate is tax-EXCLUSIVE (an assumption then, **confirmed**
+  by the studio in Phase 2), rounding is half-up per line on integer paise, and totals are the
+  sums of the already-rounded lines. WITHOUT_GST charges no tax but keeps each line's GST snapshot.
 - **Nothing a client sends can become a snapshot or an amount.** Those fields do not exist in
   the schemas; the server reads the masters and recomputes every figure.
 - **A billed master cannot be deleted.** `bill_items` references Item and Sub Item with
@@ -99,6 +103,54 @@ What Phase 1 establishes, and what the next phases must not break:
   amount columns AND inside exact integer arithmetic. Raising either means re-checking both.
 
 Full contract: `docs/BILL_NUMBERING.md`, which is now the implemented record, not a plan.
+
+### Billing — Phase 2 (discount, GST detail, final totals)
+
+Built on Phase 1 without rebuilding any of it. **Full contract: `docs/BILLING_CALCULATION.md`** —
+read it before touching any figure on a bill.
+
+- **The rate is GST-exclusive — CONFIRMED by the studio.** It is no longer an assumption, and
+  nothing should be written as though it might flip. ₹1,000 @ 18% bills 1,000 taxable + 180 GST
+  = 1,180.
+- **The calculation order is `Gross Taxable -> Discount -> Net Taxable -> GST -> Grand Total`.**
+  The discount reduces the taxable base BEFORE tax. Doing it the other way round would make the
+  rate-wise GST summary arithmetically false on a bill that mixes slabs.
+- **The discount is BILL-level** and stored as the pair the operator chose:
+  `discount_type` (NONE | AMOUNT | PERCENT), `discount_value` (what was typed) and
+  `discount_amount` (what it came to — the server's). There is deliberately **no per-line
+  discount field**; a line's `discount_allocated` is computed, never typed.
+- **Allocation is largest-remainder (Hamilton) in integer paise**, in `allocateDiscount`
+  (`packages/shared/src/billing.ts`). `sum(line allocations) === discount_amount` exactly — a
+  ₹100 discount over three ₹100 lines is 33.34 + 33.33 + 33.33, never 99.99. Ties go to the
+  larger line, then to the earlier one, so the result is deterministic. A zero-value line never
+  takes a remainder paisa, and no line can be driven negative. The products that pass 2^53 at the
+  schemas' ceilings are done in `bigint`.
+- **101% and an amount above the sub total are REFUSED with a field error, never clamped.** The
+  rule lives once, in `billDiscountError` (`packages/shared/src/schemas/bills.ts`): the zod
+  refinement and the billing screen's live warning are the same function.
+- **`sub_total` is GROSS** (before discount, before GST). `netTaxable` (= sub total − discount)
+  and each line's `grossTaxable` (= taxable + allocated) are **derived in `shapeBill` /
+  `shapeBillItem`, not stored** — two stored columns already determine each, and a third could
+  only drift. That is also why migration `0011` needed no backfill: every new column defaults to
+  a value that is already correct for a Phase 1 bill.
+- **The rate-wise GST summary is derived from the lines' own amounts** by `gstSummary`, returned
+  on `GET /api/bills/:id`, never stored and never recalculated from quantities. Its taxable
+  figure is the NET one, after the allocated discount. A 0% group is kept.
+- **WITHOUT_GST** applies the discount normally and charges 0 tax, so the grand total is the net
+  taxable. Every line keeps its GST snapshot; the screen hides the GST Details table in that mode
+  so retained rates can never read as charged tax.
+- **Snapshot rules on an edit** (all four proven by test and in a browser): re-save keeps the
+  snapshot; a rate-only change keeps it; changing the Item/Product identity refreshes it from the
+  master as it stands today; a genuinely new product takes today's master. A second line for a
+  product the bill ALREADY carries takes that bill's own rate — the Phase 1 trade-off, kept on
+  purpose so one invoice cannot print two rates for one product.
+- **CGST/SGST/IGST is deliberately NOT split.** It needs a supplier state, a place of supply and
+  an intra/inter-state rule that nothing in this repository establishes. The summary is
+  `Rate / Taxable / GST` until those are confirmed. Do not guess at it.
+- UI: the discount control lives inside the totals panel (`None | ₹ | %` + value), the totals read
+  Sub Total / Discount / Taxable Amount / GST / **Grand Total**, and a collapsible "GST Details"
+  table sits beside them. The grid gained a **Taxable** column; GST % and GST Amt stay visible.
+  No new permission — `operations_billing` covers all of it.
 
 ### Bill numbering
 
@@ -251,16 +303,16 @@ embeds the username (`https://dhadukmanish@github.com/...`) so git picks the rig
 Keep the `dhadukmanish@` in the URL. Nothing needs to be deleted from Credential Manager.
 
 **Nothing has been pushed yet.** As of this update the current branch is `masters/account-master`
-(no upstream) and **8 commits are unpushed**: `main` is 4 ahead of `origin/main`, and this branch
-is 4 ahead of `main` (Account Group + Account Master, Book Master + sample-module removal, the
-HANDOFF refresh, and the Appointment module). Whoever picks this up should decide whether to
-merge into `main` and push, rather than assume the remote is current.
+(no upstream) and **9 commits are unpushed** (`origin/main..HEAD`), the newest being Billing
+Phase 1 (`1432eac`). Whoever picks this up should decide whether to merge into `main` and push,
+rather than assume the remote is current.
 
-**Billing Phase 1 is NOT committed.** It sits uncommitted in the working tree — the whole
-`bills`/`bill_items` stack, the billing screens, the tests and the docs — because the
-instruction for that phase was not to commit. It is nonetheless applied to the database
-(migrations `0008`–`0010`), so a fresh clone of the repo would not match this machine's schema
-until it is committed.
+**Billing Phase 2 is NOT committed.** It sits uncommitted in the working tree — the shared
+calculation and discount schema, the two `bills` / `bill_items` column sets, the service, the
+billing screens, the tests and the docs, plus the new `docs/BILLING_CALCULATION.md` and
+migration `0011` — because the instruction for that phase was not to commit. Migration `0011`
+has nonetheless been **applied** to the shared database, so a fresh clone would not match this
+machine's schema until it is committed.
 
 Untracked in the working tree and **intentionally left untouched — never add, move or delete
 them**: `erp-boilerplate.bundle` (the original boilerplate delivery, now redundant) and
@@ -288,11 +340,15 @@ this machine. The app points at a **hosted Postgres 18.4** instead:
 - The password contains `@@`, which **must stay percent-encoded** as `%40%40` inside the URL,
   or the connection string parses wrong
 - No SSL parameters needed
-- **24 tables** in `public`; migrations `0000` … `0010` all applied (11 rows in
+- **24 tables** in `public`; migrations `0000` … `0011` all applied (12 rows in
   `drizzle.__drizzle_migrations`). `0005` created `books`; `0006` dropped the sample
   `categories` table; `0007` added `appointments` and `document_counters`; `0008` added
   `sub_items_id_tenant_uk`; `0009` added `bills` and `bill_items`; `0010` widened the three
-  `bill_items` amount columns to `numeric(16, 2)`. All additive.
+  `bill_items` amount columns to `numeric(16, 2)`; `0011` added the four discount columns
+  (`bills.discount_type / discount_value / discount_amount`, `bill_items.discount_allocated`)
+  and their seven check constraints. All additive — `0011` needed **no backfill**, because each
+  new column's default (NONE / 0) is already the truth about a Phase 1 bill, so no existing
+  bill's totals moved.
 - **Generator gotcha worth remembering:** drizzle-kit put the new `sub_items` unique key AFTER
   the foreign key that references it, so the single migration failed (and rolled back cleanly).
   The fix was to split it into two migrations — the key first, then the tables — not to
@@ -332,15 +388,16 @@ Dev servers are usually already running in the background from an earlier sessio
 ## Testing
 
 Vitest runs in `apps/api` only (pinned to v3 — v5 needs Vite 6, this repo is on Vite 5).
-Seven files (items, sub-items, account groups, accounts, books, appointments, bills), 706 tests.
+Seven files (items, sub-items, account groups, accounts, books, appointments, bills), 780 tests.
 Each has two sections:
 
 - **A — pure validation and calculation** (zod schemas, `normalizeMobile`, the bill money
-  functions). Always runs. **406 tests pass today.**
+  functions, the discount allocation and the rate-wise GST summary). Always runs.
+  **457 tests pass today.**
 - **B — database-backed** (tenant isolation, RBAC, duplicate guards, lookup field exposure, the
   allocators' sequences and concurrency, the rollback that keeps a failed create from burning a
-  number, bill snapshots and the atomic line replacement). `describe.skipIf(!TEST_DATABASE_URL)`,
-  so it **skips by default** — 300 skipped.
+  number, bill snapshots, the stored discount and its allocation, and the atomic line
+  replacement). `describe.skipIf(!TEST_DATABASE_URL)`, so it **skips by default** — 323 skipped.
 
 Section B creates and deletes tenants, roles and users. `TEST_DATABASE_URL` must point at a
 **throwaway** database — never at the hosted `DATABASE_URL` above. Because no throwaway database
@@ -405,7 +462,34 @@ Confirmed end-to-end against the live API / in a real browser, not just by readi
   the appointment counter row was removed and the verification audit entries were cleaned up:
   `bills`, `bill_items` and `appointments` are all empty, and the owner's `2026-27` book is
   still on `next_bill_number = 1`.
-- `pnpm typecheck`, `pnpm test` (406 passed, 300 skipped) and `pnpm build` all clean.
+- **Billing Phase 2 (2026-09-23), against the live API — 42 checks:** the GST-exclusive rule
+  (1,000 @ 18% -> 1,180; 2 x 500 @ 12% -> 1,120), a ₹300 discount over a 5% and an 18% line
+  allocating 100 / 200 and giving 2,700 taxable / 369 GST / 3,069 total, 10% of 10,000 read
+  against the sub total and not the grand total, 3 x ₹100 less ₹100 allocating 33.34 / 33.33 /
+  33.33 and summing exactly, a 0% group kept in the summary, 100% taking a bill to zero while
+  still issuing a number, WITHOUT_GST charging 0 while keeping its snapshots, 101% / an amount
+  above the sub total / a negative / a 3-decimal / an unknown type all refused, a refused
+  discount burning no bill number, forged discount amounts and line allocations ignored, an
+  issued bill still reading at 12% after Item Master moved to 28%, a rate-only edit keeping the
+  snapshot, a newly added product taking today's master, changing the product identity
+  refreshing the snapshot, and adding then removing a discount by edit without renumbering.
+- **Billing Phase 2 in a real browser (headless Chrome, 1440x900) — 30 checks, zero console
+  errors:** the Taxable / GST % / GST Amt columns per line, totals before any discount, the
+  rate-wise GST Details table, a ₹ discount re-taxing the lines instantly (900 / 45 and
+  1,800 / 324), the same for a %, the 101% and above-sub-total warnings appearing live and
+  clearing again, Without GST zeroing the tax and hiding the GST Details table, switching back
+  restoring it, save → the stored bill matching the screen exactly, reopening showing the same
+  totals with the discount control on what was chosen, a rate-only edit keeping 5% after Item
+  Master moved to 28%, choosing a different item refreshing the line to 12%, and no sideways
+  page scroll at 390px.
+- One UI issue was found by that pass and fixed: `<Select>`'s blank placeholder option could set
+  the discount type to `''`, which the preview then read as a percentage; `pickDiscountType`
+  now treats a blank as NONE. The grid's column widths were also tightened (min-width 1160 ->
+  1100) so the Remark column is not pushed off a 1440px screen.
+- Every temporary bill, book, item and sub item those two passes created was deleted and the
+  166 verification audit entries were removed — `bills`, `bill_items` and `appointments` are
+  empty again, and the owner's `2026-27` book is still on `next_bill_number = 1`.
+- `pnpm typecheck`, `pnpm test` (457 passed, 323 skipped) and `pnpm build` all clean.
 
 Demo logins: `admin@example.com` (Super Admin, everything) and `viewer@example.com`
 (read-only, useful for testing RBAC) — both password `Admin@1234`.
@@ -420,21 +504,21 @@ assumes one and will throw. Guard the login step when reusing it.
 
 - **Payment, Ledger, Voucher and Reports are NOT implemented.** Nothing posts an accounting
   transaction anywhere yet — a bill is a document, not a journal entry.
-- **Billing beyond Phase 1 is NOT implemented**, deliberately and by instruction: discount,
-  advance, paid and outstanding; rate-wise GST summary and the CGST/SGST/IGST split; the
-  delivery workflow (the `delivery_date` column exists, the statuses do not); Invoice Template
-  Master, invoice preview and PDF; WhatsApp sharing; a draft/cancelled bill status; a Customer
-  Master. The Phase 1 data was shaped so each of these is an addition, not a rewrite.
-- **Two business questions were NOT guessed at and need an answer before the next phase:**
-  1. **Is the line Rate tax-exclusive or tax-inclusive?** Phase 1 treats it as EXCLUSIVE
-     (GST added on top of Qty x Rate). The legacy billing screens are scanned images with no
-     text layer and could not be read here, and nothing else in the repo settles it. The policy
-     is isolated in `lineAmounts` (`packages/shared/src/billing.ts`); changing it means
-     recalculating bills already issued.
-  2. **What is "Item Description" in the legacy requirement?** Phase 1 keeps only the per-line
-     `remark` (defaulted from the Sub Item). Whether Item Description is a separate line field,
-     a bill-level field, or just another name for the same thing is unresolved, so nothing was
-     invented for it.
+- **Billing beyond Phase 2 is NOT implemented**, deliberately and by instruction: advance, paid
+  and outstanding; the CGST/SGST/IGST split; the delivery workflow (the `delivery_date` column
+  exists, the statuses do not); Invoice Template Master, invoice preview and PDF; WhatsApp
+  sharing; a draft/cancelled bill status; a Customer Master. The data is shaped so each of these
+  is an addition, not a rewrite.
+- **The CGST/SGST/IGST split needs business input before it can be built:** the studio's state,
+  the place-of-supply rule and how an intra-state bill is told from an inter-state one. Nothing
+  in the repo establishes any of them, and guessing would put wrong numbers on a statutory
+  document. The summary stays `Rate / Taxable / GST` until they are answered.
+- **One business question is still open:** **what is "Item Description" in the legacy
+  requirement?** Billing keeps only the per-line `remark` (defaulted from the Sub Item). Whether
+  Item Description is a separate line field, a bill-level field, or just another name for the
+  same thing is unresolved, so nothing was invented for it.
+  (The other Phase 1 question — tax-exclusive or tax-inclusive rate — has been **answered**:
+  EXCLUSIVE, confirmed by the studio. See `docs/BILLING_CALCULATION.md`.)
 - **Deliberately NOT built into Appointments, because no requirement establishes them:** a
   status workflow (Scheduled / Confirmed / Completed / Cancelled / No Show), a Customer Master
   or any customer deduplication, calendar or scheduler views, slot-conflict detection (two

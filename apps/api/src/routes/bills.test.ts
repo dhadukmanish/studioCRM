@@ -9,6 +9,7 @@ import {
   billTotals,
   billUpdateSchema,
   calculateBill,
+  gstSummary,
   lineAmounts,
   normalizeMobile,
 } from '@erp/shared';
@@ -68,33 +69,33 @@ function issuesFor(input: unknown, schema: ZodTypeAny = billSchema) {
 
 describe('lineAmounts (one line of a WITH_GST bill)', () => {
   it('bills quantity x rate and adds GST on top of it', () => {
-    expect(lineAmounts({ quantity: 3, rate: 250, gstRate: 18 }, 'WITH_GST')).toEqual({ taxableAmount: 750, gstAmount: 135, lineTotal: 885 });
+    expect(lineAmounts({ quantity: 3, rate: 250, gstRate: 18 }, 'WITH_GST')).toEqual({ grossTaxable: 750, discountAllocated: 0, taxableAmount: 750, gstAmount: 135, lineTotal: 885 });
   });
 
   /** The policy the whole module rests on: the typed rate is what is charged BEFORE tax. */
   it('treats the rate as tax-exclusive, so the line total is more than quantity x rate', () => {
-    expect(lineAmounts({ quantity: 1, rate: 100, gstRate: 18 }, 'WITH_GST')).toEqual({ taxableAmount: 100, gstAmount: 18, lineTotal: 118 });
+    expect(lineAmounts({ quantity: 1, rate: 100, gstRate: 18 }, 'WITH_GST')).toEqual({ grossTaxable: 100, discountAllocated: 0, taxableAmount: 100, gstAmount: 18, lineTotal: 118 });
   });
 
   it('rounds the taxable value to 2 decimals', () => {
-    expect(lineAmounts({ quantity: 3, rate: 33.33, gstRate: 18 }, 'WITH_GST')).toEqual({ taxableAmount: 99.99, gstAmount: 18, lineTotal: 117.99 });
+    expect(lineAmounts({ quantity: 3, rate: 33.33, gstRate: 18 }, 'WITH_GST')).toEqual({ grossTaxable: 99.99, discountAllocated: 0, taxableAmount: 99.99, gstAmount: 18, lineTotal: 117.99 });
   });
 
   it('rounds the GST to 2 decimals', () => {
-    expect(lineAmounts({ quantity: 1, rate: 999.99, gstRate: 18 }, 'WITH_GST')).toEqual({ taxableAmount: 999.99, gstAmount: 180, lineTotal: 1179.99 });
+    expect(lineAmounts({ quantity: 1, rate: 999.99, gstRate: 18 }, 'WITH_GST')).toEqual({ grossTaxable: 999.99, discountAllocated: 0, taxableAmount: 999.99, gstAmount: 180, lineTotal: 1179.99 });
   });
 
   /** Exactly half a paisa of tax goes up, never silently down. */
   it('rounds exactly half a paisa of GST up', () => {
-    expect(lineAmounts({ quantity: 1, rate: 1, gstRate: 0.5 }, 'WITH_GST')).toEqual({ taxableAmount: 1, gstAmount: 0.01, lineTotal: 1.01 });
+    expect(lineAmounts({ quantity: 1, rate: 1, gstRate: 0.5 }, 'WITH_GST')).toEqual({ grossTaxable: 1, discountAllocated: 0, taxableAmount: 1, gstAmount: 0.01, lineTotal: 1.01 });
   });
 
   it('rounds exactly half a paisa of taxable value up', () => {
-    expect(lineAmounts({ quantity: 0.5, rate: 0.01, gstRate: 18 }, 'WITH_GST')).toEqual({ taxableAmount: 0.01, gstAmount: 0, lineTotal: 0.01 });
+    expect(lineAmounts({ quantity: 0.5, rate: 0.01, gstRate: 18 }, 'WITH_GST')).toEqual({ grossTaxable: 0.01, discountAllocated: 0, taxableAmount: 0.01, gstAmount: 0, lineTotal: 0.01 });
   });
 
   it('bills a fractional quantity against a fractional rate', () => {
-    expect(lineAmounts({ quantity: 2.5, rate: 199.99, gstRate: 12 }, 'WITH_GST')).toEqual({ taxableAmount: 499.98, gstAmount: 60, lineTotal: 559.98 });
+    expect(lineAmounts({ quantity: 2.5, rate: 199.99, gstRate: 12 }, 'WITH_GST')).toEqual({ grossTaxable: 499.98, discountAllocated: 0, taxableAmount: 499.98, gstAmount: 60, lineTotal: 559.98 });
   });
 
   /** 0.1 * 0.2 is 0.020000000000000004 in binary floating point. It must never reach an amount. */
@@ -103,12 +104,12 @@ describe('lineAmounts (one line of a WITH_GST bill)', () => {
   });
 
   it('charges nothing on a 0% GST item', () => {
-    expect(lineAmounts({ quantity: 4, rate: 25, gstRate: 0 }, 'WITH_GST')).toEqual({ taxableAmount: 100, gstAmount: 0, lineTotal: 100 });
+    expect(lineAmounts({ quantity: 4, rate: 25, gstRate: 0 }, 'WITH_GST')).toEqual({ grossTaxable: 100, discountAllocated: 0, taxableAmount: 100, gstAmount: 0, lineTotal: 100 });
   });
 
   /** A complimentary line is a real line: it prints, it just costs nothing. */
   it('bills a zero rate as a zero line', () => {
-    expect(lineAmounts({ quantity: 2, rate: 0, gstRate: 18 }, 'WITH_GST')).toEqual({ taxableAmount: 0, gstAmount: 0, lineTotal: 0 });
+    expect(lineAmounts({ quantity: 2, rate: 0, gstRate: 18 }, 'WITH_GST')).toEqual({ grossTaxable: 0, discountAllocated: 0, taxableAmount: 0, gstAmount: 0, lineTotal: 0 });
   });
 
   /**
@@ -118,6 +119,8 @@ describe('lineAmounts (one line of a WITH_GST bill)', () => {
   it('stays exact at the largest quantity and rate the limits allow', () => {
     // 9999.99 x 999999.99 = 9,999,989,900.0001 -> 9,999,989,900.00, and 18% of that is exact.
     expect(lineAmounts({ quantity: BILL_QUANTITY_MAX, rate: BILL_RATE_MAX, gstRate: 18 }, 'WITH_GST')).toEqual({
+      grossTaxable: 9999989900,
+      discountAllocated: 0,
       taxableAmount: 9999989900,
       gstAmount: 1799998182,
       lineTotal: 11799988082,
@@ -127,7 +130,7 @@ describe('lineAmounts (one line of a WITH_GST bill)', () => {
 
 describe('lineAmounts (one line of a WITHOUT_GST bill)', () => {
   it('charges no tax, so the line total is the taxable value alone', () => {
-    expect(lineAmounts({ quantity: 3, rate: 250, gstRate: 18 }, 'WITHOUT_GST')).toEqual({ taxableAmount: 750, gstAmount: 0, lineTotal: 750 });
+    expect(lineAmounts({ quantity: 3, rate: 250, gstRate: 18 }, 'WITHOUT_GST')).toEqual({ grossTaxable: 750, discountAllocated: 0, taxableAmount: 750, gstAmount: 0, lineTotal: 750 });
   });
 
   it('charges no tax however high the item GST rate is', () => {
@@ -139,6 +142,8 @@ describe('billTotals and calculateBill (the bill money)', () => {
   it('adds the lines up into the header totals', () => {
     expect(calculateBill([{ quantity: 1, rate: 100, gstRate: 18 }, { quantity: 2, rate: 50, gstRate: 18 }], 'WITH_GST').totals).toEqual({
       subTotal: 200,
+      discountAmount: 0,
+      netTaxable: 200,
       gstAmount: 36,
       grandTotal: 236,
     });
@@ -154,7 +159,7 @@ describe('billTotals and calculateBill (the bill money)', () => {
       'WITH_GST',
     );
     expect(lines.map((l) => l.gstAmount)).toEqual([18, 5, 0]);
-    expect(totals).toEqual({ subTotal: 210, gstAmount: 23, grandTotal: 233 });
+    expect(totals).toEqual({ subTotal: 210, discountAmount: 0, netTaxable: 210, gstAmount: 23, grandTotal: 233 });
   });
 
   /**
@@ -165,6 +170,8 @@ describe('billTotals and calculateBill (the bill money)', () => {
   it('sums the rounded lines rather than re-taxing their total', () => {
     expect(calculateBill([{ quantity: 1, rate: 1, gstRate: 0.5 }, { quantity: 1, rate: 1, gstRate: 0.5 }], 'WITH_GST').totals).toEqual({
       subTotal: 2,
+      discountAmount: 0,
+      netTaxable: 2,
       gstAmount: 0.02,
       grandTotal: 2.02,
     });
@@ -173,12 +180,14 @@ describe('billTotals and calculateBill (the bill money)', () => {
   it('makes the grand total the sum of the printed line totals', () => {
     const { lines, totals } = calculateBill([{ quantity: 3, rate: 33.33, gstRate: 18 }, { quantity: 2.5, rate: 199.99, gstRate: 12 }], 'WITH_GST');
     expect(lines.map((l) => l.lineTotal)).toEqual([117.99, 559.98]);
-    expect(totals).toEqual({ subTotal: 599.97, gstAmount: 78, grandTotal: 677.97 });
+    expect(totals).toEqual({ subTotal: 599.97, discountAmount: 0, netTaxable: 599.97, gstAmount: 78, grandTotal: 677.97 });
   });
 
   it('charges a WITHOUT_GST bill no tax at all', () => {
     expect(calculateBill([{ quantity: 1, rate: 100, gstRate: 18 }, { quantity: 2, rate: 50, gstRate: 5 }], 'WITHOUT_GST').totals).toEqual({
       subTotal: 200,
+      discountAmount: 0,
+      netTaxable: 200,
       gstAmount: 0,
       grandTotal: 200,
     });
@@ -190,11 +199,320 @@ describe('billTotals and calculateBill (the bill money)', () => {
   });
 
   it('adds ten already-rounded lines without drifting a paisa', () => {
-    expect(billTotals(Array.from({ length: 10 }, () => ({ taxableAmount: 0.07, gstAmount: 0.01, lineTotal: 0.08 })))).toEqual({
+    expect(billTotals(Array.from({ length: 10 }, () => ({ grossTaxable: 0.07, discountAllocated: 0, taxableAmount: 0.07, gstAmount: 0.01, lineTotal: 0.08 })))).toEqual({
       subTotal: 0.7,
+      discountAmount: 0,
+      netTaxable: 0.7,
       gstAmount: 0.1,
       grandTotal: 0.8,
     });
+  });
+});
+
+/* --------------------------------------- A1b. the bill-level discount math -- */
+
+/**
+ * The discount, and the property the whole model rests on: it comes off the TAXABLE value
+ * before any tax is worked out, and it is spread across the lines first, so a bill that mixes
+ * GST slabs is still taxed correctly slab by slab.
+ */
+describe('calculateBill with a bill-level discount', () => {
+  const amount = (value: number) => ({ type: 'AMOUNT' as const, value });
+  const percent = (value: number) => ({ type: 'PERCENT' as const, value });
+
+  it('charges the full taxable value when there is no discount', () => {
+    expect(calculateBill([{ quantity: 1, rate: 1000, gstRate: 18 }], 'WITH_GST', { type: 'NONE', value: 0 }).totals).toEqual({
+      subTotal: 1000,
+      discountAmount: 0,
+      netTaxable: 1000,
+      gstAmount: 180,
+      grandTotal: 1180,
+    });
+  });
+
+  /** Omitting the discount entirely must calculate exactly as Phase 1 did. */
+  it('treats a missing discount as no discount', () => {
+    const lines = [{ quantity: 2, rate: 250.5, gstRate: 12 }];
+    expect(calculateBill(lines, 'WITH_GST')).toEqual(calculateBill(lines, 'WITH_GST', { type: 'NONE', value: 0 }));
+  });
+
+  it('takes a fixed discount off the taxable value before GST', () => {
+    const { lines, totals } = calculateBill([{ quantity: 1, rate: 1000, gstRate: 18 }], 'WITH_GST', amount(100));
+    expect(lines[0]).toEqual({ grossTaxable: 1000, discountAllocated: 100, taxableAmount: 900, gstAmount: 162, lineTotal: 1062 });
+    expect(totals).toEqual({ subTotal: 1000, discountAmount: 100, netTaxable: 900, gstAmount: 162, grandTotal: 1062 });
+  });
+
+  /**
+   * The vector the requirement spells out. Taxing the undiscounted lines and subtracting the
+   * 300 at the very bottom would give a different grand total AND a rate-wise summary that
+   * does not add up — which is exactly why it is not done that way.
+   */
+  it('allocates a discount across mixed GST slabs before taxing each of them', () => {
+    const { lines, totals, gstSummary: summary } = calculateBill(
+      [
+        { quantity: 1, rate: 1000, gstRate: 5 },
+        { quantity: 1, rate: 2000, gstRate: 18 },
+      ],
+      'WITH_GST',
+      amount(300),
+    );
+    expect(lines[0]).toEqual({ grossTaxable: 1000, discountAllocated: 100, taxableAmount: 900, gstAmount: 45, lineTotal: 945 });
+    expect(lines[1]).toEqual({ grossTaxable: 2000, discountAllocated: 200, taxableAmount: 1800, gstAmount: 324, lineTotal: 2124 });
+    expect(totals).toEqual({ subTotal: 3000, discountAmount: 300, netTaxable: 2700, gstAmount: 369, grandTotal: 3069 });
+    expect(summary).toEqual([
+      { gstRate: 5, taxableAmount: 900, gstAmount: 45 },
+      { gstRate: 18, taxableAmount: 1800, gstAmount: 324 },
+    ]);
+  });
+
+  it('reads a percentage against the sub total, not against the grand total', () => {
+    const { totals } = calculateBill(
+      [
+        { quantity: 4, rate: 1000, gstRate: 18 },
+        { quantity: 2, rate: 3000, gstRate: 18 },
+      ],
+      'WITH_GST',
+      percent(10),
+    );
+    // 10% of the 10,000 taxable — NOT 10% of the 11,800 the bill would otherwise come to.
+    expect(totals).toMatchObject({ subTotal: 10000, discountAmount: 1000, netTaxable: 9000, gstAmount: 1620, grandTotal: 10620 });
+  });
+
+  it('rounds a fractional percentage half-up', () => {
+    // 12.5% of 1,000.05 is 125.00625 -> 125.01.
+    expect(calculateBill([{ quantity: 1, rate: 1000.05, gstRate: 0 }], 'WITH_GST', percent(12.5)).totals.discountAmount).toBe(125.01);
+  });
+
+  it('gives the same answer for an amount and for the percentage that comes to it', () => {
+    const lines = [{ quantity: 3, rate: 700, gstRate: 12 }];
+    expect(calculateBill(lines, 'WITH_GST', percent(10)).totals).toEqual(calculateBill(lines, 'WITH_GST', amount(210)).totals);
+  });
+
+  /* ------------------------------------------------- the allocation itself -- */
+
+  describe('allocating the discount across the lines', () => {
+    /** The invariant everything else depends on: not a paisa is invented or lost. */
+    const allocationSums = (lines: { quantity: number; rate: number; gstRate: number }[], discount: { type: 'AMOUNT' | 'PERCENT'; value: number }) => {
+      const { lines: amounts, totals } = calculateBill(lines, 'WITH_GST', discount);
+      const allocated = amounts.reduce((t, l) => t + Math.round(l.discountAllocated * 100), 0);
+      expect(allocated).toBe(Math.round(totals.discountAmount * 100));
+      expect(totals.netTaxable).toBe(Number((totals.subTotal - totals.discountAmount).toFixed(2)));
+      return totals;
+    };
+
+    it('gives the whole discount to the only line there is', () => {
+      expect(calculateBill([{ quantity: 1, rate: 500, gstRate: 18 }], 'WITH_GST', amount(123.45)).lines[0].discountAllocated).toBe(123.45);
+    });
+
+    it('splits a discount in proportion to each line, to the paisa', () => {
+      const { lines } = calculateBill(
+        [
+          { quantity: 1, rate: 100, gstRate: 18 },
+          { quantity: 1, rate: 300, gstRate: 18 },
+        ],
+        'WITH_GST',
+        amount(40),
+      );
+      expect(lines.map((l) => l.discountAllocated)).toEqual([10, 30]);
+    });
+
+    /**
+     * Three equal lines and a discount that does not divide by three: each exact share is
+     * 33.3333, so the floors drop a paisa and the largest-remainder pass hands it back. The
+     * answer is 33.34 + 33.33 + 33.33, never 33.33 three times, which would total 99.99.
+     */
+    it('hands the rounding remainder to a deterministic line rather than losing it', () => {
+      const lines = Array.from({ length: 3 }, () => ({ quantity: 1, rate: 100, gstRate: 18 }));
+      expect(calculateBill(lines, 'WITH_GST', amount(100)).lines.map((l) => l.discountAllocated)).toEqual([33.34, 33.33, 33.33]);
+      allocationSums(lines, amount(100));
+    });
+
+    it('allocates the same way every time it is asked', () => {
+      const lines = [
+        { quantity: 1, rate: 33.33, gstRate: 5 },
+        { quantity: 3, rate: 11.11, gstRate: 12 },
+        { quantity: 2, rate: 49.99, gstRate: 18 },
+      ];
+      const once = calculateBill(lines, 'WITH_GST', amount(37.77)).lines.map((l) => l.discountAllocated);
+      expect(calculateBill(lines, 'WITH_GST', amount(37.77)).lines.map((l) => l.discountAllocated)).toEqual(once);
+    });
+
+    it.each([
+      ['an awkward amount over three equal lines', [100, 100, 100], amount(0.01)],
+      ['a discount smaller than the line count', [10, 20, 30, 40, 50], amount(0.03)],
+      ['odd quantities at fractional rates', [33.33, 66.67, 0.01, 999.99], percent(7.77)],
+      ['a percentage that cannot divide evenly', [1, 1, 1, 1, 1, 1, 1], percent(33.33)],
+      ['a single paisa line among large ones', [0.01, 5000, 12345.67], amount(999.99)],
+    ])('allocates exactly, with %s', (_case, rates, discount) => {
+      allocationSums(
+        (rates as number[]).map((rate, i) => ({ quantity: 1, rate, gstRate: [0, 5, 12, 18][i % 4] })),
+        discount as { type: 'AMOUNT' | 'PERCENT'; value: number },
+      );
+    });
+
+    /** A line worth nothing cannot absorb a discount, and must not be pushed below zero. */
+    it('never allocates to a zero-value line', () => {
+      const { lines } = calculateBill(
+        [
+          { quantity: 1, rate: 0, gstRate: 18 },
+          { quantity: 1, rate: 100, gstRate: 18 },
+        ],
+        'WITH_GST',
+        amount(100),
+      );
+      expect(lines[0]).toMatchObject({ grossTaxable: 0, discountAllocated: 0, taxableAmount: 0 });
+      expect(lines[1].discountAllocated).toBe(100);
+    });
+
+    /** Nothing to discount: no division by zero, and no discount conjured out of nothing. */
+    it('discounts nothing on a bill whose lines are all worth nothing', () => {
+      const lines = [{ quantity: 2, rate: 0, gstRate: 18 }];
+      expect(calculateBill(lines, 'WITH_GST', amount(50)).totals).toMatchObject({ subTotal: 0, discountAmount: 0, netTaxable: 0, grandTotal: 0 });
+      expect(calculateBill(lines, 'WITH_GST', percent(10)).totals).toMatchObject({ subTotal: 0, discountAmount: 0, grandTotal: 0 });
+    });
+
+    it('takes a bill to exactly zero at 100%, and no further', () => {
+      const { lines, totals } = calculateBill(
+        [
+          { quantity: 1, rate: 1000, gstRate: 18 },
+          { quantity: 2, rate: 33.33, gstRate: 5 },
+        ],
+        'WITH_GST',
+        percent(100),
+      );
+      expect(lines.every((l) => l.taxableAmount === 0 && l.gstAmount === 0 && l.lineTotal === 0)).toBe(true);
+      expect(totals).toEqual({ subTotal: 1066.66, discountAmount: 1066.66, netTaxable: 0, gstAmount: 0, grandTotal: 0 });
+    });
+
+    /**
+     * A defensive clamp, not a business rule: `billSchema` refuses both of these with a field
+     * error rather than shrinking them. What is pinned here is only that the calculation
+     * could never produce a negative bill if one ever reached it.
+     */
+    it('cannot be driven past zero by an impossible discount', () => {
+      expect(calculateBill([{ quantity: 1, rate: 100, gstRate: 18 }], 'WITH_GST', amount(5000)).totals).toMatchObject({ discountAmount: 100, netTaxable: 0, grandTotal: 0 });
+      expect(calculateBill([{ quantity: 1, rate: 100, gstRate: 18 }], 'WITH_GST', percent(150)).totals).toMatchObject({ discountAmount: 100, netTaxable: 0, grandTotal: 0 });
+    });
+
+    /** The point where the arithmetic would drift if any of it were done in floating point. */
+    it('stays exact on a full bill of the largest lines the limits allow', () => {
+      const lines = Array.from({ length: BILL_LIMITS.maxLines }, () => ({ quantity: BILL_QUANTITY_MAX, rate: BILL_RATE_MAX, gstRate: 18 }));
+      const totals = allocationSums(lines, percent(33.33));
+      expect(totals.subTotal).toBe(999998990000);
+    });
+  });
+
+  /* ---------------------------------------------------- the two tax modes -- */
+
+  it('discounts a WITHOUT_GST bill normally and still charges no tax', () => {
+    const { lines, totals } = calculateBill(
+      [
+        { quantity: 1, rate: 1000, gstRate: 18 },
+        { quantity: 1, rate: 1000, gstRate: 5 },
+      ],
+      'WITHOUT_GST',
+      amount(200),
+    );
+    expect(lines.map((l) => l.gstAmount)).toEqual([0, 0]);
+    expect(lines.map((l) => l.taxableAmount)).toEqual([900, 900]);
+    expect(totals).toEqual({ subTotal: 2000, discountAmount: 200, netTaxable: 1800, gstAmount: 0, grandTotal: 1800 });
+  });
+
+  /** Switching the mode changes the tax charged and nothing else about the bill. */
+  it('leaves the taxable side of a bill identical in both tax modes', () => {
+    const lines = [{ quantity: 1, rate: 1000, gstRate: 18 }];
+    const withGst = calculateBill(lines, 'WITH_GST', amount(100));
+    const withoutGst = calculateBill(lines, 'WITHOUT_GST', amount(100));
+    expect(withoutGst.totals).toMatchObject({ subTotal: withGst.totals.subTotal, discountAmount: withGst.totals.discountAmount, netTaxable: withGst.totals.netTaxable });
+    expect(withGst.totals.grandTotal).toBe(1062);
+    expect(withoutGst.totals.grandTotal).toBe(900);
+  });
+});
+
+/* ------------------------------------------- A1c. the rate-wise GST detail -- */
+
+describe('gstSummary (the rate-wise GST detail)', () => {
+  it('groups the lines by their GST rate and adds each group up', () => {
+    const { gstSummary: summary } = calculateBill(
+      [
+        { quantity: 1, rate: 1000, gstRate: 5 },
+        { quantity: 1, rate: 2000, gstRate: 12 },
+        { quantity: 1, rate: 3000, gstRate: 18 },
+        { quantity: 1, rate: 500, gstRate: 12 },
+      ],
+      'WITH_GST',
+    );
+    expect(summary).toEqual([
+      { gstRate: 5, taxableAmount: 1000, gstAmount: 50 },
+      { gstRate: 12, taxableAmount: 2500, gstAmount: 300 },
+      { gstRate: 18, taxableAmount: 3000, gstAmount: 540 },
+    ]);
+  });
+
+  it('adds up to the bill totals it was grouped from', () => {
+    const { totals, gstSummary: summary } = calculateBill(
+      [
+        { quantity: 2, rate: 333.33, gstRate: 5 },
+        { quantity: 3, rate: 111.11, gstRate: 18 },
+        { quantity: 1, rate: 99.99, gstRate: 0 },
+      ],
+      'WITH_GST',
+      { type: 'AMOUNT', value: 250 },
+    );
+    expect(summary.reduce((t, r) => t + r.taxableAmount, 0)).toBe(totals.netTaxable);
+    expect(summary.reduce((t, r) => t + r.gstAmount, 0)).toBe(totals.gstAmount);
+  });
+
+  /** The figure a GST return needs is the base tax was charged on, i.e. after the discount. */
+  it('reports the taxable value AFTER the discount', () => {
+    expect(calculateBill([{ quantity: 1, rate: 1000, gstRate: 18 }], 'WITH_GST', { type: 'AMOUNT', value: 200 }).gstSummary).toEqual([
+      { gstRate: 18, taxableAmount: 800, gstAmount: 144 },
+    ]);
+  });
+
+  it('keeps a 0% group rather than dropping its taxable value', () => {
+    const { gstSummary: summary } = calculateBill(
+      [
+        { quantity: 1, rate: 500, gstRate: 0 },
+        { quantity: 1, rate: 500, gstRate: 18 },
+      ],
+      'WITH_GST',
+    );
+    expect(summary).toEqual([
+      { gstRate: 0, taxableAmount: 500, gstAmount: 0 },
+      { gstRate: 18, taxableAmount: 500, gstAmount: 90 },
+    ]);
+  });
+
+  it('sorts the rates the same way on every bill', () => {
+    const { gstSummary: summary } = calculateBill(
+      [
+        { quantity: 1, rate: 100, gstRate: 28 },
+        { quantity: 1, rate: 100, gstRate: 5 },
+        { quantity: 1, rate: 100, gstRate: 12 },
+      ],
+      'WITH_GST',
+    );
+    expect(summary.map((r) => r.gstRate)).toEqual([5, 12, 28]);
+  });
+
+  /** WITHOUT_GST still groups — the rates are the lines' snapshots, and nothing was charged. */
+  it('shows zero tax in every group of a WITHOUT_GST bill while keeping its rates', () => {
+    const { gstSummary: summary } = calculateBill(
+      [
+        { quantity: 1, rate: 1000, gstRate: 18 },
+        { quantity: 1, rate: 500, gstRate: 5 },
+      ],
+      'WITHOUT_GST',
+    );
+    expect(summary).toEqual([
+      { gstRate: 5, taxableAmount: 500, gstAmount: 0 },
+      { gstRate: 18, taxableAmount: 1000, gstAmount: 0 },
+    ]);
+  });
+
+  it('has nothing to say about a bill with no lines', () => {
+    expect(gstSummary([])).toEqual([]);
   });
 });
 
@@ -214,6 +532,8 @@ describe('billSchema (create payload)', () => {
       birthDate: null,
       remark: null,
       taxMode: 'WITH_GST',
+      discountType: 'NONE',
+      discountValue: 0,
       items: [{ itemId: ITEM_ID, subItemId: SUB_ITEM_ID, quantity: 1, rate: 100, remark: null }],
     });
   });
@@ -447,6 +767,89 @@ describe('billSchema (create payload)', () => {
       expect(issuesFor(makeBill({ taxMode: m }))).toContainEqual({ path: 'taxMode', message: 'Select a valid tax mode' });
     });
   });
+
+  /**
+   * The discount a client is allowed to send: the TYPE and the VALUE, never the money. The
+   * two real limits are refused with a field message rather than quietly clamped — an
+   * operator who typed 101% has made a mistake, and a bill that silently became 100% off
+   * would hide it.
+   */
+  describe('the bill discount', () => {
+    /** Every bill in this block has one line at 1 x 100, so its sub total is 100.00. */
+    const withDiscount = (discountType: string, discountValue?: unknown) => makeBill({ discountType, discountValue });
+
+    it('defaults to no discount at all', () => {
+      expect(parseBill(makeBill())).toMatchObject({ discountType: 'NONE', discountValue: 0 });
+    });
+
+    it('reads a cleared value as no discount rather than as an error', () => {
+      expect(parseBill(withDiscount('AMOUNT', ''))).toMatchObject({ discountType: 'AMOUNT', discountValue: 0 });
+    });
+
+    it.each([
+      ['AMOUNT', 25, 25],
+      ['AMOUNT', '99.99', 99.99],
+      ['PERCENT', 10, 10],
+      ['PERCENT', 12.5, 12.5],
+      ['PERCENT', 100, 100],
+      ['AMOUNT', 100, 100],
+    ])('accepts a %s discount of %p', (type, value, expected) => {
+      expect(parseBill(withDiscount(type, value))).toMatchObject({ discountType: type, discountValue: expected });
+    });
+
+    /** NONE is the statement that there is no discount, so a leftover value is dropped. */
+    it('drops a value left behind by switching the discount off', () => {
+      expect(parseBill(withDiscount('NONE', 50))).toMatchObject({ discountType: 'NONE', discountValue: 0 });
+    });
+
+    it.each(['FLAT', 'percent', ''])('rejects the discount type %p', (t) => {
+      expect(issuesFor(withDiscount(t, 1))).toContainEqual({ path: 'discountType', message: 'Select a valid discount type' });
+    });
+
+    it('refuses a negative discount', () => {
+      expect(issuesFor(withDiscount('AMOUNT', -1))).toContainEqual({ path: 'discountValue', message: 'Discount cannot be negative' });
+    });
+
+    it('refuses more precision than the money columns hold', () => {
+      expect(issuesFor(withDiscount('AMOUNT', 10.005))).toContainEqual({ path: 'discountValue', message: 'Discount can have at most 2 decimal places' });
+    });
+
+    it('refuses a percentage above 100 instead of clamping it', () => {
+      expect(issuesFor(withDiscount('PERCENT', 101))).toContainEqual({ path: 'discountValue', message: 'Discount cannot be more than 100%' });
+    });
+
+    it('refuses an amount larger than the bill it is being given on', () => {
+      expect(issuesFor(withDiscount('AMOUNT', 100.01))).toContainEqual({ path: 'discountValue', message: 'Discount cannot be more than the sub total (100.00)' });
+    });
+
+    /** Nothing to discount, so any amount is too much — and no division by zero happens. */
+    it('refuses an amount on a bill whose lines are all worth nothing', () => {
+      const free = makeBill({ discountType: 'AMOUNT', discountValue: 1, items: [makeLine({ rate: 0 })] });
+      expect(issuesFor(free)).toContainEqual({ path: 'discountValue', message: 'Discount cannot be more than the sub total (0.00)' });
+    });
+
+    it('accepts a percentage on a bill worth nothing, because it comes to nothing', () => {
+      expect(parseBill(makeBill({ discountType: 'PERCENT', discountValue: 10, items: [makeLine({ rate: 0 })] }))).toMatchObject({ discountValue: 10 });
+    });
+
+    it('measures an amount against the WHOLE bill, not against one line', () => {
+      const twoLines = { items: [makeLine({ quantity: 1, rate: 100 }), makeLine({ quantity: 1, rate: 100 })] };
+      expect(parseBill(makeBill({ ...twoLines, discountType: 'AMOUNT', discountValue: 150 }))).toMatchObject({ discountValue: 150 });
+    });
+
+    it('applies the same rules to an update', () => {
+      expect(issuesFor(makeUpdate({ discountType: 'PERCENT', discountValue: 101 }), billUpdateSchema)).toContainEqual({
+        path: 'discountValue',
+        message: 'Discount cannot be more than 100%',
+      });
+    });
+
+    /** The money is never the client's to state — the fields simply do not exist here. */
+    it('strips a discount amount a client tries to state for itself', () => {
+      expect(parseBill(withDiscount('PERCENT', 10) as Record<string, unknown>)).not.toHaveProperty('discountAmount');
+      expect(parseBill(makeBill({ discountType: 'PERCENT', discountValue: 10, discountAmount: 999, netTaxable: 1 }))).not.toHaveProperty('netTaxable');
+    });
+  });
 });
 
 /* ---------------------------------------------------------- A3. one line -- */
@@ -669,6 +1072,8 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
     gstRateSnapshot: number;
     quantity: number;
     rate: number;
+    grossTaxable: number;
+    discountAllocated: number;
     taxableAmount: number;
     gstAmount: number;
     lineTotal: number;
@@ -686,10 +1091,15 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
     mobileNumber: string;
     babyName: string | null;
     taxMode: string;
+    discountType: string;
+    discountValue: number;
+    discountAmount: number;
     subTotal: number;
+    netTaxable: number;
     gstAmount: number;
     grandTotal: number;
     items: Line[];
+    gstSummary: { gstRate: number; taxableAmount: number; gstAmount: number }[];
   }
 
   const created = async (token: string, payload: unknown) => (await post(token, payload)).json().data as Bill;
@@ -1113,6 +1523,87 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
         expect(reloaded.items[0]).toMatchObject({ gstRateSnapshot: 12, itemNameSnapshot: product.item.itemName, hsnCodeSnapshot: '9983' });
         expect(reloaded).toMatchObject({ subTotal: 200, gstAmount: 24, grandTotal: 224 });
       });
+
+      /**
+       * Changing what a line COSTS is not changing what it IS. The bill goes on charging the
+       * tax its line was raised under, on the new rate.
+       */
+      it('taxes a re-rated line at its own snapshot, not at the master’s rate today', async () => {
+        const own = await seedProduct(tenantAId, { gstRate: '12.00' });
+        const raised = await created(tokenA, billOf(bookA.id, [lineOf(own, 1, 100)]));
+        await db.update(schema.items).set({ gstRate: '18.00' }).where(eq(schema.items.id, own.item.id));
+
+        await put(tokenA, raised.id, updateOf([lineOf(own, 1, 500)]));
+        const reloaded = await detail(tokenA, raised.id);
+        expect(reloaded.items[0]).toMatchObject({ rate: 500, gstRateSnapshot: 12, taxableAmount: 500, gstAmount: 60, lineTotal: 560 });
+      });
+    });
+
+    /**
+     * What happens on an edit when the masters have moved on. The rule is that a line the
+     * bill ALREADY has keeps its snapshot, and anything genuinely new on the bill takes the
+     * master as it stands today — so one edited bill may legitimately carry an old line at
+     * 12% beside a new one at 18%.
+     */
+    describe('editing a bill after Item Master has changed', () => {
+      it('gives a newly added product the master’s CURRENT values, and leaves the old line alone', async () => {
+        const original = await seedProduct(tenantAId, { gstRate: '12.00', hsnCode: '9983' });
+        const bill = await created(tokenA, billOf(bookA.id, [lineOf(original, 1, 100)]));
+        // Both masters move after the bill exists.
+        await db.update(schema.items).set({ gstRate: '28.00' }).where(eq(schema.items.id, original.item.id));
+        const added = await seedProduct(tenantAId, { gstRate: '18.00', hsnCode: '9989' });
+
+        await put(tokenA, bill.id, updateOf([lineOf(original, 1, 100), lineOf(added, 1, 100)]));
+        const reloaded = await detail(tokenA, bill.id);
+        expect(reloaded.items.map((l) => l.gstRateSnapshot)).toEqual([12, 18]);
+        expect(reloaded.items.map((l) => l.gstAmount)).toEqual([12, 18]);
+        expect(reloaded).toMatchObject({ subTotal: 200, gstAmount: 30, grandTotal: 230 });
+      });
+
+      /** Changing which PRODUCT a line bills makes it a different commercial line. */
+      it('takes a fresh snapshot when a line’s product is changed for another', async () => {
+        const first = await seedProduct(tenantAId, { itemName: uniqueName('First'), gstRate: '12.00', hsnCode: '9983' });
+        const second = await seedProduct(tenantAId, { itemName: uniqueName('Second'), gstRate: '5.00', hsnCode: '9971' });
+        const bill = await created(tokenA, billOf(bookA.id, [lineOf(first, 1, 100)]));
+
+        await put(tokenA, bill.id, updateOf([lineOf(second, 1, 100)]));
+        const reloaded = await detail(tokenA, bill.id);
+        expect(reloaded.items).toHaveLength(1);
+        expect(reloaded.items[0]).toMatchObject({
+          subItemId: second.subItem.id,
+          itemNameSnapshot: second.item.itemName,
+          hsnCodeSnapshot: '9971',
+          gstRateSnapshot: 5,
+          gstAmount: 5,
+        });
+      });
+
+      /**
+       * A second line for a product the bill ALREADY carries takes that bill's own rate, not
+       * today's — deliberately, so one invoice can never print two different GST rates for
+       * the same product. The cost is documented in `resolveLines`; the benefit is a document
+       * that adds up on paper.
+       */
+      it('keeps one rate per product on a bill, even for a line added later', async () => {
+        const product = await seedProduct(tenantAId, { gstRate: '12.00' });
+        const bill = await created(tokenA, billOf(bookA.id, [lineOf(product, 1, 100)]));
+        await db.update(schema.items).set({ gstRate: '18.00' }).where(eq(schema.items.id, product.item.id));
+
+        await put(tokenA, bill.id, updateOf([lineOf(product, 1, 100), lineOf(product, 1, 200)]));
+        expect((await detail(tokenA, bill.id)).items.map((l) => l.gstRateSnapshot)).toEqual([12, 12]);
+      });
+
+      /** A discount changes what is CHARGED, never what the line is a record of. */
+      it('leaves every snapshot alone when only the discount changes', async () => {
+        const product = await seedProduct(tenantAId, { gstRate: '12.00', hsnCode: '9983' });
+        const bill = await created(tokenA, billOf(bookA.id, [lineOf(product, 1, 1000)]));
+        await db.update(schema.items).set({ gstRate: '28.00', hsnCode: '0000' }).where(eq(schema.items.id, product.item.id));
+
+        await put(tokenA, bill.id, updateOf([lineOf(product, 1, 1000)], { discountType: 'PERCENT', discountValue: 10 }));
+        const reloaded = await detail(tokenA, bill.id);
+        expect(reloaded.items[0]).toMatchObject({ gstRateSnapshot: 12, hsnCodeSnapshot: '9983', discountAllocated: 100, taxableAmount: 900, gstAmount: 108 });
+        expect(reloaded).toMatchObject({ discountAmount: 100, netTaxable: 900, grandTotal: 1008 });
+      });
     });
 
     it('numbers the lines 1..n in payload order and keeps that order on reload', async () => {
@@ -1216,6 +1707,138 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
       expect(bill.subTotal).toBe(lines.reduce((t, l) => t + Number(l.taxableAmount), 0));
       expect(bill.gstAmount).toBe(lines.reduce((t, l) => t + Number(l.gstAmount), 0));
       expect(bill.grandTotal).toBe(lines.reduce((t, l) => t + Number(l.lineTotal), 0));
+    });
+  });
+
+  /* -------------------------------------------------------- the discount -- */
+
+  /**
+   * The discount end to end: what the API accepts, what it works out, what it writes, and
+   * what it refuses to take from a client. The arithmetic itself is pinned in section A —
+   * what is proved here is that the stored bill really is the answer that calculation gives.
+   */
+  describe('the discount a bill stores', () => {
+    it('stores a fixed discount as chosen, and what it came to', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 1000)], { discountType: 'AMOUNT', discountValue: 100 }));
+      expect(bill).toMatchObject({ discountType: 'AMOUNT', discountValue: 100, discountAmount: 100, subTotal: 1000, netTaxable: 900, gstAmount: 162, grandTotal: 1062 });
+      expect(await storedBill(bill.id)).toMatchObject({ discountType: 'AMOUNT', discountValue: '100.00', discountAmount: '100.00', subTotal: '1000.00', grandTotal: '1062.00' });
+      const [stored] = await storedLines(bill.id);
+      expect(stored).toMatchObject({ discountAllocated: '100.00', taxableAmount: '900.00', gstAmount: '162.00', lineTotal: '1062.00' });
+    });
+
+    it('keeps the percentage that was chosen as well as the money it came to', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 4, 1000), lineOf(productA, 2, 3000)], { discountType: 'PERCENT', discountValue: 10 }));
+      expect(bill).toMatchObject({ discountType: 'PERCENT', discountValue: 10, discountAmount: 1000, subTotal: 10000, netTaxable: 9000, gstAmount: 1620, grandTotal: 10620 });
+    });
+
+    /** The requirement's own worked example, end to end. */
+    it('allocates a discount across mixed GST slabs before taxing them', async () => {
+      const at5 = await seedProduct(tenantAId, { gstRate: '5.00' });
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(at5, 1, 1000), lineOf(productA, 1, 2000)], { discountType: 'AMOUNT', discountValue: 300 }));
+      expect(bill.items.map((l) => [l.grossTaxable, l.discountAllocated, l.taxableAmount, l.gstAmount, l.lineTotal])).toEqual([
+        [1000, 100, 900, 45, 945],
+        [2000, 200, 1800, 324, 2124],
+      ]);
+      expect(bill).toMatchObject({ subTotal: 3000, discountAmount: 300, netTaxable: 2700, gstAmount: 369, grandTotal: 3069 });
+    });
+
+    /** The property the allocation exists to guarantee, asserted against real stored rows. */
+    it('allocates exactly the bill discount across the lines, to the paisa', async () => {
+      const bill = await created(
+        tokenA,
+        billOf(bookA.id, [lineOf(productA, 1, 100), lineOf(productA, 1, 100), lineOf(productA, 1, 100)], { discountType: 'AMOUNT', discountValue: 100 }),
+      );
+      const lines = await storedLines(bill.id);
+      expect(lines.map((l) => l.discountAllocated)).toEqual(['33.34', '33.33', '33.33']);
+      expect(lines.reduce((t, l) => t + Math.round(Number(l.discountAllocated) * 100), 0)).toBe(Math.round(bill.discountAmount * 100));
+    });
+
+    it('reports a net taxable value that is exactly the sub total less the discount', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 3, 33.33)], { discountType: 'PERCENT', discountValue: 7.77 }));
+      expect(bill.netTaxable).toBe(Number((bill.subTotal - bill.discountAmount).toFixed(2)));
+      expect(bill.items.reduce((t, l) => t + l.taxableAmount, 0)).toBe(bill.netTaxable);
+      expect(bill.items.every((l) => l.grossTaxable === Number((l.taxableAmount + l.discountAllocated).toFixed(2)))).toBe(true);
+    });
+
+    it('returns a rate-wise GST summary grouped off the bill’s own lines', async () => {
+      const at5 = await seedProduct(tenantAId, { gstRate: '5.00' });
+      const at0 = await seedProduct(tenantAId, { gstRate: '0.00' });
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(at5, 1, 1000), lineOf(productA, 1, 2000), lineOf(at0, 1, 500)], { discountType: 'AMOUNT', discountValue: 350 }));
+      expect(bill.gstSummary.map((r) => r.gstRate)).toEqual([0, 5, 18]);
+      expect(bill.gstSummary.reduce((t, r) => t + r.taxableAmount, 0)).toBe(bill.netTaxable);
+      expect(bill.gstSummary.reduce((t, r) => t + r.gstAmount, 0)).toBe(bill.gstAmount);
+      // Reloading regroups from the stored lines and must say exactly the same thing.
+      expect((await detail(tokenA, bill.id)).gstSummary).toEqual(bill.gstSummary);
+    });
+
+    it('discounts a WITHOUT_GST bill while still charging no tax', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 1000)], { taxMode: 'WITHOUT_GST', discountType: 'AMOUNT', discountValue: 100 }));
+      expect(bill).toMatchObject({ subTotal: 1000, discountAmount: 100, netTaxable: 900, gstAmount: 0, grandTotal: 900 });
+      // The snapshot survives: it records the item, not a tax that was charged.
+      expect(bill.items[0]).toMatchObject({ gstRateSnapshot: 18, gstAmount: 0, lineTotal: 900 });
+    });
+
+    it('takes a bill to zero at 100% without going negative', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 1000)], { discountType: 'PERCENT', discountValue: 100 }));
+      expect(bill).toMatchObject({ discountAmount: 1000, netTaxable: 0, gstAmount: 0, grandTotal: 0 });
+      // Still a real document: it took a number and it reloads.
+      expect((await detail(tokenA, bill.id)).billNumber).toBe(bill.billNumber);
+    });
+
+    it.each([
+      ['a percentage above 100', { discountType: 'PERCENT', discountValue: 101 }],
+      ['an amount larger than the bill', { discountType: 'AMOUNT', discountValue: 1000.01 }],
+      ['a negative discount', { discountType: 'AMOUNT', discountValue: -1 }],
+      ['a discount with three decimals', { discountType: 'AMOUNT', discountValue: 10.005 }],
+      ['an unknown discount type', { discountType: 'FLAT', discountValue: 10 }],
+    ])('refuses %s', async (_case, discount) => {
+      expect((await post(tokenA, billOf(bookA.id, [lineOf(productA, 1, 1000)], discount))).statusCode).toBe(400);
+    });
+
+    /** A refused discount must not have cost the book a number on its way to being refused. */
+    it('does not burn a bill number on a refused discount', async () => {
+      const book = await seedBook(tenantAId, { seriesStartsAt: 700 });
+      expect((await post(tokenA, billOf(book.id, [lineOf(productA, 1, 100)], { discountType: 'PERCENT', discountValue: 101 }))).statusCode).toBe(400);
+      expect(await nextNumberOf(book.id)).toBe(700);
+    });
+
+    /** The client states the KIND and the NUMBER. Everything the money depends on is ours. */
+    it('ignores a discount amount, a net taxable and a line allocation sent by a client', async () => {
+      const bill = await created(
+        tokenA,
+        billOf(bookA.id, [lineOf(productA, 1, 1000, { discountAllocated: 999, taxableAmount: 1, grossTaxable: 5 })], {
+          discountType: 'AMOUNT',
+          discountValue: 100,
+          discountAmount: 999,
+          netTaxable: 1,
+          grandTotal: 1,
+        }),
+      );
+      expect(bill).toMatchObject({ discountAmount: 100, netTaxable: 900, grandTotal: 1062 });
+      expect(bill.items[0]).toMatchObject({ discountAllocated: 100, taxableAmount: 900 });
+    });
+
+    /** A bill saved before this phase existed, and one saved now without a discount, agree. */
+    it('stores no discount when a payload carries none, leaving the totals untouched', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 2, 100)]));
+      expect(bill).toMatchObject({ discountType: 'NONE', discountValue: 0, discountAmount: 0, subTotal: 200, netTaxable: 200, gstAmount: 36, grandTotal: 236 });
+      expect((await storedLines(bill.id))[0]).toMatchObject({ discountAllocated: '0.00', taxableAmount: '200.00' });
+    });
+
+    it('recalculates the whole bill when a discount is added by an edit, without renumbering it', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 1000)]));
+      const res = await put(tokenA, bill.id, updateOf([lineOf(productA, 1, 1000)], { discountType: 'AMOUNT', discountValue: 250 }));
+      expect(res.statusCode).toBe(200);
+      const reloaded = await detail(tokenA, bill.id);
+      expect(reloaded).toMatchObject({ billNumber: bill.billNumber, discountAmount: 250, netTaxable: 750, gstAmount: 135, grandTotal: 885 });
+    });
+
+    it('restores the full totals when a discount is taken off again', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 1000)], { discountType: 'PERCENT', discountValue: 20 }));
+      await put(tokenA, bill.id, updateOf([lineOf(productA, 1, 1000)], { discountType: 'NONE' }));
+      const reloaded = await detail(tokenA, bill.id);
+      expect(reloaded).toMatchObject({ discountType: 'NONE', discountValue: 0, discountAmount: 0, netTaxable: 1000, grandTotal: 1180 });
+      expect((await storedLines(bill.id))[0].discountAllocated).toBe('0.00');
     });
   });
 

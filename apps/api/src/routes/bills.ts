@@ -74,7 +74,7 @@ export async function billRoutes(app: FastifyInstance) {
       .offset((q.page - 1) * q.limit);
     // `tableColumns` is an untyped column map, so the row's `numeric` fields arrive as unknown;
     // `shapeBill` is what turns them into numbers, exactly as the detail endpoint does.
-    const shaped = (rows as unknown as { subTotal: unknown; gstAmount: unknown; grandTotal: unknown }[]).map(shapeBill);
+    const shaped = (rows as unknown as { subTotal: unknown; discountValue: unknown; discountAmount: unknown; gstAmount: unknown; grandTotal: unknown }[]).map(shapeBill);
     return ok({ rows: shaped, total: Number(total), page: q.page, pageSize: q.limit }, `${LABEL}s retrieved successfully`);
   });
 

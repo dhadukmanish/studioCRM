@@ -115,3 +115,18 @@ export function accountDetailFor(groupName: string | null | undefined) {
 export const INVOICE_TAX_MODES = ['WITH_GST', 'WITHOUT_GST'] as const;
 export type InvoiceTaxMode = (typeof INVOICE_TAX_MODES)[number];
 export const INVOICE_TAX_MODE_LABELS: Record<InvoiceTaxMode, string> = { WITH_GST: 'With GST', WITHOUT_GST: 'Without GST' };
+
+/**
+ * How a bill's discount was entered.
+ *
+ * A discount is a BILL-level concession, never a per-line one, and it is stored as the pair
+ * the operator actually chose rather than as one ambiguous number: NONE means there is no
+ * discount at all, AMOUNT means a rupee figure was typed, PERCENT means a percentage of the
+ * bill's sub total was. The money it works out to is the server's (`discountAmount`), and it
+ * reduces the taxable value BEFORE GST — see `billing.ts`.
+ */
+export const BILL_DISCOUNT_TYPES = ['NONE', 'AMOUNT', 'PERCENT'] as const;
+export type BillDiscountType = (typeof BILL_DISCOUNT_TYPES)[number];
+export const BILL_DISCOUNT_TYPE_LABELS: Record<BillDiscountType, string> = { NONE: 'None', AMOUNT: 'Amount', PERCENT: 'Percent' };
+/** The compact form the billing screen puts on a segmented control. */
+export const BILL_DISCOUNT_TYPE_SHORT: Record<BillDiscountType, string> = { NONE: 'None', AMOUNT: '₹', PERCENT: '%' };

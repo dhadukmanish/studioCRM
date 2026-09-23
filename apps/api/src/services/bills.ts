@@ -1,5 +1,15 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
-import { calculateBill, normalizeMobile, type BillInput, type BillItemInput, type BillUpdateInput, type InvoiceTaxMode } from '@erp/shared';
+import {
+  calculateBill,
+  gstSummary,
+  normalizeMobile,
+  type BillDiscountValues,
+  type BillInput,
+  type BillItemInput,
+  type BillUpdateInput,
+  type GstSummaryRow,
+  type InvoiceTaxMode,
+} from '@erp/shared';
 import { db, schema } from '../db/client';
 import { notFound, validation } from '../lib/errors';
 import { allocateBillNumber } from './billNumbers';
@@ -22,8 +32,13 @@ import { allocateBillNumber } from './billNumbers';
  *     rolls its number back with it instead of burning one. Nothing here ever previews a
  *     number — see `docs/BILL_NUMBERING.md`.
  *
- * Not in this phase, deliberately: discount, advance, payment, outstanding, any accounting
- * posting, delivery workflow, draft/cancelled status and the CGST/SGST/IGST split.
+ * The discount follows the same three rules. The client says only what KIND of discount was
+ * given and what number was typed; this file decides what that is worth, spreads it across the
+ * lines BEFORE tax (see `calculateBill` in `@erp/shared`), and stores both the bill's figure
+ * and each line's share of it.
+ *
+ * Not in this module, deliberately: advance, payment, outstanding, any accounting posting,
+ * delivery workflow, draft/cancelled status and the CGST/SGST/IGST split.
  */
 
 /** `db`, or the transaction handle inside `db.transaction(...)` — the same shape the services use. */
@@ -34,23 +49,52 @@ const BI = schema.billItems;
 
 /* ----------------------------------------------------------------- shaping -- */
 
-/** API shape: `numeric` comes back from Postgres as a string. */
-export const shapeBill = <T extends { subTotal: unknown; gstAmount: unknown; grandTotal: unknown }>(row: T) => ({
-  ...row,
-  subTotal: Number(row.subTotal),
-  gstAmount: Number(row.gstAmount),
-  grandTotal: Number(row.grandTotal),
-});
+/**
+ * API shape: `numeric` comes back from Postgres as a string.
+ *
+ * `netTaxable` is derived here rather than stored — it is exactly `sub_total -
+ * discount_amount`, so a column for it could only ever drift from the two that decide it.
+ * Deriving it in the one place every response passes through means the list, the detail
+ * endpoint and a future invoice all read the same figure.
+ */
+export const shapeBill = <T extends { subTotal: unknown; discountValue: unknown; discountAmount: unknown; gstAmount: unknown; grandTotal: unknown }>(row: T) => {
+  const subTotal = Number(row.subTotal);
+  const discountAmount = Number(row.discountAmount);
+  return {
+    ...row,
+    subTotal,
+    discountValue: Number(row.discountValue),
+    discountAmount,
+    netTaxable: Number((subTotal - discountAmount).toFixed(2)),
+    gstAmount: Number(row.gstAmount),
+    grandTotal: Number(row.grandTotal),
+  };
+};
 
-export const shapeBillItem = <T extends { gstRateSnapshot: unknown; quantity: unknown; rate: unknown; taxableAmount: unknown; gstAmount: unknown; lineTotal: unknown }>(row: T) => ({
-  ...row,
-  gstRateSnapshot: Number(row.gstRateSnapshot),
-  quantity: Number(row.quantity),
-  rate: Number(row.rate),
-  taxableAmount: Number(row.taxableAmount),
-  gstAmount: Number(row.gstAmount),
-  lineTotal: Number(row.lineTotal),
-});
+/**
+ * Same for a line, and `grossTaxable` is derived the same way: the stored `taxable_amount` is
+ * the NET base GST was charged on, and adding the line's allocated discount back gives the
+ * Qty x Rate it started from. Exact in both directions, so neither is stored twice.
+ */
+export const shapeBillItem = <
+  T extends { gstRateSnapshot: unknown; quantity: unknown; rate: unknown; discountAllocated: unknown; taxableAmount: unknown; gstAmount: unknown; lineTotal: unknown },
+>(
+  row: T,
+) => {
+  const taxableAmount = Number(row.taxableAmount);
+  const discountAllocated = Number(row.discountAllocated);
+  return {
+    ...row,
+    gstRateSnapshot: Number(row.gstRateSnapshot),
+    quantity: Number(row.quantity),
+    rate: Number(row.rate),
+    grossTaxable: Number((taxableAmount + discountAllocated).toFixed(2)),
+    discountAllocated,
+    taxableAmount,
+    gstAmount: Number(row.gstAmount),
+    lineTotal: Number(row.lineTotal),
+  };
+};
 
 /* ------------------------------------------------------------ master reads -- */
 
@@ -130,6 +174,7 @@ async function resolveLines(
   tenantId: string,
   lines: BillItemInput[],
   taxMode: InvoiceTaxMode,
+  discount: BillDiscountValues,
   existing: Map<string, LineSnapshot>,
 ) {
   const itemIds = Array.from(new Set(lines.map((l) => l.itemId)));
@@ -174,11 +219,13 @@ async function resolveLines(
 
   /**
    * The money, from the one shared calculation both apps use — the browser's preview and this
-   * are the same function, and this one is what gets stored.
+   * are the same function, and this one is what gets stored. It is also where the bill's
+   * discount is spread across the lines before any tax is worked out.
    */
   const calculated = calculateBill(
     lines.map((l, i) => ({ quantity: l.quantity, rate: l.rate, gstRate: snapshots[i].gstRateSnapshot })),
     taxMode,
+    discount,
   );
 
   const rows = lines.map((line, i) => ({
@@ -190,6 +237,7 @@ async function resolveLines(
     gstRateSnapshot: snapshots[i].gstRateSnapshot.toFixed(2),
     quantity: line.quantity.toFixed(2),
     rate: line.rate.toFixed(2),
+    discountAllocated: calculated.lines[i].discountAllocated.toFixed(2),
     taxableAmount: calculated.lines[i].taxableAmount.toFixed(2),
     gstAmount: calculated.lines[i].gstAmount.toFixed(2),
     lineTotal: calculated.lines[i].lineTotal.toFixed(2),
@@ -241,17 +289,40 @@ function headerRow(body: Omit<BillUpdateInput, 'items'>): Record<string, unknown
     birthDate: body.hasBirthDate ? body.birthDate : null,
     remark: body.remark,
     taxMode: body.taxMode,
+    // What the operator CHOSE. What it is worth is set beside it from the calculation.
+    discountType: body.discountType,
+    discountValue: body.discountValue.toFixed(2),
   };
 }
 
+/** The discount as the calculation wants it — the two fields the client is allowed to send. */
+const discountOf = (body: { discountType: BillDiscountValues['type']; discountValue: number }): BillDiscountValues => ({
+  type: body.discountType,
+  value: body.discountValue,
+});
+
 /* --------------------------------------------------------------- public API -- */
 
-/** A bill row as the API returns it: the stored columns, with `numeric` read back as numbers. */
-export type BillShaped = Omit<typeof B.$inferSelect, 'subTotal' | 'gstAmount' | 'grandTotal'> & { subTotal: number; gstAmount: number; grandTotal: number };
-export type BillItemShaped = Omit<typeof BI.$inferSelect, 'gstRateSnapshot' | 'quantity' | 'rate' | 'taxableAmount' | 'gstAmount' | 'lineTotal'> & {
+/**
+ * A bill row as the API returns it: the stored columns with `numeric` read back as numbers,
+ * plus `netTaxable`, which is derived from two of them rather than stored.
+ */
+export type BillShaped = Omit<typeof B.$inferSelect, 'subTotal' | 'discountValue' | 'discountAmount' | 'gstAmount' | 'grandTotal'> & {
+  subTotal: number;
+  discountValue: number;
+  discountAmount: number;
+  netTaxable: number;
+  gstAmount: number;
+  grandTotal: number;
+};
+export type BillItemShaped = Omit<typeof BI.$inferSelect, 'gstRateSnapshot' | 'quantity' | 'rate' | 'discountAllocated' | 'taxableAmount' | 'gstAmount' | 'lineTotal'> & {
   gstRateSnapshot: number;
   quantity: number;
   rate: number;
+  /** Qty x Rate, before this line's share of the bill discount. Derived, not stored. */
+  grossTaxable: number;
+  discountAllocated: number;
+  /** The NET base GST was charged on. */
   taxableAmount: number;
   gstAmount: number;
   lineTotal: number;
@@ -262,7 +333,17 @@ export interface BillRecord extends BillShaped {
   /** The booking this bill came from, for display only. Null for a walk-in customer. */
   appointmentNumber: number | null;
   items: BillItemShaped[];
+  /**
+   * The rate-wise GST summary, grouped off THESE lines' own stored amounts by the shared
+   * `gstSummary`. Derived on read rather than stored: it is a view of the lines, and a stored
+   * copy would be one more thing that could disagree with them.
+   */
+  gstSummary: GstSummaryRow[];
 }
+
+/** The summary a response carries, always grouped from the lines that response returns. */
+const summaryOf = (items: BillItemShaped[]): GstSummaryRow[] =>
+  gstSummary(items.map((l) => ({ gstRate: l.gstRateSnapshot, taxableAmount: l.taxableAmount, gstAmount: l.gstAmount })));
 
 /** One bill with its book's number, its booking's number and its lines in print order. */
 export async function getBill(tenantId: string, id: string): Promise<BillRecord> {
@@ -278,7 +359,8 @@ export async function getBill(tenantId: string, id: string): Promise<BillRecord>
   // One query for the lines, not one per line, and ordered by the stored line number rather
   // than by insertion time — the invoice's order is data, not a side effect.
   const lines = await db.select().from(BI).where(and(eq(BI.tenantId, tenantId), eq(BI.billId, id))).orderBy(asc(BI.lineNumber));
-  return { ...shapeBill(row.bill), bookNumber: row.bookNumber, appointmentNumber: row.appointmentNumber ?? null, items: lines.map(shapeBillItem) };
+  const items = lines.map(shapeBillItem);
+  return { ...shapeBill(row.bill), bookNumber: row.bookNumber, appointmentNumber: row.appointmentNumber ?? null, items, gstSummary: summaryOf(items) };
 }
 
 /**
@@ -293,7 +375,7 @@ export async function createBill(tenantId: string, body: BillInput): Promise<Bil
   return db.transaction(async (tx) => {
     const book = await resolveBook(tx, tenantId, body.bookId, true);
     const appointment = body.appointmentId ? await resolveAppointment(tx, tenantId, body.appointmentId) : null;
-    const { rows, totals } = await resolveLines(tx, tenantId, body.items, body.taxMode, new Map());
+    const { rows, totals } = await resolveLines(tx, tenantId, body.items, body.taxMode, discountOf(body), new Map());
 
     const billNumber = await allocateBillNumber(tx, tenantId, book.id);
 
@@ -305,6 +387,7 @@ export async function createBill(tenantId: string, body: BillInput): Promise<Bil
         bookId: book.id,
         billNumber,
         subTotal: totals.subTotal.toFixed(2),
+        discountAmount: totals.discountAmount.toFixed(2),
         gstAmount: totals.gstAmount.toFixed(2),
         grandTotal: totals.grandTotal.toFixed(2),
       })
@@ -315,7 +398,8 @@ export async function createBill(tenantId: string, body: BillInput): Promise<Bil
       .values(rows.map((r) => ({ ...r, tenantId, billId: bill.id })))
       .returning();
 
-    return { ...shapeBill(bill), bookNumber: book.bookNumber, appointmentNumber: appointment?.appointmentNumber ?? null, items: lines.map(shapeBillItem) };
+    const items = lines.map(shapeBillItem);
+    return { ...shapeBill(bill), bookNumber: book.bookNumber, appointmentNumber: appointment?.appointmentNumber ?? null, items, gstSummary: summaryOf(items) };
   });
 }
 
@@ -345,13 +429,14 @@ export async function updateBill(tenantId: string, id: string, body: BillUpdateI
     // Not re-checked for active: this bill is already numbered under this book.
     const book = await resolveBook(tx, tenantId, existing.bookId, false);
     const appointment = body.appointmentId ? await resolveAppointment(tx, tenantId, body.appointmentId) : null;
-    const { rows, totals } = await resolveLines(tx, tenantId, body.items, body.taxMode, await existingSnapshots(tx, tenantId, id));
+    const { rows, totals } = await resolveLines(tx, tenantId, body.items, body.taxMode, discountOf(body), await existingSnapshots(tx, tenantId, id));
 
     const [bill] = await tx
       .update(B)
       .set({
         ...headerRow(body),
         subTotal: totals.subTotal.toFixed(2),
+        discountAmount: totals.discountAmount.toFixed(2),
         gstAmount: totals.gstAmount.toFixed(2),
         grandTotal: totals.grandTotal.toFixed(2),
         updatedAt: new Date(),
@@ -365,6 +450,7 @@ export async function updateBill(tenantId: string, id: string, body: BillUpdateI
       .values(rows.map((r) => ({ ...r, tenantId, billId: id })))
       .returning();
 
-    return { ...shapeBill(bill), bookNumber: book.bookNumber, appointmentNumber: appointment?.appointmentNumber ?? null, items: lines.map(shapeBillItem) };
+    const items = lines.map(shapeBillItem);
+    return { ...shapeBill(bill), bookNumber: book.bookNumber, appointmentNumber: appointment?.appointmentNumber ?? null, items, gstSummary: summaryOf(items) };
   });
 }

@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { INVOICE_TAX_MODES, INVOICE_TAX_MODE_LABELS, type FilterFieldDef } from '@erp/shared';
+import { BILL_DISCOUNT_TYPES, BILL_DISCOUNT_TYPE_LABELS, INVOICE_TAX_MODES, INVOICE_TAX_MODE_LABELS, type FilterFieldDef } from '@erp/shared';
 import { Crumb } from '@/components/layout/AppShell';
 import { DataTable, useListState, type Column } from '@/components/data/DataTable';
 import { Badge, ConfirmDialog, Dropdown } from '@/components/ui';
 import { useList, useSave } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
-import { fmtDate, fmtDateOnly, fmtMoney } from '@/lib/format';
+import { fmtDate, fmtDateOnly, fmtMoney, fmtNum } from '@/lib/format';
 import type { BillRow } from './types';
 
 const PERMISSION = 'operations_billing';
@@ -37,6 +37,7 @@ export default function BillsPage() {
     { key: 'customerName', label: 'Customer Name' },
     { key: 'mobileNumber', label: 'Mobile No.' },
     { key: 'grandTotal', label: 'Grand Total', type: 'number' },
+    { key: 'discountType', label: 'Discount Type', type: 'select', options: BILL_DISCOUNT_TYPES.map((t) => ({ value: t, label: BILL_DISCOUNT_TYPE_LABELS[t] })) },
     { key: 'updatedAt', label: 'Last Modified', type: 'date' },
     { key: 'createdAt', label: 'Created At', type: 'date' },
   ];
@@ -54,6 +55,22 @@ export default function BillsPage() {
     { key: 'grandTotal', header: 'Grand Total', align: 'right', render: (r) => <span className="font-medium text-gray-900">{fmtMoney(r.grandTotal)}</span> },
     /** Hidden by default: useful when reconciling, but they would push the row past the viewport. */
     { key: 'subTotal', header: 'Sub Total', align: 'right', hidden: true, render: (r) => fmtMoney(r.subTotal) },
+    /** Shows WHAT was given as well as how much — "10%" and "₹1,000" are not the same fact. */
+    {
+      key: 'discountAmount',
+      header: 'Discount',
+      align: 'right',
+      hidden: true,
+      render: (r) =>
+        r.discountType === 'NONE' ? (
+          <span className="text-gray-400">-</span>
+        ) : (
+          <span>
+            {fmtMoney(r.discountAmount)}
+            {r.discountType === 'PERCENT' && <span className="ml-1 text-gray-500">({fmtNum(r.discountValue)}%)</span>}
+          </span>
+        ),
+    },
     { key: 'gstAmount', header: 'GST Amount', align: 'right', hidden: true, render: (r) => fmtMoney(r.gstAmount) },
     { key: 'babyName', header: 'Baby Name', hidden: true, render: (r) => r.babyName || '-' },
     { key: 'remark', header: 'Remark', hidden: true, render: (r) => r.remark || '-' },

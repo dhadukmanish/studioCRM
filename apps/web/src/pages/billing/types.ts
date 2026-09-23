@@ -1,4 +1,4 @@
-import type { InvoiceTaxMode } from '@erp/shared';
+import type { BillDiscountType, GstSummaryRow, InvoiceTaxMode } from '@erp/shared';
 
 /**
  * The Billing screens' view of the API contract (`apps/api/src/routes/bills.ts` +
@@ -24,7 +24,14 @@ export interface BillRow {
   birthDate: string | null;
   remark: string | null;
   taxMode: InvoiceTaxMode;
+  /** The bill-level discount as the operator chose it. The money it came to is the server's. */
+  discountType: BillDiscountType;
+  discountValue: number;
+  discountAmount: number;
+  /** Gross taxable, before the discount and before GST. */
   subTotal: number;
+  /** subTotal - discountAmount: what GST was charged on. Derived by the API, not stored. */
+  netTaxable: number;
   gstAmount: number;
   grandTotal: number;
   createdAt: string;
@@ -43,6 +50,11 @@ export interface BillItemRow {
   gstRateSnapshot: number;
   quantity: number;
   rate: number;
+  /** Qty x Rate, before this line's share of the bill discount. */
+  grossTaxable: number;
+  /** This line's allocated share of the BILL's discount — never typed on the line. */
+  discountAllocated: number;
+  /** grossTaxable - discountAllocated: the base this line's GST was charged on. */
   taxableAmount: number;
   gstAmount: number;
   lineTotal: number;
@@ -53,6 +65,8 @@ export interface BillItemRow {
 export interface BillRecord extends BillRow {
   appointmentNumber: number | null;
   items: BillItemRow[];
+  /** Rate-wise GST, grouped by the API off these very lines. Never regrouped on this side. */
+  gstSummary: GstSummaryRow[];
 }
 
 /**
@@ -95,6 +109,12 @@ export interface BillFormValues {
   birthDate: string;
   remark: string;
   taxMode: InvoiceTaxMode;
+  /**
+   * The discount pair. Kept as a string while the operator types, for the same reason a rate
+   * is: a number input cannot express "cleared", and the shared schema coerces "10" itself.
+   */
+  discountType: BillDiscountType;
+  discountValue: string;
   items: BillLineFormValues[];
 }
 

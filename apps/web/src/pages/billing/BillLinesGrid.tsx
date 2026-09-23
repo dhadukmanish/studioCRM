@@ -38,16 +38,20 @@ interface GridProps {
 export function BillLinesGrid({ lines, fieldIds, amounts, items, itemOptions, taxMode, onAdd, onNext, onRemove, focusIndex, onFocused, disabled }: GridProps) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1040px] border-separate border-spacing-0">
+      {/* Ten data columns have to stay readable side by side: the two pickers take a share of
+          the width, every money column is fixed so the figures line up, and Remark takes what
+          is left. The min-width is what the row genuinely needs before its own scroller. */}
+      <table className="w-full min-w-[1100px] border-separate border-spacing-0">
         <colgroup>
           <col className="w-10" />
-          <col className="w-[19%]" />
-          <col className="w-[19%]" />
-          <col className="w-[84px]" />
-          <col className="w-[110px]" />
-          <col className="w-[78px]" />
-          <col className="w-[110px]" />
-          <col className="w-[120px]" />
+          <col className="w-[17%]" />
+          <col className="w-[17%]" />
+          <col className="w-[72px]" />
+          <col className="w-[96px]" />
+          <col className="w-[104px]" />
+          <col className="w-[64px]" />
+          <col className="w-[96px]" />
+          <col className="w-[108px]" />
           <col />
           <col className="w-10" />
         </colgroup>
@@ -58,6 +62,8 @@ export function BillLinesGrid({ lines, fieldIds, amounts, items, itemOptions, ta
             <th scope="col" className="table-head px-2">Product</th>
             <th scope="col" className="table-head px-2 text-right">Qty</th>
             <th scope="col" className="table-head px-2 text-right">Rate</th>
+            {/* The NET taxable value: Qty x Rate less this line's share of the bill discount. */}
+            <th scope="col" className="table-head px-2 text-right">Taxable</th>
             <th scope="col" className="table-head px-2 text-right">GST %</th>
             <th scope="col" className="table-head px-2 text-right">GST Amt</th>
             <th scope="col" className="table-head px-2 text-right">Total</th>
@@ -87,7 +93,7 @@ export function BillLinesGrid({ lines, fieldIds, amounts, items, itemOptions, ta
           ))}
           {lines.length === 0 && (
             <tr>
-              <td colSpan={10} className="border-b border-line px-3 py-6 text-center text-[13px] text-gray-500">
+              <td colSpan={11} className="border-b border-line px-3 py-6 text-center text-[13px] text-gray-500">
                 This bill has no lines yet. Add at least one before saving.
               </td>
             </tr>
@@ -229,6 +235,18 @@ function BillLineRow({ index, line, amount, items, itemOptions, taxMode, onEnter
       <td className={cell}>
         <TextInput size="sm" data-cell="rate" className="text-right" inputMode="decimal" aria-label={`Rate, line ${index + 1}`} placeholder="0.00" disabled={disabled} onKeyDown={nextLineOnEnter} {...register(`items.${index}.rate`)} />
         <CellError message={lineErrors?.rate?.message} />
+      </td>
+      {/*
+        The taxable base, after the bill's discount has been spread across the lines. The
+        allocated share itself is not a column: the discount is a BILL-level concession and a
+        per-line figure in the entry grid would read like one the operator could type. It is in
+        the title, and in the saved bill's data, for when the arithmetic has to be explained.
+      */}
+      <td
+        className={`${cell} pt-2.5 text-right text-[13px] tabular-nums text-gray-700`}
+        title={amount && amount.discountAllocated > 0 ? `Qty × Rate ${fmtNum(amount.grossTaxable)} − discount ${fmtNum(amount.discountAllocated)}` : undefined}
+      >
+        {fmtNum(amount?.taxableAmount ?? 0)}
       </td>
       {/* Read-only: the GST rate is Item Master's, and a bill line may not argue with it. */}
       <td className={`${cell} pt-2.5 text-right text-[13px] ${taxMode === 'WITH_GST' ? 'text-gray-600' : 'text-gray-400'}`} title="From Item Master — not editable on a bill">

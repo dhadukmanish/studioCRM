@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { INVOICE_TAX_MODES } from '../enums.js';
+import { BILL_DISCOUNT_TYPES, INVOICE_TAX_MODES, type BillDiscountType } from '../enums.js';
+import { calculateBill } from '../billing.js';
 
 /**
  * Bill — the studio's invoice document: a header, its customer snapshot and at least one line.
@@ -12,8 +13,10 @@ import { INVOICE_TAX_MODES } from '../enums.js';
  *  - `mobileSearch` — derived from the typed mobile by `normalizeMobile`.
  *  - every line snapshot (item name, product name, HSN, GST %) — read from Item / Sub Item
  *    Master by the server, never accepted from a payload.
- *  - every amount (taxable, GST, line total, and the bill's totals) — recomputed from the
- *    validated lines by the shared calculation in `billing.ts`.
+ *  - every amount (taxable, GST, line total, the discount in money, each line's allocated
+ *    share of it, and the bill's totals) — recomputed from the validated lines by the shared
+ *    calculation in `billing.ts`. The client chooses the discount TYPE and VALUE; what those
+ *    are worth is never its answer.
  *
  * None of those fields exist in this schema, and zod strips unknown keys, so a payload that
  * carries them loses them before any route code runs.
@@ -40,6 +43,15 @@ export const BILL_LIMITS = {
  */
 export const BILL_QUANTITY_MAX = 9999.99;
 export const BILL_RATE_MAX = 999999.99;
+
+/**
+ * Runaway-payload guard on the discount the operator types. It is deliberately loose, because
+ * the REAL bound is a business one and is checked against the bill itself further down: an
+ * AMOUNT may not exceed the bill's sub total, and a PERCENT may not exceed 100. This value is
+ * only the point past which no bill could ever need one — every line of a full bill at both
+ * ceilings above — and it keeps a nonsense number out of `numeric(16, 2)`.
+ */
+export const BILL_DISCOUNT_MAX = 999999999999.99;
 
 const isBlank = (v: unknown) => v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
 
@@ -155,6 +167,20 @@ const billBaseSchema = z.object({
   remark: optionalText('Remark', BILL_LIMITS.remark),
   taxMode: z.enum(INVOICE_TAX_MODES, { errorMap: () => ({ message: 'Select a valid tax mode' }) }).default('WITH_GST'),
   /**
+   * The bill-level discount, as the pair the operator actually chose. NONE / AMOUNT / PERCENT
+   * rather than one overloaded number, so "100" can never be read as 100% on one screen and
+   * ₹100 on another. What it is worth in money is the server's — see `discountRule` below and
+   * `billing.ts`. There is deliberately no per-LINE discount field: a line's share of this one
+   * is allocated by the calculation, never typed.
+   */
+  discountType: z.enum(BILL_DISCOUNT_TYPES, { errorMap: () => ({ message: 'Select a valid discount type' }) }).default('NONE'),
+  /**
+   * Rupees when the type is AMOUNT, a percentage when it is PERCENT, 0 when it is NONE.
+   * A missing or cleared field is no discount rather than an error — unlike a line's rate,
+   * an empty discount box has an obvious and harmless meaning.
+   */
+  discountValue: z.preprocess((v) => (isBlank(v) ? 0 : v), decimal2('Discount', { min: 0, max: BILL_DISCOUNT_MAX })),
+  /**
    * The bill's lines, in the order they will print. At least one: a saved bill with nothing
    * on it is not a document. There is deliberately no Draft status in this phase — its
    * lifecycle is not defined, and inventing one would be inventing business rules.
@@ -173,8 +199,56 @@ const birthDateRule = (v: { hasBirthDate: boolean; birthDate: string | null }, c
   if (!v.hasBirthDate && v.birthDate) v.birthDate = null;
 };
 
+/**
+ * The discount, checked against the bill it is being given on.
+ *
+ * NONE is normalised rather than refused: the type IS the statement that there is no
+ * discount, so a value left behind by an earlier edit is dropped exactly as an unticked
+ * birthdate drops its date. The two real limits are refused with a field message and never
+ * silently clamped — 101% does not become 100%, and ₹5,000 off a ₹3,000 bill does not become
+ * ₹3,000. The sub total is the bill's own GROSS taxable value, taken from the one shared
+ * calculation so this rule can never drift from what the server would charge.
+ */
+const discountRule = (v: { discountType: BillDiscountType; discountValue: number; items: BillItemInput[] }, ctx: z.RefinementCtx) => {
+  if (v.discountType === 'NONE') {
+    v.discountValue = 0;
+    return;
+  }
+  const message = billDiscountError({ type: v.discountType, value: v.discountValue }, billSubTotal(v.items));
+  if (message) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['discountValue'], message });
+};
+
+/**
+ * A bill's GROSS taxable value — the base a discount is measured against. Taken from the one
+ * shared calculation (with the tax mode that charges nothing, because tax is irrelevant to a
+ * sub total) so this rule can never drift from what the server will actually charge.
+ */
+export const billSubTotal = (items: { quantity: number; rate: number }[]) =>
+  calculateBill(
+    items.map((l) => ({ quantity: l.quantity, rate: l.rate, gstRate: 0 })),
+    'WITHOUT_GST',
+  ).totals.subTotal;
+
+/**
+ * Why a discount is not acceptable on a bill of this size, or null when it is.
+ *
+ * Exported because the billing screen shows the same message live, as the operator types,
+ * instead of keeping its own copy of the rule — a validation rule that exists twice is a bug
+ * waiting for the two copies to disagree. The API's refusal and the form's warning are this
+ * one function.
+ */
+export function billDiscountError(discount: { type: BillDiscountType; value: number }, subTotal: number): string | null {
+  if (discount.type === 'NONE') return null;
+  if (discount.value < 0) return 'Discount cannot be negative';
+  if (discount.type === 'PERCENT') return discount.value > 100 ? 'Discount cannot be more than 100%' : null;
+  return discount.value > subTotal ? `Discount cannot be more than the sub total (${subTotal.toFixed(2)})` : null;
+}
+
 /** Create: the whole document in one payload, book included. */
-export const billSchema = billBaseSchema.superRefine(birthDateRule);
+export const billSchema = billBaseSchema.superRefine((v, ctx) => {
+  birthDateRule(v, ctx);
+  discountRule(v, ctx);
+});
 export type BillInput = z.infer<typeof billSchema>;
 
 /**
@@ -186,5 +260,8 @@ export type BillInput = z.infer<typeof billSchema>;
  * inside one transaction, which is what keeps line numbering deterministic and the stored
  * totals honest. No update ever allocates a bill number.
  */
-export const billUpdateSchema = billBaseSchema.omit({ bookId: true }).superRefine(birthDateRule);
+export const billUpdateSchema = billBaseSchema.omit({ bookId: true }).superRefine((v, ctx) => {
+  birthDateRule(v, ctx);
+  discountRule(v, ctx);
+});
 export type BillUpdateInput = z.infer<typeof billUpdateSchema>;

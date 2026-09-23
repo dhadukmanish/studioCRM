@@ -173,34 +173,24 @@ master row that has since been retired.
 `line_number` is 1, 2, 3 … in the order the operator entered, `UNIQUE (bill_id, line_number)`,
 and the invoice prints in that order. Nothing orders lines by `created_at` or by id.
 
-## Calculation policy (Phase 1)
+## Calculation policy
 
-One implementation, in [`packages/shared/src/billing.ts`](../packages/shared/src/billing.ts),
-used by both apps: the browser previews with it, the server recalculates with it and stores the
-result. A total sent by a client is never trusted.
+The money contract has its own document — **[`docs/BILLING_CALCULATION.md`](./BILLING_CALCULATION.md)**:
+the GST-exclusive rate rule (**confirmed** by the studio, no longer an assumption), the
+`Gross Taxable -> Discount -> Net Taxable -> GST -> Grand Total` order, the discount model and
+its allocation algorithm, the rounding policy, the rate-wise GST summary and the snapshot rules
+an edit follows. Read it before touching any figure on a bill.
 
-```
-taxable    = round2(qty × rate)
-gst        = round2(taxable × gstRate / 100)     -- WITH_GST
-gst        = 0                                   -- WITHOUT_GST
-line total = taxable + gst
-sub total / gst / grand total = the sums of the already-rounded lines
-```
+What matters *here*, where numbering is concerned:
 
-- **The rate is treated as tax-EXCLUSIVE.** This is an assumption, and it is written here on
-  purpose. The legacy billing screens supplied with the requirement are scanned images with no
-  text layer and could not be read in this environment, and nothing else in the repository
-  establishes whether the studio's rate was ever entered tax-inclusive. If the business says
-  inclusive, `lineAmounts` is the one function that changes — and bills already issued would
-  have to be recalculated.
-- Rounding is half-up, per line, to 2 decimals, on integer arithmetic (paise), so the printed
-  lines always add up to the printed total and no float error can reach a stored amount.
-- **WITHOUT_GST charges no tax but keeps each line's GST snapshot.** The snapshot records the
-  Item Master configuration the line was built from; it is not a claim that tax was charged.
-  Nothing about the tax mode edits Item Master.
+- One implementation, in [`packages/shared/src/billing.ts`](../packages/shared/src/billing.ts),
+  used by both apps. A total sent by a client is never trusted.
+- Nothing about a bill's money touches its number. A discount, a re-rated line, a tax-mode
+  switch and a recalculated total all leave `bills.bill_number` and `books.next_bill_number`
+  exactly where they were.
 - GST is **not** operator-editable: it comes from Item Master, per the requirement that GST is
   applied per item. A manual override would need its own decision and its own audit rule.
 - The **rate** is operator-editable. Sub Item Master supplies the default; the bill stores what
   was saved.
-- CGST/SGST/IGST splitting, rate-wise GST summaries, discount, advance, payment, outstanding and
-  any accounting posting are **not** implemented and must not be inferred from these fields.
+- CGST/SGST/IGST splitting, advance, payment, outstanding and any accounting posting are **not**
+  implemented and must not be inferred from these fields.

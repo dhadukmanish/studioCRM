@@ -20,9 +20,10 @@ import { subItems } from './subItems';
  * each line snapshots the item name, product name, HSN code and GST rate it was built from.
  * Editing an Appointment or an Item Master row afterwards must never rewrite an issued bill.
  *
- * What this phase deliberately does NOT model: discount, advance, payment, outstanding, any
- * accounting posting, a delivery or approval workflow, a draft/cancelled status, and the
- * statutory CGST/SGST/IGST split. Each is a real later decision, not an oversight.
+ * What this module deliberately does NOT model: advance, payment, outstanding, any accounting
+ * posting, a delivery or approval workflow, a draft/cancelled status, and the statutory
+ * CGST/SGST/IGST split — which needs a place of supply and an intra/inter-state rule that
+ * nothing here establishes. Each is a real later decision, not an oversight.
  *
  * Audited through `activity_logs`, like every other module.
  */
@@ -66,9 +67,31 @@ export const bills = pgTable(
     /** WITH_GST | WITHOUT_GST — how this bill charges tax. See `INVOICE_TAX_MODES`. */
     taxMode: text('tax_mode').notNull().default('WITH_GST'),
     /**
+     * The bill-level discount as the OPERATOR entered it: NONE | AMOUNT | PERCENT, plus the
+     * number they typed (rupees, or a percentage). Stored as the pair rather than as one
+     * ambiguous figure, so an invoice printed years from now still says WHY the concession
+     * was what it was. There is deliberately no per-line discount column — a line's share of
+     * this is allocated by the calculation, never typed.
+     */
+    discountType: text('discount_type').notNull().default('NONE'),
+    discountValue: numeric('discount_value', { precision: 16, scale: 2 }).notNull().default('0'),
+    /**
+     * What the discount came to in money, worked out by the server. Exactly the sum of the
+     * lines' `discount_allocated`, to the paisa — that is the property the allocation
+     * algorithm exists to guarantee.
+     */
+    discountAmount: numeric('discount_amount', { precision: 16, scale: 2 }).notNull().default('0'),
+    /**
      * Totals DERIVED from this bill's lines inside the same transaction that writes them, so
      * the list and later reports need no per-row aggregate. Never accepted from a client:
      * the server recomputes them from the validated lines through the shared calculation.
+     *
+     * `sub_total` is the GROSS taxable value — the sum of Qty x Rate across the lines, BEFORE
+     * the discount and before GST. The net taxable value GST is actually charged on is
+     * `sub_total - discount_amount`; it is not a fourth column, because it is exactly
+     * determined by two that are already here and a stored copy could only ever drift from
+     * them. `gst_amount` is the tax charged (0 throughout a WITHOUT_GST bill) and
+     * `grand_total` is net taxable + GST.
      */
     subTotal: numeric('sub_total', { precision: 16, scale: 2 }).notNull().default('0'),
     gstAmount: numeric('gst_amount', { precision: 16, scale: 2 }).notNull().default('0'),
@@ -115,6 +138,14 @@ export const bills = pgTable(
     check('bills_sub_total_non_negative_check', sql`${t.subTotal} >= 0`),
     check('bills_gst_amount_non_negative_check', sql`${t.gstAmount} >= 0`),
     check('bills_grand_total_non_negative_check', sql`${t.grandTotal} >= 0`),
+    check('bills_discount_type_check', sql`${t.discountType} IN ('NONE', 'AMOUNT', 'PERCENT')`),
+    check('bills_discount_value_non_negative_check', sql`${t.discountValue} >= 0`),
+    check('bills_discount_amount_non_negative_check', sql`${t.discountAmount} >= 0`),
+    /** NONE is a statement that there is no discount, so neither number may say otherwise. */
+    check('bills_discount_none_check', sql`${t.discountType} <> 'NONE' OR (${t.discountValue} = 0 AND ${t.discountAmount} = 0)`),
+    check('bills_discount_percent_check', sql`${t.discountType} <> 'PERCENT' OR ${t.discountValue} <= 100`),
+    /** A discount can at most take a bill to zero — never past it into a negative taxable value. */
+    check('bills_discount_within_sub_total_check', sql`${t.discountAmount} <= ${t.subTotal}`),
   ],
 );
 
@@ -152,8 +183,20 @@ export const billItems = pgTable(
     /** The rate this bill charged. Defaulted from Sub Item Master; owned by the line from then on. */
     rate: numeric('rate', { precision: 12, scale: 2 }).notNull(),
     /**
-     * quantity x rate. Scaled to 16 digits like the bill's own totals: at the very top of the
-     * range the schemas accept, quantity x rate plus 28% GST needs 13 integer digits, and a
+     * This line's share of the BILL's discount, allocated in proportion to its gross taxable
+     * value — never a figure the operator typed on the line, and never accepted from a
+     * client. 0 on every bill that has no discount, which is why this column could be added
+     * to Phase 1 bills without touching a single one of their rows.
+     */
+    discountAllocated: numeric('discount_allocated', { precision: 16, scale: 2 }).notNull().default('0'),
+    /**
+     * The NET taxable value: quantity x rate MINUS `discount_allocated`. This is the base GST
+     * was actually charged on, which is the figure a reprint or a GST return has to be able
+     * to reproduce. The gross value is `taxable_amount + discount_allocated` — exact, so it
+     * is not stored a second time.
+     *
+     * Scaled to 16 digits like the bill's own totals: at the very top of the range the
+     * schemas accept, quantity x rate plus 28% GST needs 13 integer digits, and a
      * numeric(14, 2) would reject it at INSERT as a 500 instead of a field-level message.
      */
     taxableAmount: numeric('taxable_amount', { precision: 16, scale: 2 }).notNull(),
@@ -187,6 +230,7 @@ export const billItems = pgTable(
     check('bill_items_rate_non_negative_check', sql`${t.rate} >= 0`),
     check('bill_items_gst_rate_range_check', sql`${t.gstRateSnapshot} >= 0 AND ${t.gstRateSnapshot} <= 100`),
     check('bill_items_taxable_amount_non_negative_check', sql`${t.taxableAmount} >= 0`),
+    check('bill_items_discount_allocated_non_negative_check', sql`${t.discountAllocated} >= 0`),
     check('bill_items_gst_amount_non_negative_check', sql`${t.gstAmount} >= 0`),
     check('bill_items_line_total_non_negative_check', sql`${t.lineTotal} >= 0`),
     check('bill_items_item_name_not_blank_check', sql`length(btrim(${t.itemNameSnapshot})) > 0`),

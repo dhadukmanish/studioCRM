@@ -2,11 +2,12 @@
 
 Business app for a photography/video studio, built on an in-house ERP boilerplate
 (multi-tenant auth, RBAC, custom fields, audit log, data-table kit).
-**Status: Masters + Appointments + Billing Phase 1 built** — Item, Sub Item, Account Group,
-Account and Book Master, the Appointment module, and the core Bill (header, lines, master
-snapshots, book-wise numbering). Payment, ledger, GST summary, PDF and reports are not started.
-The numbering and snapshot contract Billing honours is `docs/BILL_NUMBERING.md`; current
-implementation status lives in `.claude/HANDOFF.md`.
+**Status: Masters + Appointments + Billing built through Phase 2** — Item, Sub Item, Account
+Group, Account and Book Master, the Appointment module, and the Bill (header, lines, master
+snapshots, book-wise numbering, bill-level discount, rate-wise GST summary and final totals).
+Payment, ledger, the CGST/SGST/IGST split, invoice template, PDF and reports are not started.
+Billing honours two contracts: `docs/BILL_NUMBERING.md` for identity and `docs/BILLING_CALCULATION.md`
+for money. Current implementation status lives in `.claude/HANDOFF.md`.
 
 The app presents itself as StudioCRM, but the workspace packages are still named `@erp/*`.
 That is intentional for now; renaming the packages is a separate task.
@@ -69,7 +70,9 @@ Dev servers are often already running from an earlier session — probe
    review the generated SQL → `pnpm db:migrate`. Never `drizzle-kit push`, never drop or
    reset a database to unstick a migration.
 4. **Money and quantities are `numeric`, never `float`/`real`.** Compute totals server-side;
-   never trust a client-sent total.
+   never trust a client-sent total. A bill's rate is **GST-exclusive** (confirmed), a discount
+   reduces the taxable value **before** GST, and all of it lives in one shared calculation —
+   `docs/BILLING_CALCULATION.md`.
 5. **Secrets stay in `apps/api/.env`** (gitignored). Never print, commit or paste them — not
    into docs, logs, commit messages or chat.
 6. **No destructive git or DB action without explicit approval**: force push, history rewrite,
@@ -160,5 +163,7 @@ return findings, not file dumps. Saving tokens never justifies guessing at corre
 - `docs/UI_DESIGN_SYSTEM.md` — visual tokens, list/form patterns, interaction rules
 - `docs/DEVELOPMENT.md` — setup, environment, workflows, troubleshooting
 - `docs/BILL_NUMBERING.md` — the bill number series contract Billing must honour
+- `docs/BILLING_CALCULATION.md` — the money contract: GST-exclusive rate, discount and its
+  allocation, rounding, the rate-wise GST summary, and the snapshot rules an edit follows
 - `.claude/HANDOFF.md` — live project state, DB target, gotchas, pending work (`/handoff`)
 - `README.md` — boilerplate feature map and the "add a module" recipe
