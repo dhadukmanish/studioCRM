@@ -49,11 +49,24 @@ front of it. Account Master is the exception: its routes are hand-written becaus
 its group-specific detail block are two tables written in one transaction, and its form is a
 large modal rather than a drawer.
 
+### Operations — project code
+
+| Module | Permission | API | Screen |
+| --- | --- | --- | --- |
+| Appointments | `operations_appointments` | `/api/appointments` | `/modules/appointments` |
+
+The studio's booking record, and the first module that is not a master: customer calls, a date
+and usually a time are agreed, and the customer name, mobile and baby name are noted so Billing
+can pick them up instead of asking again. Fields: system-issued Appointment No., date, optional
+time, customer name, mobile, optional baby name, optional remark. Hand-written routes (not
+`crudRoutes`) because creation takes its number inside the insert's own transaction. Its form is
+a 760px modal; the list defaults to newest-first with a Today quick filter.
+
 ### Bill Number Series foundation
 
 `allocateBillNumber` (`apps/api/src/services/billNumbers.ts`) exists, is documented and is
-concurrency-proven — but **nothing calls it yet**, because bills do not exist. See the two
-sections below.
+concurrency-proven — but **nothing calls it yet**, because bills do not exist. Appointments do
+NOT use it; they have their own tenant-level counter. See the sections below.
 
 ### The sample module is gone
 
@@ -104,6 +117,32 @@ These are load-bearing. Changing any of them is a deliberate decision, not a ref
   returns `id` + `bookNumber` only — the counter is not a picker's business. `lookups/accounts`
   returns id, name and group / head group — never PAN, GST, salary, bank account number or
   opening balance. Active rows only, so a deactivated row is not offered for a new transaction.
+  `lookups/appointments` goes further and requires `operations_appointments` read, because it
+  carries a customer's name and number rather than a picker label.
+- **Two numbering shapes, never coupled.** A BILL number belongs to a Book row
+  (`books.next_bill_number`), so two books can each hold a Bill No. 1. An APPOINTMENT number is
+  a tenant-level sequence held in `document_counters` (one row per tenant per document type)
+  and taken through `allocateDocumentNumber` (`services/documentNumbers.ts`) — a single
+  `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` that creates the counter on first use and
+  otherwise advances it under a row lock. Creating an appointment must never move a book's
+  counter, and `services/billNumbers.ts` stays untouched. A future Voucher or Receipt number
+  belongs in `document_counters` too — it needs no new table, only a new `DocumentNumberType`.
+- **Every allocator runs inside the document's own transaction.** A failed insert rolls the
+  number back with it instead of burning one, and no allocator is ever called to preview a
+  number. Proven by a test that allocates, throws, and asserts the counter is unmoved.
+- **A mobile number is stored as typed and searched normalized.** `appointments.mobile_number`
+  keeps exactly what the operator entered; `mobile_search` is derived server-side by
+  `normalizeMobile` (`@erp/shared`) — digits only, and the last ten when more remain, which
+  drops an Indian country/trunk prefix without pretending to parse international numbers. It is
+  never accepted from a client, and it is what makes "+91 98765 43210", "98765-43210" and
+  "9876543210" find each other. One index: `(tenant_id, mobile_search)`.
+- **A mobile number is not an identity.** There is no `UNIQUE(mobile_number)` and no Customer
+  Master: the same number may hold any number of bookings. The lookup therefore returns
+  CANDIDATES, most recent first, and never picks one for the operator.
+- **A business date is a `date`, a business time is a `time`.** They are separate columns and
+  never combined into a timestamptz, so a booking cannot shift a day through UTC. Nothing
+  parses a date-only value with `new Date()` — `fmtDateOnly` formats the string, and
+  `todayISO` reads the browser's local date, never `toISOString().slice(0, 10)`.
 - **Money is `numeric`, always positive, never computed on the client.** An opening balance is
   stated as an amount plus a `DEBIT` / `CREDIT` side, never as a negative number. There is
   deliberately no mutable `currentBalance` anywhere — this phase is accounting *foundation*, and
@@ -129,6 +168,24 @@ bills under it run 1, 2, 3 … and a new book starts again from its own `seriesS
   table shape, `UNIQUE(tenant_id, book_id, bill_number)`, the composite FK to
   `books_id_tenant_uk` with RESTRICT — is written down in `docs/BILL_NUMBERING.md`. Read it
   before starting Billing.
+
+## The Billing lookup contract (written, not implemented)
+
+`GET /api/common/lookups/appointments?mobile=...` is what the future Billing screen will call.
+
+- Tenant-scoped and guarded by `operations_appointments` read — it carries a customer's name
+  and number, so it is not an open lookup like books or items.
+- Matches the normalized key, so any shape of the number works. A blank mobile returns `[]`,
+  never the whole table.
+- Returns `id`, `appointmentNumber`, `appointmentDate`, `appointmentTime`, `customerName`,
+  `mobileNumber`, `babyName` — no counters, no `mobileSearch`, no `tenantId`.
+- Ordered appointment date desc, then appointment number desc; capped at 20 candidates.
+
+Intended (NOT built) Billing behaviour: the operator types a mobile, Billing offers the
+candidates, the operator picks one, and the bill prefills customer/baby/mobile and stores
+`appointment_id`. It must never silently overwrite what the operator already typed, and the
+bill must keep its OWN snapshot of those values — an issued invoice is history and must not
+change when someone later edits the appointment. See `docs/BILL_NUMBERING.md`.
 
 ## Git
 
@@ -175,9 +232,9 @@ this machine. The app points at a **hosted Postgres 18.4** instead:
 - The password contains `@@`, which **must stay percent-encoded** as `%40%40` inside the URL,
   or the connection string parses wrong
 - No SSL parameters needed
-- **20 tables** in `public`; migrations `0000` … `0006` all applied (7 rows in
+- **22 tables** in `public`; migrations `0000` … `0007` all applied (8 rows in
   `drizzle.__drizzle_migrations`). `0005` created `books`; `0006` dropped the sample
-  `categories` table.
+  `categories` table; `0007` added `appointments` and `document_counters` (purely additive).
 - The demo users `admin@example.com` and `viewer@example.com` are present
 
 This is a **shared hosted database, not a scratch one.** It holds real entered data — there is
@@ -213,13 +270,13 @@ Dev servers are usually already running in the background from an earlier sessio
 ## Testing
 
 Vitest runs in `apps/api` only (pinned to v3 — v5 needs Vite 6, this repo is on Vite 5).
-Five files (items, sub-items, account groups, accounts, books), 391 tests. Each has two
-sections:
+Six files (items, sub-items, account groups, accounts, books, appointments), 504 tests. Each
+has two sections:
 
-- **A — pure validation** (zod schemas). Always runs. **208 tests pass today.**
+- **A — pure validation** (zod schemas, `normalizeMobile`). Always runs. **272 tests pass today.**
 - **B — database-backed** (tenant isolation, RBAC, duplicate guards, lookup field exposure, the
-  bill-number allocator's concurrency). `describe.skipIf(!TEST_DATABASE_URL)`, so it **skips by
-  default** — 183 skipped.
+  allocators' sequences and concurrency, the rollback that keeps a failed create from burning a
+  number). `describe.skipIf(!TEST_DATABASE_URL)`, so it **skips by default** — 232 skipped.
 
 Section B creates and deletes tenants, roles and users. `TEST_DATABASE_URL` must point at a
 **throwaway** database — never at the hosted `DATABASE_URL` above. Because no throwaway database
@@ -244,7 +301,20 @@ Confirmed end-to-end against the live API / in a real browser, not just by readi
   `/api/masters/books` and `/api/masters/accounts` still answer `401` (registered, auth
   required); `categories` dropped, public tables 21 → 20, and the owner's `2026-27` book plus
   the items / sub-items rows all intact afterwards.
-- `pnpm typecheck`, `pnpm test` (208 passed) and `pnpm build` all clean.
+- Appointments (2026-09-23), in a real headless-Chrome session with **zero console errors**:
+  the Operations nav entry, the list and its default columns, the 760px New Appointment modal,
+  the date defaulting to the local business date with the time left blank, the tab order
+  date → time → customer → mobile → baby → remark, Ctrl+S save, Escape close, a second booking
+  on the same mobile in `+91 98765 00011` form, search finding both formats from one term, the
+  Today filter, the Columns chooser, edit (titled `Edit Appointment #31`, no number field), the
+  delete confirmation, and a 390px phone viewport where the modal is near full width, the
+  fields stack to one column and nothing scrolls sideways.
+- Appointment numbering: 25 parallel creates through the live API returned 25 distinct, gapless
+  numbers, and `books.next_bill_number` did not move.
+- All 33 verification appointments, their 36 activity-log entries and the appointment counter
+  row were deleted afterwards — the table is empty again, so the studio's first real
+  appointment will be #1.
+- `pnpm typecheck`, `pnpm test` (272 passed) and `pnpm build` all clean.
 
 Demo logins: `admin@example.com` (Super Admin, everything) and `viewer@example.com`
 (read-only, useful for testing RBAC) — both password `Admin@1234`.
@@ -257,13 +327,19 @@ assumes one and will throw. Guard the login step when reusing it.
 
 ## Known pending work
 
-- **Billing, Appointment, Payment, Ledger, Voucher and Reports are NOT implemented.** Nothing
-  posts a transaction anywhere yet. Billing must start from `docs/BILL_NUMBERING.md`; the
-  intended flow is Appointment first, then a Bill that picks up the appointment / customer
-  instead of retyping it.
+- **Billing, Payment, Ledger, Voucher and Reports are NOT implemented.** Nothing posts a
+  transaction anywhere yet. Billing is the next step and must start from
+  `docs/BILL_NUMBERING.md` plus the lookup contract above: a Bill picks an Appointment up by
+  mobile instead of retyping it.
+- **Deliberately NOT built into Appointments, because no requirement establishes them:** a
+  status workflow (Scheduled / Confirmed / Completed / Cancelled / No Show), a Customer Master
+  or any customer deduplication, calendar or scheduler views, slot-conflict detection (two
+  bookings may share a date and time — there is no room, photographer, duration or capacity in
+  the model), and WhatsApp reminders. Each is a real later decision, not an oversight.
 - **New permissions need existing roles re-saved.** Role grants are stored JSON, written before
   the newer permissions existed, so roles other than Super Admin (which bypasses everything)
-  do not have `masters_items` … `masters_books` ticked. Per the README, opening a role in
+  do not have `masters_items` … `masters_books` or `operations_appointments` ticked. Per the
+  README, opening a role in
   Settings → Roles and saving it picks up new permissions. A stale `sample_categories` key may
   still sit in that JSON; it is harmless (no route checks it) and clears on the next save.
 - Workspace packages are still named `@erp/*` (the UI says StudioCRM). Renaming them is its own

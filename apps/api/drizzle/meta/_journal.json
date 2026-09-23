@@ -50,6 +50,13 @@
       "when": 1790130228512,
       "tag": "0006_short_wong",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790131505004,
+      "tag": "0007_old_sabretooth",
+      "breakpoints": true
     }
   ]
 }

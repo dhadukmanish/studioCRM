@@ -23,6 +23,7 @@ const SubItemsPage = lazy(() => import('@/pages/masters/SubItemsPage'));
 const AccountGroupsPage = lazy(() => import('@/pages/masters/AccountGroupsPage'));
 const AccountsPage = lazy(() => import('@/pages/masters/AccountsPage'));
 const BooksPage = lazy(() => import('@/pages/masters/BooksPage'));
+const AppointmentsPage = lazy(() => import('@/pages/appointments/AppointmentsPage'));
 
 /** Redirects to /signin when logged out. */
 function Protected() {
@@ -64,6 +65,8 @@ export default function App() {
               <Route path="/modules/masters/account-groups" element={<Guard permission="masters_account_groups"><AccountGroupsPage /></Guard>} />
               <Route path="/modules/masters/accounts" element={<Guard permission="masters_accounts"><AccountsPage /></Guard>} />
               <Route path="/modules/masters/books" element={<Guard permission="masters_books"><BooksPage /></Guard>} />
+              {/* ---- Operations ---- */}
+              <Route path="/modules/appointments" element={<Guard permission="operations_appointments"><AppointmentsPage /></Guard>} />
               {/* ---- Settings ---- */}
               <Route path="/modules/settings" element={<SettingsHub />} />
               <Route path="/modules/settings" element={<SettingsLayout />}>

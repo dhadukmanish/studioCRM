@@ -37,6 +37,7 @@ export interface PermissionDef {
 export const PERMISSION_MODULE_LABELS: Record<string, string> = {
   masters: 'Masters',
   admin: 'Administration',
+  operations: 'Operations',
   settings: 'Settings',
 };
 
@@ -47,6 +48,8 @@ export const PERMISSIONS: PermissionDef[] = [
   { name: 'masters_account_groups', displayName: 'Account Group Master', module: 'masters' },
   { name: 'masters_accounts', displayName: 'Account Master', module: 'masters' },
   { name: 'masters_books', displayName: 'Book Master', module: 'masters' },
+  // Operations
+  { name: 'operations_appointments', displayName: 'Appointments', module: 'operations' },
   // Administration
   { name: 'admin_companies', displayName: 'Companies', module: 'admin' },
   { name: 'admin_branches', displayName: 'Branches', module: 'admin' },

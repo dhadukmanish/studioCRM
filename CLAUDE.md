@@ -2,9 +2,9 @@
 
 Business app for a photography/video studio, built on an in-house ERP boilerplate
 (multi-tenant auth, RBAC, custom fields, audit log, data-table kit).
-**Status: Masters layer built** — Item, Sub Item, Account Group, Account and Book Master.
-Appointments, Billing and Reports are not started; Book Master already defines the bill number
-series Billing will draw from (`docs/BILL_NUMBERING.md`).
+**Status: Masters layer + Appointments built** — Item, Sub Item, Account Group, Account and
+Book Master, plus the Appointment module. Billing and Reports are not started; Book Master
+already defines the bill number series Billing will draw from (`docs/BILL_NUMBERING.md`).
 
 The app presents itself as StudioCRM, but the workspace packages are still named `@erp/*`.
 That is intentional for now; renaming the packages is a separate task.
@@ -73,6 +73,11 @@ Dev servers are often already running from an earlier session — probe
 6. **No destructive git or DB action without explicit approval**: force push, history rewrite,
    `reset --hard` over user work, deleting data, reseeding a populated database.
 7. **Never disable or delete a failing test to get a green run.**
+8. **Document numbers are issued by the server, atomically, inside the transaction that writes
+   the document.** A bill number comes from its Book (`allocateBillNumber`); every other
+   document number comes from `document_counters` (`allocateDocumentNumber`). Never
+   `SELECT max(...) + 1`, never number a document in the browser, and never let one document
+   type move another's counter.
 
 ## Architecture boundaries
 

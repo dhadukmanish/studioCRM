@@ -8,3 +8,4 @@ export * from './subItems.js';
 export * from './accountGroups.js';
 export * from './accounts.js';
 export * from './books.js';
+export * from './appointments.js';

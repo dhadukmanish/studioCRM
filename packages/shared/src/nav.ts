@@ -22,6 +22,10 @@ export const NAV: NavSection[] = [
     items: [{ label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard' }],
   },
   {
+    title: 'Operations',
+    items: [{ label: 'Appointments', href: '/modules/appointments', icon: 'CalendarClock', permission: 'operations_appointments' }],
+  },
+  {
     title: 'Masters',
     items: [
       { label: 'Item Master', href: '/modules/masters/items', icon: 'Package', permission: 'masters_items' },

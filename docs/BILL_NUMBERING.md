@@ -94,9 +94,24 @@ That lock is already live and needs no change when Billing arrives: it keys off 
 having moved, and the counter moves only through `allocateBillNumber`. No bill-existence check
 is invented anywhere.
 
-## Appointment → Bill (future, not designed here)
+## Appointment → Bill (the appointment half now exists)
 
-A bill may later carry `appointment_id` plus the customer/invoice fields it snapshots at the
-time of billing, so an operator picks the appointment instead of retyping it. Nothing in Book
-Master constrains that; it is recorded here only so the numbering design is not mistaken for a
-customer-identity design.
+Appointments are built (`/api/appointments`). Two things about them matter to Billing:
+
+**Their numbering is not this numbering.** An Appointment No. is a tenant-level sequence taken
+from `document_counters` through `allocateDocumentNumber` (`services/documentNumbers.ts`). A
+bill number comes from its Book. The two never meet: Appointment #1 and Bill No. 1 are
+unrelated, and creating an appointment must never move `books.next_bill_number`. Both
+allocators follow the same rule — one atomic statement, inside the document's own transaction,
+never `SELECT max(...) + 1`.
+
+**Finding the customer.** `GET /api/common/lookups/appointments?mobile=...` matches a
+normalized mobile key and returns the matching appointments, most recent first. It returns
+CANDIDATES: one mobile number legitimately has many bookings, so Billing shows the operator
+the list and lets them pick — it must not assume the first row.
+
+A bill may then carry `appointment_id` (tenant-safe composite FK to `appointments_id_tenant_uk`)
+**plus its own snapshot** of the customer name, mobile and baby name. The snapshot is the
+point: an invoice is a historical document, so editing an appointment afterwards must never
+rewrite a bill that was already issued. Prefilling the form from an appointment is a
+convenience; the values the operator confirms are what the bill stores.

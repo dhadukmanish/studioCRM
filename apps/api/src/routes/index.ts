@@ -11,6 +11,7 @@ import { subItemRoutes } from './subItems';
 import { accountGroupRoutes } from './accountGroups';
 import { accountRoutes } from './accounts';
 import { bookRoutes } from './books';
+import { appointmentRoutes } from './appointments';
 
 /** Register every route module here. Feature modules: add one line. */
 export async function registerRoutes(app: FastifyInstance) {
@@ -26,4 +27,5 @@ export async function registerRoutes(app: FastifyInstance) {
   await app.register(accountGroupRoutes);
   await app.register(accountRoutes);
   await app.register(bookRoutes);
+  await app.register(appointmentRoutes);
 }
