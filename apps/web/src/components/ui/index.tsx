@@ -1,65 +1,36 @@
-import { Fragment, forwardRef, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, forwardRef, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Loader2, MoreVertical, Search, X } from 'lucide-react';
 import { cx } from '@/lib/format';
 
-/* ---------------- Modal ---------------- */
-export function Modal({ open, onClose, title, children, footer, size = 'md', className }: { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; footer?: ReactNode; size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'; className?: string }) {
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', h);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', h);
-      document.body.style.overflow = '';
-    };
-  }, [open, onClose]);
-  if (!open) return null;
-  const w = { sm: 'max-w-[420px]', md: 'max-w-[560px]', lg: 'max-w-[760px]', xl: 'max-w-[1000px]', full: 'max-w-[1200px]' }[size];
-  return createPortal(
-    <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={cx('card w-full my-auto flex flex-col max-h-[calc(100vh-4rem)]', w, className)}>
-        {title !== undefined && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-line">
-            <h3 className="text-[18px] font-semibold text-gray-900">{title}</h3>
-            <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-900" aria-label="Close"><X className="h-5 w-5" /></button>
-          </div>
-        )}
-        <div className="px-6 py-5 overflow-y-auto flex-1">{children}</div>
-        {footer && <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-line">{footer}</div>}
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-/* ---------------- Drawer (right side panel) ---------------- */
-export function Drawer({ open, onClose, title, children, footer, width = 'w-[480px]' }: { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; footer?: ReactNode; width?: string }) {
-  const panel = useRef<HTMLDivElement>(null);
-  const body = useRef<HTMLDivElement>(null);
+/* ---------------- Dialog focus contract ---------------- */
+/**
+ * What a modal dialog owes the keyboard: it opens on its first field, keeps Tab inside while
+ * it is open, closes on Escape and hands focus back to whatever had it before. Shared by
+ * <Modal> and <Drawer> so the two behave identically whichever one a form is presented in.
+ */
+function useDialogFocus(open: boolean, panel: RefObject<HTMLDivElement>, body: RefObject<HTMLDivElement>, onClose: () => void) {
   const restoreTo = useRef<HTMLElement | null>(null);
   // kept in a ref so the effect below runs once per open, not on every parent re-render
   const close = useRef(onClose);
   close.current = onClose;
 
   /**
-   * Remember what had focus outside the panel. Reading document.activeElement when the
-   * drawer opens is too late: React applies a field's autoFocus during commit, before any
-   * effect runs, so by then focus is already inside.
+   * Remember what had focus outside the panel. Reading document.activeElement when the dialog
+   * opens is too late: React applies a field's autoFocus during commit, before any effect
+   * runs, so by then focus is already inside.
    */
   useEffect(() => {
     const onFocusIn = (e: FocusEvent) => {
       const el = e.target as HTMLElement;
       // `closest`, not the panel ref: refs attach after React has already applied autoFocus,
-      // so the ref is still null for the very first focus event inside a freshly opened drawer.
+      // so the ref is still null for the very first focus event inside a freshly opened dialog.
       if (el !== document.body && !el.closest?.('[role="dialog"]')) restoreTo.current = el;
     };
     document.addEventListener('focusin', onFocusIn);
     return () => document.removeEventListener('focusin', onFocusIn);
   }, []);
 
-  // A drawer is a modal dialog: it owns focus while open and hands it back on close.
   useEffect(() => {
     if (!open) return;
     const within = (root: HTMLElement | null) => Array.from(root?.querySelectorAll<HTMLElement>('input:not([type=hidden]), select, textarea, button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])') ?? []).filter((el) => el.offsetParent !== null);
@@ -85,6 +56,42 @@ export function Drawer({ open, onClose, title, children, footer, width = 'w-[480
       setTimeout(() => { if (target && document.contains(target)) target.focus(); }, 0);
     };
   }, [open]);
+}
+
+/* ---------------- Modal ---------------- */
+export function Modal({ open, onClose, title, children, footer, size = 'md', className, maxHeight = 'max-h-[calc(100vh-4rem)]' }: { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; footer?: ReactNode; size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'; className?: string; /** the panel's height cap — one class, so a caller can raise or lower it without fighting the default */ maxHeight?: string }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  useDialogFocus(open, panel, body, onClose);
+  useEffect(() => {
+    if (!open) return;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, [open]);
+  if (!open) return null;
+  const w = { sm: 'max-w-[420px]', md: 'max-w-[560px]', lg: 'max-w-[760px]', xl: 'max-w-[1000px]', full: 'max-w-[1200px]' }[size];
+  return createPortal(
+    <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div ref={panel} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined} tabIndex={-1} className={cx('card w-full my-auto flex flex-col outline-none', maxHeight, w, className)}>
+        {title !== undefined && (
+          <div className="flex items-center justify-between px-6 py-4 border-b border-line">
+            <h3 className="text-[18px] font-semibold text-gray-900">{title}</h3>
+            <button type="button" onClick={onClose} className="text-gray-500 hover:text-gray-900" aria-label="Close"><X className="h-5 w-5" /></button>
+          </div>
+        )}
+        <div ref={body} className="px-6 py-5 overflow-y-auto flex-1">{children}</div>
+        {footer && <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-line">{footer}</div>}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/* ---------------- Drawer (right side panel) ---------------- */
+export function Drawer({ open, onClose, title, children, footer, width = 'w-[480px]' }: { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; footer?: ReactNode; width?: string }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  useDialogFocus(open, panel, body, onClose);
 
   if (!open) return null;
   return createPortal(

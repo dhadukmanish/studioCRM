@@ -26,6 +26,8 @@ export const NAV: NavSection[] = [
     items: [
       { label: 'Item Master', href: '/modules/masters/items', icon: 'Package', permission: 'masters_items' },
       { label: 'Sub Item Master', href: '/modules/masters/sub-items', icon: 'Boxes', permission: 'masters_sub_items' },
+      { label: 'Account Group Master', href: '/modules/masters/account-groups', icon: 'Layers', permission: 'masters_account_groups' },
+      { label: 'Account Master', href: '/modules/masters/accounts', icon: 'Wallet', permission: 'masters_accounts' },
     ],
   },
   {

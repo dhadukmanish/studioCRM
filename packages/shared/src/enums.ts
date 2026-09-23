@@ -42,4 +42,64 @@ export const formatGst = (rate: number | string | null | undefined) => {
   return `${n % 1 === 0 ? n : n.toFixed(2)}%`;
 };
 
+/**
+ * Head groups an Account Group can be classified under — the set the studio's existing
+ * accounting uses, in the order it presents them. Classification only: nothing in this phase
+ * posts, balances or reports off these values.
+ *
+ * The Account Groups themselves (CASH, BANK, CUSTOMER, PARTNER, ...) are tenant data in
+ * `account_groups`, never constants — only their classification is fixed.
+ */
+export const HEAD_GROUPS = ['LIABILITIES', 'ASSETS', 'EXPENSES', 'INCOME', 'CASH', 'OTHER'] as const;
+export type HeadGroup = (typeof HEAD_GROUPS)[number];
+
 export const THEME_MODES = ['light', 'dark', 'system'] as const;
+
+/**
+ * Which side of the account an opening balance sits on. The amount itself is always stored
+ * positive — Credit is a side, never a negative number.
+ *
+ * Opening information only at this stage: nothing posts a ledger or journal entry from it.
+ */
+export const ACCOUNT_OPENING_SIDES = ['DEBIT', 'CREDIT'] as const;
+export type AccountOpeningSide = (typeof ACCOUNT_OPENING_SIDES)[number];
+/** "DEBIT" -> "Dr". The short form is what the studio's accounting has always shown. */
+export const OPENING_SIDE_SHORT: Record<AccountOpeningSide, string> = { DEBIT: 'Dr', CREDIT: 'Cr' };
+
+/**
+ * The extra detail block an Account Group drives on the Account Master form, one storage kind
+ * per block. `party` serves both CLIENT and EXPOSER/PARTY: the legacy screens show identical
+ * fields for the two, only the heading differs.
+ */
+export const ACCOUNT_DETAIL_KINDS = ['bank', 'employee', 'loan', 'partner', 'party'] as const;
+export type AccountDetailKind = (typeof ACCOUNT_DETAIL_KINDS)[number];
+
+/**
+ * Account Group NAME -> the detail block it drives, keyed by the normalized legacy names.
+ *
+ * Deliberately keyed on the group name, not on the head group: BANK is filed under ASSETS,
+ * but that must not give every ASSETS group a bank account number. Groups the legacy screens
+ * show with no extra fields (CASH, INCOME, EXPENSES, DISCOUNT) are simply absent here, which
+ * is also how any group a tenant invents behaves — common fields only.
+ */
+const ACCOUNT_DETAIL_BY_GROUP: Record<string, { kind: AccountDetailKind; title: string }> = {
+  BANK: { kind: 'bank', title: 'Bank Details' },
+  EMPLOYEE: { kind: 'employee', title: 'Employee Details' },
+  LOAN: { kind: 'loan', title: 'Loan Details' },
+  PARTNER: { kind: 'partner', title: 'Partner Details' },
+  CLIENT: { kind: 'party', title: 'Client Details' },
+  'EXPOSER/PARTY': { kind: 'party', title: 'Party Details' },
+};
+
+/**
+ * Matching key for a group name: upper-cased, trimmed, inner runs of whitespace collapsed and
+ * whitespace around a slash removed, so "exposer / party" and "EXPOSER/PARTY" are the same
+ * group. The stored name itself is never touched — this only decides which form to show.
+ */
+export const normalizeGroupName = (name: string) => name.trim().toUpperCase().replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ');
+
+/** The detail block a group drives, or null for a group that has only the common fields. */
+export function accountDetailFor(groupName: string | null | undefined) {
+  if (!groupName) return null;
+  return ACCOUNT_DETAIL_BY_GROUP[normalizeGroupName(groupName)] ?? null;
+}

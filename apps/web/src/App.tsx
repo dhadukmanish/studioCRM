@@ -20,6 +20,8 @@ const GeneralSettingsPage = lazy(() => import('@/pages/settings/GeneralSettingsP
 const ProfilePage = lazy(() => import('@/pages/account/ProfilePage'));
 const ItemsPage = lazy(() => import('@/pages/masters/ItemsPage'));
 const SubItemsPage = lazy(() => import('@/pages/masters/SubItemsPage'));
+const AccountGroupsPage = lazy(() => import('@/pages/masters/AccountGroupsPage'));
+const AccountsPage = lazy(() => import('@/pages/masters/AccountsPage'));
 const CategoriesPage = lazy(() => import('@/pages/sample/CategoriesPage'));
 
 /** Redirects to /signin when logged out. */
@@ -59,6 +61,8 @@ export default function App() {
               {/* ---- Masters ---- */}
               <Route path="/modules/masters/items" element={<Guard permission="masters_items"><ItemsPage /></Guard>} />
               <Route path="/modules/masters/sub-items" element={<Guard permission="masters_sub_items"><SubItemsPage /></Guard>} />
+              <Route path="/modules/masters/account-groups" element={<Guard permission="masters_account_groups"><AccountGroupsPage /></Guard>} />
+              <Route path="/modules/masters/accounts" element={<Guard permission="masters_accounts"><AccountsPage /></Guard>} />
               {/* ---- Sample module (delete when you add real ones) ---- */}
               <Route path="/modules/sample/categories" element={<Guard permission="sample_categories"><CategoriesPage /></Guard>} />
               {/* ---- Settings ---- */}

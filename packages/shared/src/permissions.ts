@@ -45,6 +45,8 @@ export const PERMISSIONS: PermissionDef[] = [
   // Masters
   { name: 'masters_items', displayName: 'Item Master', module: 'masters' },
   { name: 'masters_sub_items', displayName: 'Sub Item Master', module: 'masters' },
+  { name: 'masters_account_groups', displayName: 'Account Group Master', module: 'masters' },
+  { name: 'masters_accounts', displayName: 'Account Master', module: 'masters' },
   // Administration
   { name: 'admin_companies', displayName: 'Companies', module: 'admin' },
   { name: 'admin_branches', displayName: 'Branches', module: 'admin' },

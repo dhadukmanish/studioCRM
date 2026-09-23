@@ -22,6 +22,20 @@
       "when": 1790107389146,
       "tag": "0002_strong_spiral",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790108678115,
+      "tag": "0003_thin_shatterstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790110013084,
+      "tag": "0004_hot_the_twelve",
+      "breakpoints": true
     }
   ]
 }

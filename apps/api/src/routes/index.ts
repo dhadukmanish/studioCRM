@@ -8,6 +8,8 @@ import { settingsRoutes } from './settings';
 import { prefRoutes } from './prefs';
 import { itemRoutes } from './items';
 import { subItemRoutes } from './subItems';
+import { accountGroupRoutes } from './accountGroups';
+import { accountRoutes } from './accounts';
 import { sampleRoutes } from './sample';
 
 /** Register every route module here. Feature modules: add one line. */
@@ -21,5 +23,7 @@ export async function registerRoutes(app: FastifyInstance) {
   await app.register(prefRoutes);
   await app.register(itemRoutes);
   await app.register(subItemRoutes);
+  await app.register(accountGroupRoutes);
+  await app.register(accountRoutes);
   await app.register(sampleRoutes); // ← delete when you add real modules
 }
