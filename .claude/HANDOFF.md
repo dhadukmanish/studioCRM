@@ -16,12 +16,24 @@ a data-table kit; the Masters layer on top of it is project code.
   (Vite + React 18 + Tailwind), `packages/shared` (enums, permission catalog, nav, zod schemas)
 - `README.md` is still the boilerplate's README, and its "Adding a module (≈ 10 minutes)"
   recipe is still accurate — read it before adding a module.
-- `CLAUDE.md` holds the always-loaded rules; `docs/ARCHITECTURE.md`, `docs/UI_DESIGN_SYSTEM.md`,
+- `CLAUDE.md` holds the always-loaded engineering rules — stable rules only; current
+  implementation status lives in THIS file. `docs/ARCHITECTURE.md`, `docs/UI_DESIGN_SYSTEM.md`,
   `docs/DEVELOPMENT.md` and `docs/BILL_NUMBERING.md` hold the detail; `.claude/agents/` has five
   specialists, `.claude/skills/studio-*` the workflows, `.claude/hooks/guard-bash.mjs` blocks
   destructive commands.
 
-### What is built
+## What is built
+
+### Foundation — auth, login, RBAC
+
+From the boilerplate, kept and branded: multi-tenant auth (JWT access + refresh tokens),
+RBAC (`role.permissions ∪ user.permissionOverrides`, `super_admin` bypasses everything),
+companies & branches, the custom-fields engine, the `activity_logs` audit trail, and the
+DataTable kit (search, filter builder, saved filters, column ordering, sorting, pagination).
+Login and the user/role screens were simplified and the app is branded StudioCRM. Three themes
+ship: light, dark, olive.
+
+### Masters — project code
 
 | Module | Permission | API | Screen |
 | --- | --- | --- | --- |
@@ -31,27 +43,92 @@ a data-table kit; the Masters layer on top of it is project code.
 | Account Master | `masters_accounts` | `/api/masters/accounts` | `/modules/masters/accounts` |
 | Book Master | `masters_books` | `/api/masters/books` | `/modules/masters/books` |
 
-All of them follow the same shape: `crudRoutes` + a shared zod schema + a compact Drawer form,
-except Account Master, which is hand-written because an account and its group-specific detail
-block are two tables written in one transaction.
+They share one shape — `crudRoutes` + a shared zod schema + a compact Drawer form, with a
+case-insensitive unique index as the real duplicate guard and a friendly `beforeSave` message in
+front of it. Account Master is the exception: its routes are hand-written because an account and
+its group-specific detail block are two tables written in one transaction, and its form is a
+large modal rather than a drawer.
 
-### Book Master is the bill number series
+### Bill Number Series foundation
 
-Not a text master. Each book (`2026-27`, `2027-28`) is one **independent** bill number series:
-bills under it run 1, 2, 3 … and a new book starts again from its own `seriesStartsAt`. Two
-books may both hold a Bill No. 1. Nothing resets a series by calendar — creating a book is the
-only boundary.
+`allocateBillNumber` (`apps/api/src/services/billNumbers.ts`) exists, is documented and is
+concurrency-proven — but **nothing calls it yet**, because bills do not exist. See the two
+sections below.
+
+### The sample module is gone
+
+The boilerplate's `sample` / `categories` template was deleted once real modules existed
+(commit `6599fc5`): its route, schema, shared zod schema, page, permission, nav section,
+dashboard shortcut, custom-field module entry and demo rows, plus migration `0006` dropping the
+`categories` table. Do not resurrect it — copy Item Master instead.
+
+## Architectural decisions that must survive
+
+These are load-bearing. Changing any of them is a deliberate decision, not a refactor.
+
+- **Tenant-safe composite foreign keys.** A child never references a parent by `id` alone. Every
+  parent carries `unique(id, tenant_id)` (`accounts_id_tenant_uk`, `books_id_tenant_uk`, the
+  same on `items`), and every child references the **pair** `(parent_id, tenant_id)`. Pointing
+  at another tenant's row is structurally impossible, not merely checked for. Live examples:
+  `sub_items → items`, `accounts → account_groups`, `account_party_details → items` (all
+  RESTRICT), and the detail tables → `accounts` (CASCADE). RESTRICT is the rule for anything
+  with history: such a row is deactivated, never deleted out from under its children.
+- **Typed Account detail extension tables, not a JSON blob.** `account_bank_details`,
+  `account_employee_details`, `account_loan_details`, `account_partner_details` and
+  `account_party_details` are 1:1 extensions keyed by `account_id` as the primary key. They hold
+  only the extra fields — never a second copy of the account's identity — and a row exists only
+  while the account's group actually drives that block, so changing the group removes the stale
+  row instead of hiding it. Typed columns keep the data queryable (every employee, every bank
+  account) and keep money in a real `numeric` column.
+- **Account Master uses a large modal on purpose.** `<Modal size="xl" maxHeight="max-h-[88vh]">`,
+  not the `<Drawer>` the other masters use: the common fields plus the group-driven detail block
+  do not fit a drawer without burying the operator in scrolling. Ctrl/Cmd+S saves; Escape, focus
+  trapping and focus restore belong to `<Modal>`.
+- **A Book is the explicit bill-series boundary.** A series exists because somebody created a
+  Book. Creating a new Book starts a fresh, **independent** series from its own
+  `seriesStartsAt` — two books may both hold a Bill No. 1.
+- **No calendar-driven reset.** Nothing resets a bill number by month, year or financial year.
+  If the numbering is meant to restart, a new Book is created. There is deliberately no "reset
+  bill number" endpoint and no permission for one.
+- **Bill numbers come from an atomic server-side `UPDATE … RETURNING`.** One statement takes the
+  number and advances the counter; Postgres locks the book row, so simultaneous operators queue
+  up and receive different numbers.
+- **Never `SELECT max(bill_no) + 1`.** That read-then-write window is exactly what
+  `allocateBillNumber` exists to replace. It must not reappear anywhere, in any module.
+- **`allocateBillNumber` must later run INSIDE the same transaction that inserts the bill.** It
+  takes an `Executor` (`db` or a transaction handle) as its first argument for precisely this
+  reason, so a failed bill rolls its number back with it. Never call it to preview or display a
+  number: every call consumes one.
+- **Generic lookups expose only what a picker needs.** `/api/common/lookups/*` is readable by
+  every authenticated user, so it never carries sensitive or internal fields. `lookups/books`
+  returns `id` + `bookNumber` only — the counter is not a picker's business. `lookups/accounts`
+  returns id, name and group / head group — never PAN, GST, salary, bank account number or
+  opening balance. Active rows only, so a deactivated row is not offered for a new transaction.
+- **Money is `numeric`, always positive, never computed on the client.** An opening balance is
+  stated as an amount plus a `DEBIT` / `CREDIT` side, never as a negative number. There is
+  deliberately no mutable `currentBalance` anywhere — this phase is accounting *foundation*, and
+  nothing posts a ledger entry, journal or voucher from it.
+
+## Book Master is the bill number series
+
+Not a text master. Each book (`2026-27`, `2027-28`) is one independent bill number series:
+bills under it run 1, 2, 3 … and a new book starts again from its own `seriesStartsAt`.
 
 - The counter is `books.next_bill_number`, seeded from `series_starts_at` on create.
-- It moves **only** through `allocateBillNumber` (`apps/api/src/services/billNumbers.ts`), a
-  single `UPDATE … RETURNING` that is concurrency-safe. Never `SELECT max(...) + 1`.
-- `bookSchema` has no `nextBillNumber` field, so no request body can set it. There is
-  deliberately no "reset bill number" endpoint or permission.
+- It moves **only** through `allocateBillNumber`. `toRow` in `routes/books.ts` is the only other
+  code that writes it, and only while the series is still untouched.
+- `bookSchema` has no `nextBillNumber` field and zod strips unknown keys, so no request body
+  can set it.
 - `seriesStartsAt` is editable only while the book has issued nothing; once the counter has
-  moved the API refuses to change it. That lock needs no change when Billing arrives.
-- **Nothing calls the allocator yet.** Bills do not exist. The contract the Billing phase must
-  honour — the `bills` table shape, `UNIQUE(tenant_id, book_id, bill_number)`, the composite FK
-  with RESTRICT — is written down in `docs/BILL_NUMBERING.md`. Read it before starting Billing.
+  moved the API refuses to change it. The counter having moved *is* the evidence that numbers
+  were issued — nothing invents bill-existence. That lock needs no change when Billing arrives.
+- The database backs all of it: `books_next_bill_number_check` (`next >= start`),
+  `books_series_starts_at_positive_check`, and the case-insensitive unique index on the book
+  number.
+- **Nothing calls the allocator yet.** The contract the Billing phase must honour — the `bills`
+  table shape, `UNIQUE(tenant_id, book_id, bill_number)`, the composite FK to
+  `books_id_tenant_uk` with RESTRICT — is written down in `docs/BILL_NUMBERING.md`. Read it
+  before starting Billing.
 
 ## Git
 
@@ -66,14 +143,16 @@ only boundary.
 embeds the username (`https://dhadukmanish@github.com/...`) so git picks the right account.
 Keep the `dhadukmanish@` in the URL. Nothing needs to be deleted from Credential Manager.
 
-**Nothing has been pushed in a while.** As of this update: current branch is
-`masters/account-master` (no upstream), `main` is **4 commits ahead of `origin/main`**, and
-Book Master is **uncommitted** in the working tree. Whoever picks this up should decide what to
-commit and push rather than assume the remote is current.
+**Nothing has been pushed yet.** As of this update the working tree is clean, the current branch
+is `masters/account-master` (no upstream), and **6 commits are unpushed**: `main` is 4 ahead of
+`origin/main`, and this branch is 2 ahead of `main` (`6731507` Account Group + Account Master,
+`6599fc5` Book Master + sample-module removal). Whoever picks this up should decide whether to
+merge into `main` and push, rather than assume the remote is current.
 
-Untracked in the working tree (intentionally not committed): `erp-boilerplate.bundle`
-(the original boilerplate delivery, now redundant) and `studio form image.pdf`
-(the client's form design reference — read it before guessing at a module's data model).
+Untracked in the working tree and **intentionally left untouched — never add, move or delete
+them**: `erp-boilerplate.bundle` (the original boilerplate delivery, now redundant) and
+`studio form image.pdf` (the client's form design reference — read it before guessing at a
+module's data model).
 
 ## Environment setup already done
 
@@ -98,12 +177,12 @@ this machine. The app points at a **hosted Postgres 18.4** instead:
 - No SSL parameters needed
 - **20 tables** in `public`; migrations `0000` … `0006` all applied (7 rows in
   `drizzle.__drizzle_migrations`). `0005` created `books`; `0006` dropped the sample
-  `categories` table when the sample module was deleted.
-- Seeded users `admin@example.com` and `viewer@example.com` are present
+  `categories` table.
+- The demo users `admin@example.com` and `viewer@example.com` are present
 
 This is a **shared hosted database, not a scratch one.** It holds real entered data — there is
-already a `2026-27` row in `books` that the owner created by hand. Never reseed it, never drop
-it, never point a destructive test suite at it (see Testing below).
+already a `2026-27` row in `books` that the owner created by hand. Never re-run the seed against
+it, never drop it, never point a destructive test suite at it (see Testing below).
 
 Local Postgres also exists but **could not be used**: PG 18 on port 5432 and PG 17 on 5433 are
 both running with `scram-sha-256` auth and the `postgres` superuser password is unknown, so the
@@ -119,11 +198,13 @@ pnpm dev:api      # api only
 pnpm dev:web      # web only
 pnpm db:generate  # after editing a schema file
 pnpm db:migrate
-pnpm db:seed
 pnpm typecheck
 pnpm test
 pnpm build
 ```
+
+There is also a `db:seed` script. **Do not run it** — it targets the shared hosted database
+above, and `.claude/hooks/guard-bash.mjs` blocks it on purpose.
 
 Dev servers are usually already running in the background from an earlier session — check ports
 4000 and 5173 before starting another `pnpm dev`, or you will get a port conflict.
@@ -132,11 +213,13 @@ Dev servers are usually already running in the background from an earlier sessio
 ## Testing
 
 Vitest runs in `apps/api` only (pinned to v3 — v5 needs Vite 6, this repo is on Vite 5).
-Each module's test file has two sections:
+Five files (items, sub-items, account groups, accounts, books), 391 tests. Each has two
+sections:
 
-- **A — pure validation** (zod schemas). Always runs. ~208 tests pass today.
-- **B — database-backed** (tenant isolation, RBAC, duplicate guards, the bill-number
-  allocator's concurrency). `describe.skipIf(!TEST_DATABASE_URL)`, so it **skips by default**.
+- **A — pure validation** (zod schemas). Always runs. **208 tests pass today.**
+- **B — database-backed** (tenant isolation, RBAC, duplicate guards, lookup field exposure, the
+  bill-number allocator's concurrency). `describe.skipIf(!TEST_DATABASE_URL)`, so it **skips by
+  default** — 183 skipped.
 
 Section B creates and deletes tenants, roles and users. `TEST_DATABASE_URL` must point at a
 **throwaway** database — never at the hosted `DATABASE_URL` above. Because no throwaway database
@@ -145,21 +228,25 @@ instead verified by hand against the dev API and then cleaned up.
 
 ## Verified working
 
-Confirmed end-to-end in a real browser / against the live API, not just by reading code:
+Confirmed end-to-end against the live API / in a real browser, not just by reading code:
 
 - `GET http://localhost:4000/api/health` → `200 {"status":"up"}`; `http://localhost:5173` serves
   the SPA and Vite's `/api` proxy reaches the API
 - Login with `admin@example.com` / `Admin@1234` → `/dashboard`, sidebar and nav render
 - Theme switcher: **Light**, **Dark** and **Olive** all apply (`data-theme` on `<html>`,
   persisted in `localStorage` under `erp-ui`), zero console errors
-- Book Master (2026-09-23): list + columns, Add/Edit drawer, case-insensitive duplicate error,
+- Book Master: list + columns, Add/Edit drawer, case-insensitive duplicate error,
   `seriesStartsAt` rejection of 0 / decimal / blank, custom start 1001, Ctrl+S save, Escape
   close, delete confirmation, active-only lookup. All temporary records were deleted afterwards.
 - `allocateBillNumber` concurrency: 25 parallel allocations on one book returned 25 distinct,
   gapless numbers, while a second book stayed on its own series.
-- `pnpm typecheck`, `pnpm test`, `pnpm build` all clean.
+- Sample-module removal (2026-09-23): `/api/sample/categories` → 404 while
+  `/api/masters/books` and `/api/masters/accounts` still answer `401` (registered, auth
+  required); `categories` dropped, public tables 21 → 20, and the owner's `2026-27` book plus
+  the items / sub-items rows all intact afterwards.
+- `pnpm typecheck`, `pnpm test` (208 passed) and `pnpm build` all clean.
 
-Seeded logins: `admin@example.com` (Super Admin, everything) and `viewer@example.com`
+Demo logins: `admin@example.com` (Super Admin, everything) and `viewer@example.com`
 (read-only, useful for testing RBAC) — both password `Admin@1234`.
 
 `.claude/scripts/verify-ui.mjs` re-runs the login + theme browser check with no extra
@@ -170,18 +257,21 @@ assumes one and will throw. Guard the login step when reusing it.
 
 ## Known pending work
 
-- **Appointments, Billing and Reports are not started.** Billing must start from
-  `docs/BILL_NUMBERING.md`. The intended flow is Appointment first, then a Bill that picks up
-  the appointment/customer instead of retyping it.
-- **New permissions need existing roles re-saved.** Role grants are stored JSON, seeded before
+- **Billing, Appointment, Payment, Ledger, Voucher and Reports are NOT implemented.** Nothing
+  posts a transaction anywhere yet. Billing must start from `docs/BILL_NUMBERING.md`; the
+  intended flow is Appointment first, then a Bill that picks up the appointment / customer
+  instead of retyping it.
+- **New permissions need existing roles re-saved.** Role grants are stored JSON, written before
   the newer permissions existed, so roles other than Super Admin (which bypasses everything)
   do not have `masters_items` … `masters_books` ticked. Per the README, opening a role in
-  Settings → Roles and saving it picks up new permissions.
+  Settings → Roles and saving it picks up new permissions. A stale `sample_categories` key may
+  still sit in that JSON; it is harmless (no route checks it) and clears on the next save.
 - Workspace packages are still named `@erp/*` (the UI says StudioCRM). Renaming them is its own
   task and touches every import.
-- `README.md` is still the boilerplate's README.
+- `README.md` is still the boilerplate's README (its file references were repointed at Item
+  Master when the sample module was deleted).
 - `JWT_SECRET=change-me-in-production` in `apps/api/.env` — fine for dev, must change before
-  deploy. So must the seeded `Admin@1234` logins: the boilerplate publishes that default in
-  `seed.ts` and `README.md`, and the database behind it is hosted, not local.
+  deploy. So must the `Admin@1234` logins: the boilerplate publishes that default in `seed.ts`
+  and `README.md`, and the database behind it is hosted, not local.
 - No lint/format tooling is installed by design. Match the surrounding style; `.editorconfig`
   (2 spaces, LF) is the only rule.
