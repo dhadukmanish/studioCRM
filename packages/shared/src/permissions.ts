@@ -38,7 +38,6 @@ export const PERMISSION_MODULE_LABELS: Record<string, string> = {
   masters: 'Masters',
   admin: 'Administration',
   settings: 'Settings',
-  sample: 'Sample Module',
 };
 
 export const PERMISSIONS: PermissionDef[] = [
@@ -47,6 +46,7 @@ export const PERMISSIONS: PermissionDef[] = [
   { name: 'masters_sub_items', displayName: 'Sub Item Master', module: 'masters' },
   { name: 'masters_account_groups', displayName: 'Account Group Master', module: 'masters' },
   { name: 'masters_accounts', displayName: 'Account Master', module: 'masters' },
+  { name: 'masters_books', displayName: 'Book Master', module: 'masters' },
   // Administration
   { name: 'admin_companies', displayName: 'Companies', module: 'admin' },
   { name: 'admin_branches', displayName: 'Branches', module: 'admin' },
@@ -56,8 +56,6 @@ export const PERMISSIONS: PermissionDef[] = [
   // Settings
   { name: 'settings_general', displayName: 'General Settings', module: 'settings', actions: ['read', 'update'] },
   { name: 'settings_custom_fields', displayName: 'Custom Fields', module: 'settings' },
-  // Sample module — delete once you have real ones
-  { name: 'sample_categories', displayName: 'Categories', module: 'sample' },
 ];
 
 /** Feature packages can extend the catalog at startup (both API and web import the same shared package). */

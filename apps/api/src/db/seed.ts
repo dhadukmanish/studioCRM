@@ -21,10 +21,6 @@ async function main() {
   await db.insert(schema.users).values({ tenantId: tenant.id, roleId: roles.super_admin.id, firstName: 'Super', lastName: 'Admin', email: ADMIN_EMAIL, username: 'admin', mobile: '9999999999', passwordHash, companyIds: [company.id], branchIds: [branch.id] });
   // a second, restricted user to demo RBAC
   await db.insert(schema.users).values({ tenantId: tenant.id, roleId: roles.user.id, firstName: 'Read', lastName: 'Only', email: 'viewer@example.com', username: 'viewer', passwordHash, companyIds: [company.id], branchIds: [branch.id] });
-  await db.insert(schema.categories).values([
-    { tenantId: tenant.id, name: 'General', code: 'GEN', sortOrder: 1 },
-    { tenantId: tenant.id, name: 'Services', code: 'SRV', sortOrder: 2 },
-  ]);
   console.log(`Seeded tenant "${tenant.slug}"`);
   console.log(`Super admin: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
   console.log(`Read-only user: viewer@example.com / ${ADMIN_PASSWORD}`);

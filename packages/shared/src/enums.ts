@@ -21,7 +21,6 @@ export const CUSTOM_FIELD_TYPE_GROUPS: { group: string; types: { type: CustomFie
 export const CUSTOM_FIELD_MODULES: { name: string; label: string }[] = [
   { name: 'users', label: 'Users' },
   { name: 'companies', label: 'Companies' },
-  { name: 'categories', label: 'Categories (sample module)' },
 ];
 
 /**

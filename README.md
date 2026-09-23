@@ -40,8 +40,7 @@ pnpm dev
 | Settings | `api/services/settings.ts`, `web/pages/settings/GeneralSettingsPage.tsx` | JSON key/value per tenant |
 | Audit log | `api/services/activity.ts`, `web/pages/settings/ActivityLogsPage.tsx` | CRUD factory logs automatically |
 | List kit | `web/components/data/DataTable.tsx` | search, dynamic filter builder, saved filters, drag-order columns (persisted per user), sort, pagination |
-| CRUD in one call | `api/lib/crud.ts`, `web/components/data/MasterPage.tsx` | see the sample module |
-| Sample module | `api/routes/sample.ts`, `web/pages/sample/CategoriesPage.tsx` | delete once you have real modules |
+| CRUD in one call | `api/lib/crud.ts`, `web/components/data/MasterPage.tsx` | see `api/routes/items.ts` + `web/pages/masters/ItemsPage.tsx` |
 
 ## Adding a module (≈ 10 minutes)
 
@@ -50,14 +49,14 @@ pnpm dev
    { name: 'inv_products', displayName: 'Products', module: 'inventory' }
    // and a label: PERMISSION_MODULE_LABELS.inventory = 'Inventory'
    ```
-2. **Schema** — create `apps/api/src/db/schema/inventory.ts` (copy `sample.ts`), export it from `schema/index.ts`, then `pnpm db:generate && pnpm db:migrate`.
+2. **Schema** — create `apps/api/src/db/schema/inventory.ts` (copy `items.ts`), export it from `schema/index.ts`, then `pnpm db:generate && pnpm db:migrate`.
 3. **Validation** — add a zod schema in `packages/shared/src/schemas/`.
 4. **API** — in a new `apps/api/src/routes/inventory.ts`:
    ```ts
    crudRoutes(app, { table: schema.products, base: '/api/inventory/products', permission: 'inv_products', schema: productSchema, label: 'Product', searchColumns: [schema.products.name] });
    ```
    and register it in `routes/index.ts`. You get list (search / filters / sort / pagination), get, create, update, delete, permission checks and audit logging.
-5. **Web** — copy `pages/sample/CategoriesPage.tsx`, set `url`, `permission`, `columns`, `fields`; add the route in `App.tsx` wrapped in `<Guard permission="inv_products">`.
+5. **Web** — copy `pages/masters/ItemsPage.tsx`, set `url`, `permission`, `columns`, `fields`; add the route in `App.tsx` wrapped in `<Guard permission="inv_products">`.
 6. **Nav** — add the item to `NAV` in `packages/shared/src/nav.ts` with `permission: 'inv_products'`; it hides itself for users without read access.
 7. (Optional) **Custom fields** — add `{ name: 'products', label: 'Products' }` to `CUSTOM_FIELD_MODULES` and render `<CustomFieldInputs moduleName="products" …>` in the form.
 

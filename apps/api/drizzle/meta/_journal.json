@@ -36,6 +36,20 @@
       "when": 1790110013084,
       "tag": "0004_hot_the_twelve",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790128874525,
+      "tag": "0005_rapid_terror",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790130228512,
+      "tag": "0006_short_wong",
+      "breakpoints": true
     }
   ]
 }

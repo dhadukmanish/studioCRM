@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Construction, Users, ShieldCheck, Settings, Building2, Tags, SlidersHorizontal, ArrowRight } from 'lucide-react';
+import { Construction, Users, ShieldCheck, Settings, Building2, SlidersHorizontal, ArrowRight } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { useCompanies } from '@/lib/queries';
 
@@ -9,7 +9,6 @@ export function Dashboard() {
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const shortcuts = [
-    { label: 'Categories', desc: 'Sample module — copy it for your own', href: '/modules/sample/categories', icon: Tags, perm: 'sample_categories' },
     { label: 'Users', desc: 'Invite people, assign roles', href: '/modules/settings/users', icon: Users, perm: 'admin_users' },
     { label: 'Roles & Permissions', desc: 'Who can do what', href: '/modules/settings/roles', icon: ShieldCheck, perm: 'admin_roles' },
     { label: 'Companies', desc: 'Legal entities & branches', href: '/modules/settings/companies', icon: Building2, perm: 'admin_companies' },

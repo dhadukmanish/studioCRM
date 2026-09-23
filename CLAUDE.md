@@ -2,7 +2,9 @@
 
 Business app for a photography/video studio, built on an in-house ERP boilerplate
 (multi-tenant auth, RBAC, custom fields, audit log, data-table kit).
-**Status: Phase 0 — foundation only. No StudioCRM business modules exist yet.**
+**Status: Masters layer built** — Item, Sub Item, Account Group, Account and Book Master.
+Appointments, Billing and Reports are not started; Book Master already defines the bill number
+series Billing will draw from (`docs/BILL_NUMBERING.md`).
 
 The app presents itself as StudioCRM, but the workspace packages are still named `@erp/*`.
 That is intentional for now; renaming the packages is a separate task.
@@ -150,5 +152,6 @@ return findings, not file dumps. Saving tokens never justifies guessing at corre
 - `docs/ARCHITECTURE.md` — module boundaries, request lifecycle, permission model
 - `docs/UI_DESIGN_SYSTEM.md` — visual tokens, list/form patterns, interaction rules
 - `docs/DEVELOPMENT.md` — setup, environment, workflows, troubleshooting
+- `docs/BILL_NUMBERING.md` — the bill number series contract Billing must honour
 - `.claude/HANDOFF.md` — live project state, DB target, gotchas, pending work (`/handoff`)
 - `README.md` — boilerplate feature map and the "add a module" recipe

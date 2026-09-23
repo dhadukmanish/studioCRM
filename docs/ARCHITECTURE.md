@@ -135,6 +135,4 @@ custom field; a tenant-level toggle is usually a setting.
 
 - Workspace packages are still named `@erp/*` (the UI itself now says StudioCRM); renaming the
   packages is a separate, deliberate task.
-- The sample module (`routes/sample.ts`, `schema/sample.ts`, `pages/sample/`) is a live
-  template. Delete it once real modules exist.
 - `README.md` is still the boilerplate's README and documents the boilerplate accurately.
