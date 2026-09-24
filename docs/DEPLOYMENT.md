@@ -125,9 +125,26 @@ Websites → `studio` → the Node app page. Deploy target `/studio`.
 codebase, including this document and the database host name, is readable by anyone. Making it
 private is fine; it just means adding a read-only PAT in the panel.
 
-Tick **Create Deploy Hook** and keep the URL it produces: it is what turns a deploy into one
-request. Anyone holding it can trigger a rebuild, so treat it as a credential — it belongs in
-`$env:STUDIOCRM_DEPLOY_HOOK` or in `deploy/.env.deploy` (gitignored), and nowhere else.
+Tick **Create Deploy Hook** and keep the URL it produces. Anyone holding it can trigger a rebuild,
+so treat it as a credential — it belongs in `$env:STUDIOCRM_DEPLOY_HOOK` or in `deploy/.env.deploy`
+(gitignored), and nowhere else.
+
+**The hook does not accept a hand-made request.** It is a GitHub webhook receiver
+(`github.site4now.net/github/deployhook?token=...`), and it answers **HTTP 200 while refusing**,
+saying so only in the body:
+
+```json
+{"job":{"msg":"Invalid","state":"ERROR","createdAt":"..."}}
+```
+
+An empty POST, a `{"ref":"refs/heads/main"}` push event and a full GitHub push payload with
+`X-GitHub-Event: push` were all refused this way — so it wants something a caller here cannot
+reproduce, most likely a signature. **Anything that treats 200 as success will wait for a build
+that never started**, which is exactly what happened on the first attempt. The script now reads the
+body and stops.
+
+Until the hook is wired into the repository's own webhook settings, a deploy is triggered by
+clicking **Deploy Now** in the panel.
 
 ## Environment variables
 
@@ -176,16 +193,27 @@ $env:STUDIOCRM_FTP_PASSWORD  = '...'   # only needed to re-apply web.config
 .\deploy\Deploy-StudioCRM.ps1 -DryRun        # gates + report, contacts nothing
 .\deploy\Deploy-StudioCRM.ps1 -Push          # push the branch, trigger, repair, wait, verify
 .\deploy\Deploy-StudioCRM.ps1 -FixWebConfig  # re-apply web.config only
+.\deploy\Deploy-StudioCRM.ps1 -Hotfix        # replace the deployed server bundle, then web.config
 .\deploy\Deploy-StudioCRM.ps1 -VerifyOnly    # re-check what is already live
 ```
 
-What it does, in order:
+What a full run does, in order:
 
 ```
 read config -> git preflight -> typecheck -> tests -> build -> (push) -> trigger hook
-   -> wait; on the host's error page, upload web.config once
+   -> wait 5 minutes, then re-apply web.config every 90s while the site is silent
    -> wait for the live build SHA to become HEAD -> verify -> report
 ```
+
+The five-minute quiet period is not arbitrary: the host rewrites `web.config` at the very **end** of
+its run, about seven minutes after the trigger, so repairing it earlier accomplishes nothing and the
+repair has to keep trying rather than fire once.
+
+`-Hotfix` uploads the locally built `apps/api/dist/server.js` over the deployed one and repairs
+`web.config`. It is the way back when the site is down and the pipeline cannot be triggered, and it
+is honest about its cost: the server tree then matches no single commit until the next real deploy,
+and it only works while the web assets are unchanged between the deployed commit and `HEAD`. It runs
+no gates, so build first.
 
 - It refuses to run while `appUrl` is `TODO`, and refuses to deploy a commit that is not on the
   remote branch the panel clones (unless `-Push` is given). Both are guesses it will not make.
@@ -225,6 +253,8 @@ Failures seen so far:
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | 502 on every path, deploy log says `SUCCESS` | the host rewrote `web.config` without `<httpPlatform>` | `-FixWebConfig` |
+| Requests hang and never answer, `logs\node.log` shows `ERR_INVALID_ARG_VALUE` with `path: '19281               '` | `PORT` arrived padded with spaces and was taken for a named pipe | fixed in `lib/listen.ts`; if it ever returns, that trim is what broke |
+| The hook answers 200 but no new deploy log appears | the hook refused the request in its body (`"state":"ERROR"`) | click **Deploy Now** in the panel |
 | `fatal: could not read Username for 'https://github.com'` | the repo has been made private and the panel has no Deployment Key | paste a read-only GitHub PAT in the panel |
 | `Unsupported URL Type "workspace:"` | the build ran under npm | Build Command must use `pnpm` |
 | `vite: not found` / `tsc: not found` | devDependencies were pruned at install | keep `--prod=false` in the Build Command |
@@ -311,6 +341,26 @@ Before the first StudioCRM deploy the host was serving the **bare boilerplate** 
 `ERP Boilerplate`, from `main` at `7cb23c9`, running as a single `index.js` at the site root). That
 earlier arrangement is what proved `<httpPlatform>` is how Node starts on this host; its
 `web.config` survives in the site root as `web.config.bak`.
+
+### Live as of 2026-09-24
+
+```
+GET /api/health          -> {"status":"up","db":"up","version":"6f9ac2e","builtAt":"..."}
+GET /                    -> 200 text/html, <title>StudioCRM</title>
+GET /modules/billing/new -> 200 text/html   (app shell, so a refresh works)
+GET /api/no-such-route   -> 404 application/json
+GET /api/bills           -> 401             (authorization is enforced)
+GET /assets/index-*.js   -> 200 public, max-age=31536000, immutable
+GET /                    -> Cache-Control: no-cache
+```
+
+Two things about it are still open, and neither is cosmetic:
+
+- **`JWT_SECRET` in the site-root `.env` has not been proven to be a fresh value.** If it is still
+  the development `change-me-in-production`, anyone can mint a valid token for a public site. Rotate
+  it in that file and restart, then log in again.
+- **`http://` is served as well as `https://`, with no redirect.** Worth adding at the host or in
+  front of the app before real client data is entered.
 
 Stored in this repo: `appUrl` only. Kept out of it: the **Deploy Hook URL**, the **FTP password**,
 the site-root **`.env`**, and a **GitHub PAT** if the repository is ever made private.

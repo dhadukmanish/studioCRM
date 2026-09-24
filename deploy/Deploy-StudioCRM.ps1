@@ -29,6 +29,13 @@
     Continue even though tracked files are modified. A build that matches no commit cannot be
     reproduced or rolled back to, so this is deliberately awkward.
 
+.PARAMETER Hotfix
+    Upload the locally built apps\api\dist\server.js over the deployed one, repair web.config, and
+    stop. A stopgap for when the host's pipeline cannot be triggered but the site must come back:
+    it changes only the server bundle, so it is safe exactly when the web assets are unchanged
+    between the deployed commit and HEAD. The next real deploy replaces it with the tree from git.
+    It does NOT run the gates - build first, or you are shipping something untested.
+
 .PARAMETER FixWebConfig
     Upload deploy/web.config to the site root over FTPS and stop. The host's deploy step rewrites
     web.config and its version has no <httpPlatform> element, so IIS is left with nothing to start
@@ -48,7 +55,8 @@ param(
     [switch] $VerifyOnly,
     [switch] $Push,
     [switch] $Force,
-    [switch] $FixWebConfig
+    [switch] $FixWebConfig,
+    [switch] $Hotfix
 )
 
 Set-StrictMode -Version Latest
@@ -168,6 +176,18 @@ function Repair-WebConfig {
 if ($FixWebConfig) {
     Repair-WebConfig
     Write-Host "`nweb.config replaced. Give IIS a few seconds, then run with -VerifyOnly." -ForegroundColor Green
+    exit 0
+}
+
+if ($Hotfix) {
+    $bundlePath = Join-Path $repoRoot 'apps\api\dist\server.js'
+    if (-not (Test-Path $bundlePath)) { Fail 'apps/api/dist/server.js does not exist - run pnpm build first.' }
+
+    Write-Step 'Hotfix: replacing only the deployed server bundle'
+    Write-Warn 'this bypasses the host pipeline, so the server tree will not match the deployed commit until the next real deploy'
+    Send-ToSiteRoot -LocalPath $bundlePath -RemoteName 'apps/api/dist/server.js'
+    Repair-WebConfig
+    Write-Host "`nBundle and web.config replaced. Give IIS up to a minute, then run with -VerifyOnly." -ForegroundColor Green
     exit 0
 }
 
@@ -344,7 +364,20 @@ if ([string]::IsNullOrWhiteSpace($hook)) {
 } else {
     Write-Step 'Triggering the rebuild through the deploy hook'
     try {
-        Invoke-WebRequest -Uri $hook -Method Post -UseBasicParsing -TimeoutSec 60 | Out-Null
+        # The hook answers 200 even when it refuses the request, and says so only in the body:
+        # {"job":{"msg":"Invalid","state":"ERROR",...}}. Ignoring the body wasted a whole deploy
+        # cycle waiting for a build that had never started.
+        $response = Invoke-WebRequest -Uri $hook -Method Post -UseBasicParsing -TimeoutSec 60
+        $body = $response.Content
+        if ($body -match '"state"\s*:\s*"ERROR"') {
+            Fail @"
+the deploy hook refused the request: $($body.Trim())
+
+It is a GitHub webhook receiver and will not act on a hand-made POST - it has only ever been seen
+to accept a real delivery from GitHub. Click Deploy Now in the control panel instead, or wire this
+URL into the repository's webhook settings so a push triggers it. Nothing was deployed.
+"@
+        }
         Write-Ok 'deploy hook accepted the request'
     } catch {
         Fail "the deploy hook returned an error: $($_.Exception.Message). Nothing was deployed; the previous build is still serving."
@@ -358,9 +391,23 @@ Write-Host '    The host extracts the build onto the Windows site folder and the
 Write-Host '    web.config into a version with no <httpPlatform> element, which is a 502 on every'
 Write-Host '    request. So a 502 here means the deploy FINISHED; web.config is re-applied once.'
 
-$deadline = (Get-Date).AddMinutes(20)
+<#
+    Timing matters here, and getting it wrong wasted a deploy: repairing web.config too early is
+    useless, because the host rewrites it at the very END of its run. Observed on this host, a
+    deploy takes about seven minutes from trigger to extracted files.
+
+    So: do not touch web.config for the first few minutes. After that, re-upload it whenever the
+    site is not answering, every REPAIR_EVERY seconds. The upload is idempotent, so repeating it is
+    harmless, and it removes the need to guess the exact moment the host finishes.
+#>
+$QUIET_PERIOD = New-TimeSpan -Minutes 5
+$REPAIR_EVERY = New-TimeSpan -Seconds 90
+
+$started = Get-Date
+$deadline = $started.AddMinutes(25)
 $seen = ''
-$repaired = $false
+$lastRepair = $null
+
 while ((Get-Date) -lt $deadline) {
     $health = Get-Health -TimeoutSec 10
     $liveCommit = Get-Prop $health 'version'
@@ -369,13 +416,16 @@ while ((Get-Date) -lt $deadline) {
         break
     }
 
-    # No parseable health while the host is reachable is its IIS error page - the signature of the
-    # rewritten web.config. Repair it once; repeating would only fight a deploy still in flight.
-    if ($null -eq $health -and -not $repaired) {
-        Write-Warn 'the site is answering with an error page, which is what the rewritten web.config looks like'
+    $elapsed = (Get-Date) - $started
+    $silent = $null -eq $health
+    $quietPassed = $elapsed -gt $QUIET_PERIOD
+    $dueAgain = ($null -eq $lastRepair) -or (((Get-Date) - $lastRepair) -gt $REPAIR_EVERY)
+
+    if ($silent -and $quietPassed -and $dueAgain) {
+        Write-Warn "site not answering after $([int]$elapsed.TotalMinutes) min - re-applying web.config"
         Repair-WebConfig
-        $repaired = $true
-        Start-Sleep -Seconds 10
+        $lastRepair = Get-Date
+        Start-Sleep -Seconds 20
         continue
     }
 
