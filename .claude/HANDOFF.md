@@ -317,14 +317,48 @@ two `bills` / `bill_items` column sets, the service, the billing screens, the te
 `docs/BILLING_CALCULATION.md`, plus migration `0011` — already applied to the shared database, so
 a fresh clone matches this machine's schema.
 
-**Deployment — read `docs/DEPLOYMENT.md` before touching any of it.** The app is served at
-`https://studio.kriviinfotech.com` (SmarterASP.NET / Site4Now, account `jigneshsatani-001`, site
-`studio`, deploy target `/studio`). The host builds a **Linux container** with railpack from a
-**git clone** — it is NOT an IIS site, which an earlier round of this tooling wrongly assumed; the
-`web.config` and the FTPS uploader were deleted rather than left to mislead. FTP survives only as
-the way to read the host's build log. `pnpm build` now leaves the whole app in `apps/api/dist`
-(`server.js` + `public/`) and `pnpm start` runs it — one process, one origin, SPA fallback
-included, verified locally against the real bundle.
+**StudioCRM IS LIVE at `https://studio.kriviinfotech.com`** — read `docs/DEPLOYMENT.md` before
+touching any of it. `/api/health` reports `status: up`, `db: up` and the build's commit; the SPA
+deep link, the JSON 404 on an unknown `/api` path and the 401 on `/api/bills` were all checked
+against the live site.
+
+How the host really works, established from its own deploy log and the deployed files — **not** what
+the plan name suggests: railpack **builds in a Linux container** from a git clone, the built tree is
+then copied out, SCP'd to the **Windows** site folder `h:\root\home\jigneshsatani-001\www\studio`
+and extracted, and **IIS starts Node through `httpPlatformHandler`**. Three consequences that cost
+a whole evening between them:
+
+- **`web.config` is what starts the app**, not the panel's Start Command. The host rewrites it at
+  the END of every deploy into a version with the handler but **no `<httpPlatform>` element**, which
+  is a 502 on every path. `deploy/web.config` is the correct file and must be re-applied after each
+  deploy: `.\deploy\Deploy-StudioCRM.ps1 -FixWebConfig`. It also must carry **no rewrite rules** —
+  the host's template rewrites non-files to `/index.html`, which would turn `/api/health` into the
+  SPA shell.
+- **`PORT` arrives padded with spaces** from `%HTTP_PLATFORM_PORT%`. The original code read that as
+  a named pipe and Node exited with `ERR_INVALID_ARG_VALUE` after logging that it was serving —
+  a 502 with a healthy-looking startup line. Fixed and tested in `apps/api/src/lib/listen.ts`; do
+  not "simplify" that trim away.
+- **The deploy hook answers 200 while refusing.** It is a GitHub webhook receiver and says
+  `{"state":"ERROR","msg":"Invalid"}` in the body for any hand-made POST. Trigger a deploy by
+  clicking **Deploy Now** in the panel, or wire the hook into the repository's webhook settings.
+
+Not zero-downtime: the host extracts over the site folder and then breaks `web.config`, so the site
+is down until it is repaired. Deploy when a few minutes of downtime is acceptable.
+
+Diagnostics all live in the site root over FTPS (`win8194.site4now.net`, user `studiodev`):
+`node_app_automate_deploy_<id>.log` for the build, `logs\node.log` for the running process, and the
+host's own `production_studio_<id>.tar.gz.backup` of the previous tree.
+
+**Two open items on the live site, neither cosmetic:** the site-root `.env` supplies
+`DATABASE_URL` and `JWT_SECRET`, and `JWT_SECRET` has **not** been proven to be a fresh value — if
+it is still `change-me-in-production`, anyone can mint a token for a public site. And `http://` is
+served alongside `https://` with no redirect.
+
+**The deployed tree is currently a hotfix, not a clean pipeline deploy.** `server.js` was uploaded
+directly (`-Hotfix`) because the hook could not be triggered and the site was down; the rest of the
+tree is from the previous run. The web assets are identical between the two, so the live app is
+coherent — but the next **Deploy Now** from the panel should be allowed to replace the whole tree
+from git, followed by `-FixWebConfig`.
 
 Untracked in the working tree and **intentionally left untouched — never add, move or delete
 them**: `erp-boilerplate.bundle` (the original boilerplate delivery, now redundant) and
@@ -547,8 +581,11 @@ assumes one and will throw. Guard the login step when reusing it.
   task and touches every import.
 - `README.md` is still the boilerplate's README (its file references were repointed at Item
   Master when the sample module was deleted).
-- `JWT_SECRET=change-me-in-production` in `apps/api/.env` — fine for dev, must change before
-  deploy. So must the `Admin@1234` logins: the boilerplate publishes that default in `seed.ts`
-  and `README.md`, and the database behind it is hosted, not local.
+- **`JWT_SECRET` and the demo passwords are now a live exposure, not a future chore.** The app is
+  published on the internet and the repository is public. `apps/api/.env` still has
+  `JWT_SECRET=change-me-in-production`, and the site-root `.env` on the host has not been proven to
+  differ — if it does not, anyone can mint a valid token. The `Admin@1234` logins are published in
+  `seed.ts` and `README.md` for anyone to read, and the database behind them is the real hosted one.
+  Rotate the secret on the host and change those passwords before the client is given the link.
 - No lint/format tooling is installed by design. Match the surrounding style; `.editorconfig`
   (2 spaces, LF) is the only rule.
