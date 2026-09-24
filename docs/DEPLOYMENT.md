@@ -79,14 +79,20 @@ Websites → `studio` → the Node app page. Deploy target `/studio`.
 | --- | --- | --- |
 | Deployment Method | **Git Repository** | The host's intended path, and it makes every later deploy one webhook call. |
 | Git Repository URL | `https://github.com/dhadukmanish/studioCRM.git` | |
-| Git Branch | **`masters/account-master`** | **Not `main`.** `origin/main` predates the whole Masters / Appointments / Billing layer — deploying `main` deploys none of the app. |
-| Deployment Key | **Personal Access Token** | The repository is private. Without a token the clone fails with `fatal: could not read Username for 'https://github.com'` — which is exactly how the first queued deploy failed. |
+| Git Branch | **`main`** | The panel's own default, and the point: `main` is what is live, so the two can never drift apart. Feature branches merge **into** `main` before a deploy. |
+| Deployment Key | **none needed** | The repository is **public** (verified against the GitHub API), so the clone works unauthenticated — which is how the currently live build got there. A `fatal: could not read Username for 'https://github.com'` in the log means the repo has been made private; a read-only PAT for that one repository fixes it. |
 | Build Command | **`pnpm install --prod=false && pnpm build`** | The `npm run build` default cannot resolve this repo's `workspace:*` dependencies. `--prod=false` keeps the devDependencies the web build needs even if `NODE_ENV=production` is set at install time. |
 | Start Command | **`pnpm start`** | Runs the one bundle. |
 | Node version | newest LTS the panel offers (>= 20) | The bundle targets `node20` and needs >= 18 for `fetch`. |
 
-The **PAT is pasted into the panel by hand** and appears nowhere else — not in this repo, not in
-a script, not in a log. Give it read access to that one repository and nothing more.
+If a Deployment Key ever is needed, the **PAT is pasted into the panel by hand** and appears
+nowhere else — not in this repo, not in a script, not in a log. Give it read access to that one
+repository and nothing more.
+
+**The repository being public is a standing decision worth knowing about.** No secret is in it —
+`apps/api/.env` is gitignored and every credential lives in the panel — but the whole codebase,
+including this document and the database host name, is readable by anyone. Making it private is
+fine; it just means adding that PAT.
 
 Tick **Create Deploy Hook** and keep the URL it produces: it is what turns a deploy into one
 request. Anyone holding it can trigger a rebuild, so treat it as a credential — it belongs in
@@ -173,7 +179,7 @@ Failures seen so far:
 
 | In the log | Cause | Fix |
 | --- | --- | --- |
-| `fatal: could not read Username for 'https://github.com'` | private repo, no Deployment Key | paste a GitHub PAT in the panel |
+| `fatal: could not read Username for 'https://github.com'` | the repo has been made private and the panel has no Deployment Key | paste a read-only GitHub PAT in the panel |
 | `Unsupported URL Type "workspace:"` | the build ran under npm | Build Command must use `pnpm` |
 | `vite: not found` / `tsc: not found` | devDependencies were pruned at install | keep `--prod=false` in the Build Command |
 
@@ -247,14 +253,23 @@ applied — not after.
 | Login fails with a valid password | `JWT_SECRET` is unset, or differs from the one the existing refresh tokens were signed with. Log in again. |
 | Nobody but Super Admin can open a module | Role grants are stored JSON written before the newer permissions existed. Open each role in Settings → Roles and save it. |
 
-## Values that must come from the control panel
+## Where it is served, and what is live now
 
-`deploy/deploy.config.json` carries `TODO` until this is read from the panel. **Do not guess it** —
-a wrong `appUrl` makes the health check pass against somebody else's site.
+`https://studio.kriviinfotech.com` — a valid certificate, `http` answers as well as `https`, and
+the host is already serving an app there. Confirmed by probing it, not guessed:
 
-| Config key | Where to look |
-| --- | --- |
-| `appUrl` | Websites → `studio` → Domains: the live domain, or the temporary URL the panel lists for the site |
+| Probe | Answer | Meaning |
+| --- | --- | --- |
+| `GET /` | `200 text/html`, `<title>ERP Boilerplate</title>` | the **bare boilerplate** is live, not StudioCRM |
+| `GET /api/health` | `{"status":"up","time":...}` — no `db`, no `version` | an old build, from before health reported either |
+| `GET /modules/billing/new` | `200 text/html` | SPA fallback already works on this host |
+| `GET /api/no-such-route` | `404 application/json` | the Fastify error envelope — the API is genuinely running |
 
-Panel-side, and never stored here: the **GitHub PAT**, the **Deploy Hook URL**, and the
-**environment variables** above.
+The live build was **`origin/main` (`7cb23c9`)**, which predates the whole Masters / Appointments /
+Billing layer. So the pipeline itself was already proven end to end on this domain; the only thing
+missing was that `main` did not yet contain the application. That is why the feature work is
+merged into `main` and `main` is the deployed branch — one branch, one meaning.
+
+Nothing here is stored in this repo except `appUrl`. Panel-side, and never stored here: the
+**Deploy Hook URL**, the **environment variables** above, and a **GitHub PAT** if the repository is
+ever made private.

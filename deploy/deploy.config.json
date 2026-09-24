@@ -21,9 +21,9 @@
 
   "git": {
     "repository": "https://github.com/dhadukmanish/studioCRM.git",
-    "branch": "masters/account-master",
-    "$branch": "The branch the panel clones. NOT main: origin/main predates the whole Masters / Appointments / Billing layer, so deploying main would deploy none of the app.",
-    "$auth": "The repository is PRIVATE, so the panel needs a GitHub Personal Access Token with read access to it. The token is pasted into the panel by hand and is never stored here, in git, or in any script."
+    "branch": "main",
+    "$branch": "The branch the panel clones, and it must match what the panel is set to. main is the deployed branch on purpose: the panel already points at it, so there is one fewer place for 'live' and 'main' to drift apart. Feature branches merge into main before a deploy, never instead of it.",
+    "$auth": "The repository is PUBLIC (verified against the GitHub API), so the panel needs no Deployment Key and the clone works unauthenticated - which is how the currently live build got there. If it is ever made private, the panel needs a GitHub Personal Access Token with read access; that token is pasted into the panel by hand and is never stored here, in git, or in any script."
   },
 
   "build": {
@@ -34,8 +34,8 @@
     "nodeVersion": ">=20"
   },
 
-  "appUrl": "TODO",
-  "$appUrl": "The public https:// URL of the site, used as the client-review link and as the base for verification. Control panel -> Websites -> Domains (the live domain, or the temporary URL the panel lists for this site).",
+  "appUrl": "https://studio.kriviinfotech.com",
+  "$appUrl": "The public https:// URL of the site: the client-review link and the base every verification runs against. A valid certificate is served on it and the host already serves an app there, so this is confirmed, not guessed.",
 
   "healthPath": "/api/health",
 
