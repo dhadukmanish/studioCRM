@@ -6,9 +6,17 @@ argument-hint: "[dry-run | verify | rollback]"
 You are deploying StudioCRM to the client-review environment on SmarterASP.NET / Site4Now.
 Read `docs/DEPLOYMENT.md` first — it is the contract this command follows.
 
-**The host builds a Linux container from a git clone of this repository.** A deployment is
-therefore: get the commit onto the branch the panel clones, trigger a rebuild, and prove the live
-instance reports that exact commit. There is no FTP upload of the application and no `web.config`.
+**The host builds in a Linux container from a git clone and runs on Windows under IIS.** A
+deployment is therefore: get the commit onto the branch the panel clones, trigger a rebuild, put
+`web.config` back, and prove the live instance reports that exact commit.
+
+Two things about this host decide almost every failure, so know them before starting:
+
+- **`web.config` is what starts the app**, not the panel's Start Command. Its `<httpPlatform>`
+  element names `node.exe` and `apps\api\dist\server.js` and passes `PORT=%HTTP_PLATFORM_PORT%`.
+- **The host overwrites `web.config` on every deploy** with a version that has no `<httpPlatform>`
+  element, which is a 502 on every path — including `/api/health`. Re-applying `deploy/web.config`
+  is a required step, not a workaround. `-FixWebConfig` does it.
 
 `$ARGUMENTS` selects the mode:
 
@@ -22,10 +30,11 @@ instance reports that exact commit. There is no FTP upload of the application an
 1. **The database is live client data.** Never run `db:seed`, never reset, never drop, never
    `drizzle-kit push`. Deployment does not migrate as a side effect: a pending migration is a
    separate, explicitly approved step (step 5).
-2. **No secret is ever written down.** The GitHub PAT is pasted into the control panel by the
-   user. The deploy hook URL comes from `$env:STUDIOCRM_DEPLOY_HOOK`. `DATABASE_URL` and
-   `JWT_SECRET` are set in the panel. None of them goes into a file, a commit, a doc, a log, a
-   command line you echo, or your report.
+2. **No secret is ever written down.** The deploy hook URL and the FTP password come from
+   `$env:STUDIOCRM_DEPLOY_HOOK` / `$env:STUDIOCRM_FTP_PASSWORD` or from `deploy/.env.deploy`, which
+   is gitignored. `DATABASE_URL` and `JWT_SECRET` live in the site-root `.env`, uploaded by hand. A
+   GitHub PAT, if ever needed, is pasted into the panel by the user. None of them goes into a commit,
+   a doc, a log, a command line you echo, or your report.
 3. **`erp-boilerplate.bundle` and `studio form image.pdf` are intentional untracked files.** Never
    staged, never mentioned as a problem.
 4. **Pushing is explicit.** The container builds what is on the remote, so a deploy needs the
@@ -86,10 +95,12 @@ Compare `apps/api/drizzle/meta/_journal.json` with the applied rows in
 ### 6. Deploy
 
 ```powershell
-$env:STUDIOCRM_DEPLOY_HOOK = '...'          # from the panel, this shell only
+$env:STUDIOCRM_DEPLOY_HOOK  = '...'         # from the panel, this shell only
+$env:STUDIOCRM_FTP_PASSWORD = '...'         # only needed to re-apply web.config
 
 .\deploy\Deploy-StudioCRM.ps1 -DryRun
 .\deploy\Deploy-StudioCRM.ps1 -Push
+.\deploy\Deploy-StudioCRM.ps1 -FixWebConfig
 .\deploy\Deploy-StudioCRM.ps1 -VerifyOnly
 ```
 
@@ -97,10 +108,15 @@ The script pushes (only with `-Push`), calls the deploy hook, then polls `/api/h
 live `version` equals the pushed commit. Without the hook in the environment it says so and waits
 while the user clicks **Deploy Now** in the panel.
 
-A failed container build leaves the **previous** application serving — there is no half-deployed
-state. If the live SHA never changes, read the host's build log over FTPS
-(`/node_app_automate_deploy_<id>.log`, credentials in the user's own hands) before changing
-anything. `docs/DEPLOYMENT.md` lists the failures that have actually happened.
+**This is not a zero-downtime deployment, and do not describe it as one.** The host extracts the new
+tree over the site folder and then rewrites `web.config`, so between "the host finished" and
+"`web.config` is repaired" the whole site is a 502. Say so before deploying, and deploy when a few
+minutes of downtime is acceptable.
+
+If the live SHA never becomes the pushed commit, read the host's own logs over FTPS before changing
+anything — `/node_app_automate_deploy_<id>.log` ends with an explicit SUCCESS or failure, and
+`/logs/node.log` holds the Node process's own output. A `SUCCESS` with a 502 means `web.config`, not
+the build. `docs/DEPLOYMENT.md` lists the failures that have actually happened.
 
 ### 7. Verify the live application
 
@@ -134,10 +150,11 @@ Never print the deploy hook URL, the PAT, `DATABASE_URL`, `JWT_SECRET` or any ot
 
 Application and database rollback are **not** the same thing.
 
-- **Application**: point the deploy branch at the previous commit (or a tag on it) and trigger a
-  rebuild; verify `/api/health` reports that SHA. The previous container keeps serving until the
-  new one is healthy, so this is a rebuild, not a restore. Never force-push to do it without the
-  user's explicit approval.
+- **Application**: point the deploy branch at the previous commit (or a tag on it), trigger a
+  rebuild, re-apply `web.config`, and verify `/api/health` reports that SHA. It is a rebuild, not a
+  restore, and it costs the same downtime as any other deploy. Never force-push to do it without the
+  user's explicit approval. If an extraction itself went wrong, the host keeps the previous tree in
+  the site root as `production_studio_<id>.tar.gz.backup`.
 - **Database**: never reversed automatically. A migration is rolled back only by a new, reviewed,
   forward migration. `docs/DEPLOYMENT.md` explains why.
 

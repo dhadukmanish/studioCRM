@@ -29,6 +29,12 @@
     Continue even though tracked files are modified. A build that matches no commit cannot be
     reproduced or rolled back to, so this is deliberately awkward.
 
+.PARAMETER FixWebConfig
+    Upload deploy/web.config to the site root over FTPS and stop. The host's deploy step rewrites
+    web.config and its version has no <httpPlatform> element, so IIS is left with nothing to start
+    and every request is a 502. A full deploy does this automatically once the host has finished;
+    this switch is the same repair on its own.
+
 .EXAMPLE
     .\deploy\Deploy-StudioCRM.ps1 -DryRun
 
@@ -41,7 +47,8 @@ param(
     [switch] $DryRun,
     [switch] $VerifyOnly,
     [switch] $Push,
-    [switch] $Force
+    [switch] $Force,
+    [switch] $FixWebConfig
 )
 
 Set-StrictMode -Version Latest
@@ -84,6 +91,85 @@ Do not guess a hostname - a wrong one makes the health check pass against somebo
 
 $appUrl = $appUrl.TrimEnd('/')
 Write-Ok "site $appUrl, branch $branch"
+
+# ---------------------------------------------------------------- local secrets
+
+<#
+    Credentials come from the environment, or from deploy/.env.deploy, which is gitignored
+    precisely so they can be kept out of a shell history, a commit and a chat message. Nothing
+    here is ever echoed: only the NAME of what was found is reported.
+#>
+function Get-LocalSecret {
+    param([string] $Name)
+
+    $fromEnv = [Environment]::GetEnvironmentVariable($Name)
+    if (-not [string]::IsNullOrWhiteSpace($fromEnv)) { return $fromEnv }
+
+    $file = Join-Path $repoRoot 'deploy\.env.deploy'
+    if (Test-Path $file) {
+        foreach ($line in Get-Content $file) {
+            if ($line -match "^\s*$([regex]::Escape($Name))\s*=\s*(.+?)\s*$") {
+                return $Matches[1].Trim('"').Trim("'")
+            }
+        }
+    }
+    return $null
+}
+
+<#
+    Uploads one local file to the site root over explicit FTPS. This is NOT how the application is
+    deployed - the host's own pipeline does that from a git clone. It exists for exactly one file:
+    the web.config the host breaks on every deploy.
+#>
+function Send-ToSiteRoot {
+    param([string] $LocalPath, [string] $RemoteName)
+
+    $logs = $config.logs
+    $password = Get-LocalSecret 'STUDIOCRM_FTP_PASSWORD'
+    if ([string]::IsNullOrWhiteSpace($password)) {
+        $secure = Read-Host -Prompt "FTP password for $($logs.username)@$($logs.host)" -AsSecureString
+        $password = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+            [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+    }
+    if ([string]::IsNullOrWhiteSpace($password)) { Fail 'no FTP password available, so web.config cannot be repaired.' }
+
+    $request = [Net.FtpWebRequest]::Create("ftp://$($logs.host)/$RemoteName")
+    $request.Method = [Net.WebRequestMethods+Ftp]::UploadFile
+    $request.Credentials = New-Object Net.NetworkCredential($logs.username, $password)
+    $request.EnableSsl = $true          # explicit TLS: the server's FEAT advertises AUTH TLS
+    $request.UseBinary = $true
+    $request.UsePassive = $true
+    $request.KeepAlive = $false
+    $request.Timeout = 60000
+
+    $bytes = [IO.File]::ReadAllBytes($LocalPath)
+    $request.ContentLength = $bytes.Length
+    $stream = $request.GetRequestStream()
+    try {
+        $stream.Write($bytes, 0, $bytes.Length)
+    } finally {
+        $stream.Close()
+    }
+    $response = $request.GetResponse()
+    try {
+        Write-Ok "uploaded $RemoteName ($($bytes.Length) bytes) - $($response.StatusDescription.Trim())"
+    } finally {
+        $response.Close()
+    }
+}
+
+function Repair-WebConfig {
+    Write-Step 'Repairing web.config in the site root'
+    $local = Join-Path $repoRoot 'deploy\web.config'
+    if (-not (Test-Path $local)) { Fail "deploy/web.config is missing - it is the only thing that tells IIS which process to start." }
+    Send-ToSiteRoot -LocalPath $local -RemoteName 'web.config'
+}
+
+if ($FixWebConfig) {
+    Repair-WebConfig
+    Write-Host "`nweb.config replaced. Give IIS a few seconds, then run with -VerifyOnly." -ForegroundColor Green
+    exit 0
+}
 
 # ---------------------------------------------------------------- verify helpers
 
@@ -248,18 +334,7 @@ if ($Push) {
 # The hook URL is a credential: anyone holding it can trigger a rebuild. It comes from the
 # environment, or from deploy/.env.deploy, which is gitignored precisely so it can be pasted
 # into a file instead of into a shell history or a chat message.
-$hook = $env:STUDIOCRM_DEPLOY_HOOK
-if ([string]::IsNullOrWhiteSpace($hook)) {
-    $hookFile = Join-Path $repoRoot 'deploy\.env.deploy'
-    if (Test-Path $hookFile) {
-        foreach ($line in Get-Content $hookFile) {
-            if ($line -match '^\s*STUDIOCRM_DEPLOY_HOOK\s*=\s*(.+?)\s*$') {
-                $hook = $Matches[1].Trim('"').Trim("'")
-                Write-Ok 'deploy hook read from deploy/.env.deploy (gitignored)'
-            }
-        }
-    }
-}
+$hook = Get-LocalSecret 'STUDIOCRM_DEPLOY_HOOK'
 if ([string]::IsNullOrWhiteSpace($hook)) {
     Write-Step 'Triggering the rebuild'
     Write-Warn '$env:STUDIOCRM_DEPLOY_HOOK is not set, so the rebuild cannot be triggered from here.'
@@ -279,18 +354,35 @@ if ([string]::IsNullOrWhiteSpace($hook)) {
 # ---------------------------------------------------------------- wait, then verify
 
 Write-Step "Waiting for the live build to become $commit"
-$deadline = (Get-Date).AddMinutes(12)
+Write-Host '    The host extracts the build onto the Windows site folder and then rewrites'
+Write-Host '    web.config into a version with no <httpPlatform> element, which is a 502 on every'
+Write-Host '    request. So a 502 here means the deploy FINISHED; web.config is re-applied once.'
+
+$deadline = (Get-Date).AddMinutes(20)
 $seen = ''
+$repaired = $false
 while ((Get-Date) -lt $deadline) {
-    $liveCommit = Get-Prop (Get-Health -TimeoutSec 10) 'version'
+    $health = Get-Health -TimeoutSec 10
+    $liveCommit = Get-Prop $health 'version'
     if ($liveCommit -eq $commit) {
         Write-Ok "live build is $commit"
         break
     }
+
+    # No parseable health while the host is reachable is its IIS error page - the signature of the
+    # rewritten web.config. Repair it once; repeating would only fight a deploy still in flight.
+    if ($null -eq $health -and -not $repaired) {
+        Write-Warn 'the site is answering with an error page, which is what the rewritten web.config looks like'
+        Repair-WebConfig
+        $repaired = $true
+        Start-Sleep -Seconds 10
+        continue
+    }
+
     if ($liveCommit -ne $seen) {
         $seen = $liveCommit
         $label = $seen
-        if ([string]::IsNullOrEmpty($label)) { $label = 'an older build that does not report its commit' }
+        if ([string]::IsNullOrEmpty($label)) { $label = 'not reporting a commit yet' }
         Write-Host "    live build is still $label ..."
     }
     Start-Sleep -Seconds 15
@@ -302,13 +394,13 @@ if ($finalCommit -ne $commit) {
     $what = 'no answer'
     if ($null -ne $final) { $what = "version '$finalCommit'" }
     Fail @"
-the live build did not become $commit within 12 minutes (it reports: $what).
+the live build did not become $commit within 20 minutes (it reports: $what).
 
-The container build most likely failed. The host writes its build log to the site root over FTPS
-as node_app_automate_deploy_<id>.log - read it before changing anything. docs/DEPLOYMENT.md has
-the failure modes that have actually happened, including a private-repo clone with no token.
-
-Nothing was lost: the previous build is still serving.
+Read the host's own log before changing anything - it is written to the site root and reachable
+over FTPS as node_app_automate_deploy_<id>.log, and it ends with an explicit SUCCESS or failure.
+If it says SUCCESS, the build is on the server and the problem is IIS starting it: check
+.\logs\node.log in the site root, and that web.config still has its <httpPlatform> element.
+docs/DEPLOYMENT.md lists the failures that have actually happened.
 "@
 }
 

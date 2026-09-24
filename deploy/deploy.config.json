@@ -4,9 +4,11 @@
     "sensitive. Every credential — the GitHub token, DATABASE_URL, JWT_SECRET, the FTP password,",
     "the deploy hook URL — stays OUT of this file and out of git. See docs/DEPLOYMENT.md.",
     "",
-    "The host runs Node apps as a Linux container built from a GIT CLONE, not as an IIS site.",
-    "That was established from the host's own build log, not assumed. Anything in here that",
-    "reads like an FTP upload target is for reading logs, not for deploying.",
+    "The host BUILDS in a Linux container from a git clone and RUNS on Windows under IIS, which",
+    "starts Node through httpPlatformHandler from web.config. Established from the host's own",
+    "deploy log and from the deployed files, not assumed. So FTP is not how the app is deployed -",
+    "but it IS how the host's logs are read and how web.config is repaired after every deploy,",
+    "because the host rewrites it into a version that starts nothing.",
     "",
     "Values marked TODO must be read from the SmarterASP.NET / Site4Now control panel. Do not",
     "guess them: a wrong appUrl makes the health check pass against nothing."
@@ -44,6 +46,7 @@
     "host": "win8194.site4now.net",
     "username": "studiodev",
     "remoteRoot": "/",
-    "$why": "FTPS over port 21 (the server's own FEAT advertises AUTH TLS). The site root is where the host drops its deploy log, node_app_automate_deploy_<id>.log — the only channel there is for reading why a container build failed. Nothing is DEPLOYED over FTP; files copied here do not become the running container."
+    "siteRoot": "h:\\root\\home\\jigneshsatani-001\\www\\studio",
+    "$why": "FTPS over port 21 (the server's own FEAT advertises AUTH TLS), landing directly on the site root. Two jobs: reading the host's own logs (node_app_automate_deploy_<id>.log for the build, logs\\node.log for the running process), and re-uploading web.config after each deploy. The application itself is never deployed this way - the host's git pipeline does that. The password is never stored here; it comes from $env:STUDIOCRM_FTP_PASSWORD, deploy/.env.deploy (gitignored), or a prompt."
   }
 }
