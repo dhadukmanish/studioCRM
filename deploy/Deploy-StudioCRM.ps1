@@ -229,7 +229,21 @@ if ($Push) {
 
 # ---------------------------------------------------------------- trigger
 
+# The hook URL is a credential: anyone holding it can trigger a rebuild. It comes from the
+# environment, or from deploy/.env.deploy, which is gitignored precisely so it can be pasted
+# into a file instead of into a shell history or a chat message.
 $hook = $env:STUDIOCRM_DEPLOY_HOOK
+if ([string]::IsNullOrWhiteSpace($hook)) {
+    $hookFile = Join-Path $repoRoot 'deploy\.env.deploy'
+    if (Test-Path $hookFile) {
+        foreach ($line in Get-Content $hookFile) {
+            if ($line -match '^\s*STUDIOCRM_DEPLOY_HOOK\s*=\s*(.+?)\s*$') {
+                $hook = $Matches[1].Trim('"').Trim("'")
+                Write-Ok 'deploy hook read from deploy/.env.deploy (gitignored)'
+            }
+        }
+    }
+}
 if ([string]::IsNullOrWhiteSpace($hook)) {
     Write-Step 'Triggering the rebuild'
     Write-Warn '$env:STUDIOCRM_DEPLOY_HOOK is not set, so the rebuild cannot be triggered from here.'

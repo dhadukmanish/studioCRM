@@ -89,8 +89,8 @@ The **PAT is pasted into the panel by hand** and appears nowhere else — not in
 a script, not in a log. Give it read access to that one repository and nothing more.
 
 Tick **Create Deploy Hook** and keep the URL it produces: it is what turns a deploy into one
-request. It is a credential, so it lives in `$env:STUDIOCRM_DEPLOY_HOOK` in the shell that runs
-the deploy, never in a file.
+request. Anyone holding it can trigger a rebuild, so treat it as a credential — it belongs in
+`$env:STUDIOCRM_DEPLOY_HOOK` or in `deploy/.env.deploy` (gitignored), and nowhere else.
 
 ## Environment variables
 
@@ -132,8 +132,9 @@ As of the first deployment: 12 journal entries, 12 applied, nothing pending. The
 ## Deploying
 
 ```powershell
-# the deploy hook URL lives in this shell only - never in a file, never committed
+# the deploy hook URL is a credential. Either this shell only:
 $env:STUDIOCRM_DEPLOY_HOOK = '...'
+# or paste it as STUDIOCRM_DEPLOY_HOOK=... into deploy/.env.deploy, which is gitignored.
 
 .\deploy\Deploy-StudioCRM.ps1 -DryRun      # gates + report, contacts nothing
 .\deploy\Deploy-StudioCRM.ps1 -Push        # push the branch, trigger, wait, verify
