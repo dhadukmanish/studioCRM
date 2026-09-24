@@ -302,26 +302,29 @@ Two more lookups were added for Billing, both tenant-scoped:
 embeds the username (`https://dhadukmanish@github.com/...`) so git picks the right account.
 Keep the `dhadukmanish@` in the URL. Nothing needs to be deleted from Credential Manager.
 
-**Nothing has been pushed yet.** As of this update the current branch is `masters/account-master`
-(no upstream) and **10 commits are unpushed** (`origin/main..HEAD`), the newest being Billing
-Phase 2 (`ca96589 feat: add billing discounts and GST totals`). Whoever picks this up should
-decide whether to merge into `main` and push, rather than assume the remote is current.
-`origin/main` predates the whole Masters / Appointments / Billing layer — deploying `main` would
-deploy none of it.
+**`main` is the deployed branch, and it is pushed.** `origin/main` moved from `7cb23c9` (the bare
+boilerplate) to `b4a8929` on 2026-09-24 — 13 commits, the whole Masters / Appointments / Billing
+layer plus the deployment work. `masters/account-master` was fast-forward merged into `main` and
+still exists; future feature branches start from `main` and merge back into it before a deploy.
 
-**Billing Phase 2 IS committed** (`ca96589`): the shared calculation and the discount schema, the
+The repository is **public** (`private: false` on the GitHub API). No secret is in it —
+`apps/api/.env` is gitignored and every deployment credential lives in the hosting panel — but the
+code, the docs and the database host name are readable by anyone. Making it private is fine; it
+just means giving the hosting panel a read-only PAT.
+
+**Billing Phase 2 is committed** (`ca96589`): the shared calculation and the discount schema, the
 two `bills` / `bill_items` column sets, the service, the billing screens, the tests and
-`docs/BILLING_CALCULATION.md`, plus migration `0011` — which was already applied to the shared
-database, so a fresh clone now matches this machine's schema.
+`docs/BILLING_CALCULATION.md`, plus migration `0011` — already applied to the shared database, so
+a fresh clone matches this machine's schema.
 
-**What IS uncommitted is the deployment milestone, not Billing.** Modified `.gitignore`,
-`apps/api/build.mjs` (bundles `@erp/shared` in — `external: []`),
-`apps/api/src/plugins/errors.ts`, `apps/api/src/server.ts` and the root `package.json`
-(`build` now also runs `deploy/collect-dist.mjs`, `start` runs the bundle); new
-`apps/api/src/plugins/web.ts`, `deploy/`, `docs/DEPLOYMENT.md` and `.claude/commands/deploy.md`.
-None of it changes a business rule. Read `docs/DEPLOYMENT.md` before continuing it, and note that
-the host turned out to be a Linux container / git-clone pipeline rather than IIS — so the
-`web.config` and FTPS parts of `deploy/` are the wrong model and still need re-scoping.
+**Deployment — read `docs/DEPLOYMENT.md` before touching any of it.** The app is served at
+`https://studio.kriviinfotech.com` (SmarterASP.NET / Site4Now, account `jigneshsatani-001`, site
+`studio`, deploy target `/studio`). The host builds a **Linux container** with railpack from a
+**git clone** — it is NOT an IIS site, which an earlier round of this tooling wrongly assumed; the
+`web.config` and the FTPS uploader were deleted rather than left to mislead. FTP survives only as
+the way to read the host's build log. `pnpm build` now leaves the whole app in `apps/api/dist`
+(`server.js` + `public/`) and `pnpm start` runs it — one process, one origin, SPA fallback
+included, verified locally against the real bundle.
 
 Untracked in the working tree and **intentionally left untouched — never add, move or delete
 them**: `erp-boilerplate.bundle` (the original boilerplate delivery, now redundant) and
