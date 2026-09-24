@@ -97,6 +97,17 @@ function Get-Health {
     }
 }
 
+# A health payload from an OLDER build may not carry db, version or builtAt at all - which is
+# exactly the situation while waiting for a rebuild to replace such a build. Under Set-StrictMode
+# reaching for a missing property is a terminating error, so every read goes through this.
+function Get-Prop {
+    param($Object, [string] $Name)
+    if ($null -eq $Object) { return $null }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
 function Test-LiveApplication {
     param([string] $ExpectedCommit)
 
@@ -104,12 +115,17 @@ function Test-LiveApplication {
     $health = Get-Health
     if ($null -eq $health) { Fail "$appUrl$healthPath did not answer. The application is not serving." }
 
-    Write-Ok "health: status=$($health.status) db=$($health.db) version=$($health.version) builtAt=$($health.builtAt)"
-    if ($health.db -ne 'up') {
-        Write-Warn 'db is down - DATABASE_URL is missing or wrong in the panel environment variables. Nothing in the app will work past the login screen.'
+    $status = Get-Prop $health 'status'
+    $dbState = Get-Prop $health 'db'
+    $liveCommit = Get-Prop $health 'version'
+    $builtAt = Get-Prop $health 'builtAt'
+    Write-Ok "health: status=$status db=$dbState version=$liveCommit builtAt=$builtAt"
+
+    if ($dbState -ne 'up') {
+        Write-Warn 'db is not up - DATABASE_URL is missing or wrong in the panel environment variables. Nothing in the app will work past the login screen.'
     }
-    if ($ExpectedCommit -and $health.version -ne $ExpectedCommit) {
-        Fail "live build is $($health.version) but $ExpectedCommit was deployed. The host has not rebuilt, or it cloned a different branch."
+    if ($ExpectedCommit -and $liveCommit -ne $ExpectedCommit) {
+        Fail "live build is '$liveCommit' but $ExpectedCommit was deployed. The host has not rebuilt, or it cloned a different branch."
     }
 
     # A SPA deep link must return the app shell, not a JSON 404.
@@ -266,24 +282,25 @@ Write-Step "Waiting for the live build to become $commit"
 $deadline = (Get-Date).AddMinutes(12)
 $seen = ''
 while ((Get-Date) -lt $deadline) {
-    $health = Get-Health -TimeoutSec 10
-    if ($null -ne $health) {
-        if ($health.version -eq $commit) {
-            Write-Ok "live build is $commit"
-            break
-        }
-        if ($health.version -ne $seen) {
-            $seen = $health.version
-            Write-Host "    live build is still $seen ..."
-        }
+    $liveCommit = Get-Prop (Get-Health -TimeoutSec 10) 'version'
+    if ($liveCommit -eq $commit) {
+        Write-Ok "live build is $commit"
+        break
+    }
+    if ($liveCommit -ne $seen) {
+        $seen = $liveCommit
+        $label = $seen
+        if ([string]::IsNullOrEmpty($label)) { $label = 'an older build that does not report its commit' }
+        Write-Host "    live build is still $label ..."
     }
     Start-Sleep -Seconds 15
 }
 
 $final = Get-Health
-if ($null -eq $final -or $final.version -ne $commit) {
+$finalCommit = Get-Prop $final 'version'
+if ($finalCommit -ne $commit) {
     $what = 'no answer'
-    if ($null -ne $final) { $what = $final.version }
+    if ($null -ne $final) { $what = "version '$finalCommit'" }
     Fail @"
 the live build did not become $commit within 12 minutes (it reports: $what).
 
