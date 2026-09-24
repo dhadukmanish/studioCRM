@@ -9,3 +9,7 @@ coverage
 .turbo
 apps/api/uploads
 *.tsbuildinfo
+
+# deployment — secrets and host-side artefacts never belong in git
+deploy/.env.deploy
+deploy/*.local.json

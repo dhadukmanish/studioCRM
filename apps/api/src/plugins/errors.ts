@@ -15,7 +15,16 @@ export default fp(async function errorPlugin(app: FastifyInstance) {
     const status = anyErr.statusCode && anyErr.statusCode >= 400 ? anyErr.statusCode : 500;
     return reply.status(status).send({ error: { code: status === 500 ? 'INTERNAL' : 'ERROR', message: status === 500 ? 'Something went wrong' : err.message, timestamp: new Date().toISOString() } });
   });
+  /**
+   * One not-found handler for the whole app.
+   *
+   * When a web build is being served from this origin (`plugins/web.ts`), a GET that is not an
+   * API path and not a real file is a React ROUTE — `/modules/billing/new` refreshed in the
+   * browser — and must return the app shell. Anything under `/api/` stays a JSON 404 whatever
+   * else is mounted, so a mistyped endpoint can never answer with HTML.
+   */
   app.setNotFoundHandler((req, reply) => {
+    if (app.spaFallback && req.method === 'GET' && !req.url.startsWith('/api/')) return app.spaFallback(req, reply);
     reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'The requested resource was not found', timestamp: new Date().toISOString() } });
   });
 });

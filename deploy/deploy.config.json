@@ -1,0 +1,49 @@
+{
+  "$comment": [
+    "Non-secret deployment configuration for StudioCRM. Committed on purpose: none of it is",
+    "sensitive. Every credential — the GitHub token, DATABASE_URL, JWT_SECRET, the FTP password,",
+    "the deploy hook URL — stays OUT of this file and out of git. See docs/DEPLOYMENT.md.",
+    "",
+    "The host runs Node apps as a Linux container built from a GIT CLONE, not as an IIS site.",
+    "That was established from the host's own build log, not assumed. Anything in here that",
+    "reads like an FTP upload target is for reading logs, not for deploying.",
+    "",
+    "Values marked TODO must be read from the SmarterASP.NET / Site4Now control panel. Do not",
+    "guess them: a wrong appUrl makes the health check pass against nothing."
+  ],
+
+  "panel": {
+    "account": "jigneshsatani-001",
+    "site": "studio",
+    "deployTarget": "/studio",
+    "$deployTarget": "What the panel's Node app page shows as the deploy target for this site."
+  },
+
+  "git": {
+    "repository": "https://github.com/dhadukmanish/studioCRM.git",
+    "branch": "masters/account-master",
+    "$branch": "The branch the panel clones. NOT main: origin/main predates the whole Masters / Appointments / Billing layer, so deploying main would deploy none of the app.",
+    "$auth": "The repository is PRIVATE, so the panel needs a GitHub Personal Access Token with read access to it. The token is pasted into the panel by hand and is never stored here, in git, or in any script."
+  },
+
+  "build": {
+    "command": "pnpm install --prod=false && pnpm build",
+    "$command": "Explicit, because the panel's npm default cannot resolve this repo's workspace:* dependencies, and because --prod=false keeps the devDependencies the web build needs even if NODE_ENV=production is set during install.",
+    "start": "pnpm start",
+    "$start": "Runs apps/api/dist/server.js — the single bundle that serves /api and the React build.",
+    "nodeVersion": ">=20"
+  },
+
+  "appUrl": "TODO",
+  "$appUrl": "The public https:// URL of the site, used as the client-review link and as the base for verification. Control panel -> Websites -> Domains (the live domain, or the temporary URL the panel lists for this site).",
+
+  "healthPath": "/api/health",
+
+  "logs": {
+    "protocol": "ftps",
+    "host": "win8194.site4now.net",
+    "username": "studiodev",
+    "remoteRoot": "/",
+    "$why": "FTPS over port 21 (the server's own FEAT advertises AUTH TLS). The site root is where the host drops its deploy log, node_app_automate_deploy_<id>.log — the only channel there is for reading why a container build failed. Nothing is DEPLOYED over FTP; files copied here do not become the running container."
+  }
+}

@@ -3,7 +3,7 @@
 Context for picking this project up in a fresh session. No secrets live in this file
 (it is committed to GitHub) — credentials are in `apps/api/.env`, which is gitignored.
 
-Last updated: 2026-09-23.
+Last updated: 2026-09-24.
 
 ## What this project is
 
@@ -303,16 +303,25 @@ embeds the username (`https://dhadukmanish@github.com/...`) so git picks the rig
 Keep the `dhadukmanish@` in the URL. Nothing needs to be deleted from Credential Manager.
 
 **Nothing has been pushed yet.** As of this update the current branch is `masters/account-master`
-(no upstream) and **9 commits are unpushed** (`origin/main..HEAD`), the newest being Billing
-Phase 1 (`1432eac`). Whoever picks this up should decide whether to merge into `main` and push,
-rather than assume the remote is current.
+(no upstream) and **10 commits are unpushed** (`origin/main..HEAD`), the newest being Billing
+Phase 2 (`ca96589 feat: add billing discounts and GST totals`). Whoever picks this up should
+decide whether to merge into `main` and push, rather than assume the remote is current.
+`origin/main` predates the whole Masters / Appointments / Billing layer — deploying `main` would
+deploy none of it.
 
-**Billing Phase 2 is NOT committed.** It sits uncommitted in the working tree — the shared
-calculation and discount schema, the two `bills` / `bill_items` column sets, the service, the
-billing screens, the tests and the docs, plus the new `docs/BILLING_CALCULATION.md` and
-migration `0011` — because the instruction for that phase was not to commit. Migration `0011`
-has nonetheless been **applied** to the shared database, so a fresh clone would not match this
-machine's schema until it is committed.
+**Billing Phase 2 IS committed** (`ca96589`): the shared calculation and the discount schema, the
+two `bills` / `bill_items` column sets, the service, the billing screens, the tests and
+`docs/BILLING_CALCULATION.md`, plus migration `0011` — which was already applied to the shared
+database, so a fresh clone now matches this machine's schema.
+
+**What IS uncommitted is the deployment milestone, not Billing.** Modified `.gitignore`,
+`apps/api/build.mjs` (bundles `@erp/shared` in — `external: []`),
+`apps/api/src/plugins/errors.ts`, `apps/api/src/server.ts` and the root `package.json`
+(`build` now also runs `deploy/collect-dist.mjs`, `start` runs the bundle); new
+`apps/api/src/plugins/web.ts`, `deploy/`, `docs/DEPLOYMENT.md` and `.claude/commands/deploy.md`.
+None of it changes a business rule. Read `docs/DEPLOYMENT.md` before continuing it, and note that
+the host turned out to be a Linux container / git-clone pipeline rather than IIS — so the
+`web.config` and FTPS parts of `deploy/` are the wrong model and still need re-scoping.
 
 Untracked in the working tree and **intentionally left untouched — never add, move or delete
 them**: `erp-boilerplate.bundle` (the original boilerplate delivery, now redundant) and
