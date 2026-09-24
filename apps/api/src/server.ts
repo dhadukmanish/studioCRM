@@ -7,6 +7,7 @@ import authPlugin from './plugins/auth';
 import errorPlugin from './plugins/errors';
 import webPlugin from './plugins/web';
 import { registerRoutes } from './routes';
+import { listenTarget, describeTarget } from './lib/listen';
 import { db } from './db/client';
 import { sql } from 'drizzle-orm';
 import { ok } from './lib/respond';
@@ -54,17 +55,12 @@ export async function buildApp() {
   return app;
 }
 
-/**
- * The port. Under IIS/iisnode this is a named pipe rather than a number, which is why it is
- * passed through as-is when it is not numeric — coercing it to a number would silently listen
- * on port 0 and the site would never answer. Host stays 0.0.0.0 for a plain Node process.
- */
-const portEnv = process.env.PORT ?? '4000';
-const listen = /^\d+$/.test(portEnv) ? { port: Number(portEnv), host: '0.0.0.0' } : { path: portEnv };
+// Where to listen, and why it is not as simple as Number(process.env.PORT): see lib/listen.ts.
+const listen = listenTarget(process.env.PORT);
 
 buildApp()
   .then((app) => app.listen(listen))
-  .then(() => console.log(`API listening on ${'port' in listen ? `http://localhost:${listen.port}` : listen.path} (build ${VERSION.commit})`))
+  .then(() => console.log(`API listening on ${describeTarget(listen)} (build ${VERSION.commit})`))
   .catch((e) => {
     console.error(e);
     process.exit(1);
