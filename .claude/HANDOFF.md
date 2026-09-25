@@ -18,7 +18,7 @@ a data-table kit; the Masters layer, Appointments and Billing on top of it are p
   recipe is still accurate — read it before adding a module.
 - `CLAUDE.md` holds the always-loaded engineering rules — stable rules only; current
   implementation status lives in THIS file. `docs/ARCHITECTURE.md`, `docs/UI_DESIGN_SYSTEM.md`,
-  `docs/DEVELOPMENT.md`, `docs/BILL_NUMBERING.md`, `docs/BILLING_CALCULATION.md`, `docs/SETTINGS.md` and `docs/INVOICE_TEMPLATES.md` hold the
+  `docs/DEVELOPMENT.md`, `docs/BILL_NUMBERING.md`, `docs/BILLING_CALCULATION.md`, `docs/SETTINGS.md`, `docs/INVOICE_TEMPLATES.md` and `docs/WHATSAPP_SHARING.md` hold the
   detail; `.claude/agents/` has five
   specialists, `.claude/skills/studio-*` the workflows, `.claude/hooks/guard-bash.mjs` blocks
   destructive commands.
@@ -233,6 +233,27 @@ and date format from. Committed as `e64a222` on `feature/settings-branding` (see
 - **RBAC**: `settings_invoice_templates` to manage; previewing/printing/downloading a bill's
   invoice needs only `operations_billing` read. Existing roles need re-saving to get the new key.
 
+### WhatsApp invoice sharing — Phase 5
+
+**Full contract: `docs/WHATSAPP_SHARING.md`.** Branch `feature/whatsapp-invoice-sharing` (from
+`bef9e04`), **uncommitted** at the time of writing.
+
+- **Browser click-to-chat only** (`https://wa.me/<digits>?text=…`): it prefills number and text but
+  can NOT attach a file. The Share dialog prepares the Phase 4 PDF first; "Open WhatsApp" (a real
+  `target=_blank` link, one click) downloads it and opens the chat; the dialog then says "Attach it
+  in WhatsApp before sending". It never claims attached/sent; no bill status changes.
+- **Where:** Invoice Preview (uses the preview's template), saved bill form (Preview · PDF ·
+  WhatsApp — disabled while dirty, absent on a new bill), Bills list row menu.
+- **Number:** the bill's saved mobile, editable for that share only (the bill is never written).
+  `whatsappDestination` (shared) adds 91 to a bare Indian mobile and keeps an explicit `+`/`00` code.
+- **Message:** tenant setting `whatsappInvoiceMessage` in `app_settings` (Settings → General →
+  Invoice sharing; no migration), fixed placeholders only, unknown ones refused; stored Grand Total,
+  company from Company Settings, date in the tenant format.
+- **API:** `GET /api/bills/:id/invoice/share` and `POST …/share-opened` (activity-log action
+  `whatsapp_share_opened`, meta = transport + template; no number, no message) — both
+  `operations_billing` read, tenant-scoped. The shared DB already holds a few such audit rows from
+  manual and verification runs on 2026-09-25 — harmless.
+
 ### Bill numbering
 
 `allocateBillNumber` (`apps/api/src/services/billNumbers.ts`) is unchanged from the phase that
@@ -394,7 +415,8 @@ exists; future feature branches start from `main` and merge back into it before 
 | Branch | Holds | State |
 | --- | --- | --- |
 | `feature/settings-branding` | `e64a222` feat: add global date settings and company branding (Phase 3) | committed, not pushed, not merged |
-| `feature/invoice-templates` | branched from `e64a222`; Phase 4 (invoice templates, preview, PDF with Gujarati/Hindi shaping) — `feat: add invoice templates preview and PDF` | committed, not pushed, not merged |
+| `feature/invoice-templates` | branched from `e64a222`; Phase 4 (invoice templates, preview, PDF with Gujarati/Hindi shaping) — `bef9e04` feat: add invoice templates preview and PDF | committed, not pushed, not merged |
+| `feature/whatsapp-invoice-sharing` | branched from `bef9e04`; Phase 5 (WhatsApp invoice sharing) | **uncommitted** working tree at the time of writing |
 
 `main` has neither. Merge in order (settings, then invoices) — never start new work from `main`
 while these are open, or it will lack the settings foundation. Neither phase is deployed; their
@@ -544,7 +566,7 @@ invoices, plus `lib/listen`), 979 tests. The route suites have two sections:
   model, and real PDFs parsed back with pdf.js — text, pages, images, glyph outlines,
   determinism, nothing drawn off the page, unprintable-character refusal, Gujarati/Hindi shaping,
   extraction and wrapping). Always runs.
-  **631 tests pass today; 358 skipped.**
+  **669 tests pass today; 364 skipped.**
 - **B — database-backed** (tenant isolation, RBAC, duplicate guards, lookup field exposure, the
   allocators' sequences and concurrency, the rollback that keeps a failed create from burning a
   number, bill snapshots, the stored discount and its allocation, and the atomic line
@@ -695,7 +717,7 @@ Confirmed end-to-end against the live API / in a real browser, not just by readi
   it; a delete that raced set-default could remove the default; an undecodable logo broke every
   PDF; a stuck preview when the chosen template stopped fitting; a duplicate "Amount" column.
   Left as LOW: concurrent template edits get a generic 409/500 message (data stays consistent).
-- `pnpm typecheck`, `pnpm test` (631 passed, 358 skipped) and `pnpm build` all clean.
+- `pnpm typecheck`, `pnpm test` (669 passed, 364 skipped) and `pnpm build` all clean.
 
 Demo logins: `admin@example.com` (Super Admin, everything) and `viewer@example.com`
 (read-only, useful for testing RBAC) — both password `Admin@1234`.
@@ -708,10 +730,13 @@ assumes one and will throw. Guard the login step when reusing it.
 
 ## Known pending work
 
-- **Phases 3 and 4 are committed but unpushed, unmerged and undeployed** — see the
-  branch table under Git. Migrations `0012`–`0014` are already on the shared database.
-- **Next: WhatsApp sharing** — deliberately not started. It should call `getBillInvoicePdf`
-  (`services/invoice.ts`) and use the bill's mobile number; no unofficial automation.
+- **Phases 3 and 4 are committed, Phase 5 is uncommitted; all unpushed, unmerged and undeployed** —
+  see the branch table under Git. Migrations `0012`–`0014` are already on the shared database
+  (Phase 5 has none). **The first deploy containing Phase 4/5 must be a FULL deploy — never
+  `Deploy-StudioCRM.ps1 -Hotfix`**, which uploads only server.js and would leave the host without
+  `dist/harfbuzz.wasm` and the new fonts.
+- **WhatsApp is browser click-to-chat only.** An official WhatsApp Business API transport (upload,
+  send, delivery status) is a later decision — no credentials exist or are wanted yet.
 - **Invoice limitations, by design for now:** A4 portrait only; the screen/print preview flows
   continuously (the PDF is where pages are split); PDF text covers English, Gujarati, Hindi and ₹ —
   other scripts (Tamil, emoji…) are refused with a 422; a WebP logo stored other than
@@ -725,7 +750,7 @@ assumes one and will throw. Guard the login step when reusing it.
   transaction anywhere yet — a bill is a document, not a journal entry.
 - **Billing beyond Phase 2 is NOT implemented**, deliberately and by instruction: advance, paid
   and outstanding; the CGST/SGST/IGST split; the delivery workflow (the `delivery_date` column
-  exists, the statuses do not); WhatsApp sharing; a draft/cancelled bill status; a Customer
+  exists, the statuses do not); a draft/cancelled bill status; a Customer
   Master. (Invoice templates, preview, print and PDF are built — Phase 4.) The data is shaped so each of these
   is an addition, not a rewrite.
 - **The CGST/SGST/IGST split needs business input before it can be built:** the studio's state,

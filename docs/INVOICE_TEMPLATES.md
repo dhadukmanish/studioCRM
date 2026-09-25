@@ -7,7 +7,7 @@ never change a figure on it.
 saved bill (its own snapshot) ─┐
 company profile + logo ────────┼─> buildInvoiceModel ─> InvoiceRenderModel ─┬─> browser preview / print
 date format (app settings) ────┤   (packages/shared)     (display-ready)      └─> PDF (pdf-lib, server)
-invoice template ──────────────┘                                                └─> (next) WhatsApp
+invoice template ──────────────┘                                                └─> WhatsApp share (docs/WHATSAPP_SHARING.md)
 ```
 
 ## The one rule
@@ -226,8 +226,9 @@ created as a copy).
   has the compatible-template picker, Print and Download PDF; the bill list's row menu has
   Preview invoice and Download PDF.
 
-## Next: WhatsApp
+## WhatsApp
 
-`getBillInvoicePdf(tenantId, billId, templateId?)` (`services/invoice.ts`) returns `{ bytes,
-fileName, model }` and is not tied to an HTTP download, so a WhatsApp share can call it directly
-with the bill's mobile number. Nothing for WhatsApp is built yet.
+Built in Phase 5 — see `docs/WHATSAPP_SHARING.md`. The share dialog downloads this same PDF
+(`GET /api/bills/:id/invoice/pdf`) for the chosen template; it adds no PDF code of its own.
+`getBillInvoicePdf` (`services/invoice.ts`) stays the reusable entry point for a future official
+WhatsApp Business API transport.

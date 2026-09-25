@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Download, Printer } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Download, MessageCircle, Printer } from 'lucide-react';
 import { INVOICE_TAX_MODE_LABELS, isTemplateCompatible } from '@erp/shared';
 import { Crumb } from '@/components/layout/AppShell';
 import { Badge, EmptyState, Select, Spinner } from '@/components/ui';
 import { InvoicePrintRoot, InvoiceSheet, useInvoiceLogo } from '@/components/invoice/InvoiceDocument';
+import { ShareInvoiceDialog } from '@/components/invoice/ShareInvoiceDialog';
 import { downloadInvoicePdf, useBillInvoice, useInvoiceTemplateLookup } from '@/lib/invoice';
 import { ApiError } from '@/lib/api';
 import { toast } from '@/lib/toast';
@@ -12,7 +13,7 @@ import { toast } from '@/lib/toast';
 /**
  * A saved bill's invoice. Read-only: it shows the server's render model of the bill, lets the
  * operator try another COMPATIBLE template (for this preview only — the tenant default is set in
- * Settings → Invoice Templates), print it, or download the server-generated PDF.
+ * Settings → Invoice Templates), print it, download the server-generated PDF, or share it on WhatsApp.
  */
 export default function InvoicePreviewPage() {
   const { id } = useParams<{ id: string }>();
@@ -23,6 +24,7 @@ export default function InvoicePreviewPage() {
   const model = invoice.data;
   const logoSrc = useInvoiceLogo(model);
   const [downloading, setDownloading] = useState(false);
+  const [sharing, setSharing] = useState(false);
   // A chosen template can stop fitting (deactivated or edited since the picker loaded): fall back
   // to the default rather than leave the page stuck on an error with no picker.
   useEffect(() => {
@@ -78,6 +80,9 @@ export default function InvoicePreviewPage() {
           <button type="button" className="btn-primary" onClick={download} disabled={downloading}>
             {downloading ? <Spinner /> : <Download className="h-4 w-4" strokeWidth={1.5} />} Download PDF
           </button>
+          <button type="button" className="btn-outline" onClick={() => setSharing(true)} title="Share this invoice on WhatsApp">
+            <MessageCircle className="h-4 w-4" strokeWidth={1.5} /> WhatsApp
+          </button>
         </div>
       </div>
       {model.pdfUnprintable.length > 0 && (
@@ -94,6 +99,8 @@ export default function InvoicePreviewPage() {
       </div>
       <p className="mt-2 text-center text-[12px] text-gray-500">The downloaded PDF is split into A4 pages, with the table header repeated on each page.</p>
       <InvoicePrintRoot model={model} logoSrc={logoSrc} />
+      {/* Shares the template shown here — never changes the tenant default or the bill. */}
+      <ShareInvoiceDialog billId={id ?? null} open={sharing} onClose={() => setSharing(false)} templateId={templateId ?? model.template.id ?? undefined} />
     </>
   );
 }

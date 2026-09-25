@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Controller, FormProvider, useFieldArray, useForm, useWatch } from 'react-hook-form';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, ChevronDown, FileText } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Download, FileText, MessageCircle } from 'lucide-react';
 import {
   BILL_DISCOUNT_TYPES,
   BILL_DISCOUNT_TYPE_SHORT,
@@ -11,12 +11,16 @@ import {
   billDiscountError,
   calculateBill,
   formatGst,
+  invoiceFileName,
   type BillDiscountType,
   type GstSummaryRow,
 } from '@erp/shared';
 import { Crumb } from '@/components/layout/AppShell';
 import { EmptyState, Select, Spinner, TextInput, type Option } from '@/components/ui';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
+import { downloadInvoicePdf } from '@/lib/invoice';
+import { toast } from '@/lib/toast';
+import { ShareInvoiceDialog } from '@/components/invoice/ShareInvoiceDialog';
 import { applyApiErrors, useBooksLookup, useItemsLookup, useSave, type AppointmentLookup } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
 import { fmtMoney, todayISO } from '@/lib/format';
@@ -149,6 +153,8 @@ function BillForm({ bill }: { bill?: BillRecord }) {
   const [linkedNo, setLinkedNo] = useState<number | null>(bill?.appointmentNumber ?? null);
   const [focusIndex, setFocusIndex] = useState<number | null>(null);
   const [lineCountError, setLineCountError] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   /**
    * The preview. Every figure on this screen comes out of `calculateBill` in `@erp/shared` —
@@ -260,6 +266,20 @@ function BillForm({ bill }: { bill?: BillRecord }) {
   };
 
   const title = bill ? `Bill ${bill.bookNumber}/${bill.billNumber}` : 'New Bill';
+  // The invoice actions exist only for a SAVED bill (it needs the issued number) and show the
+  // saved version, so unsaved edits must be saved first.
+  const unsavedHint = 'Save your changes first — the invoice shows the saved bill';
+  const downloadPdf = async () => {
+    if (!bill) return;
+    setDownloading(true);
+    try {
+      await downloadInvoicePdf(bill.id, invoiceFileName(bill.bookNumber, bill.billNumber));
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'The PDF could not be generated');
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <FormProvider {...form}>
@@ -270,19 +290,32 @@ function BillForm({ bill }: { bill?: BillRecord }) {
         </button>
         <h2 className="text-[20px] font-semibold text-gray-900">{title}</h2>
         {bill && <span className="text-[13px] text-gray-500">{bill.customerName}</span>}
-        {/* An invoice exists only for a SAVED bill — it needs the issued number. It shows the
-            saved version, so unsaved edits must be saved first. */}
         {bill && (
-          <button
-            type="button"
-            className="btn-outline ml-auto"
-            disabled={isDirty}
-            title={isDirty ? 'Save your changes first — the invoice shows the saved bill' : 'Preview, print or download the invoice'}
-            onClick={() => nav(`/modules/billing/${bill.id}/invoice`)}
-          >
-            <FileText className="h-4 w-4" strokeWidth={1.5} /> Preview
-          </button>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="btn-outline"
+              disabled={isDirty}
+              title={isDirty ? unsavedHint : 'Preview or print the invoice'}
+              onClick={() => nav(`/modules/billing/${bill.id}/invoice`)}
+            >
+              <FileText className="h-4 w-4" strokeWidth={1.5} /> Preview
+            </button>
+            <button
+              type="button"
+              className="btn-outline"
+              disabled={isDirty || downloading}
+              title={isDirty ? unsavedHint : 'Download the invoice PDF'}
+              onClick={downloadPdf}
+            >
+              {downloading ? <Spinner /> : <Download className="h-4 w-4" strokeWidth={1.5} />} PDF
+            </button>
+            <button type="button" className="btn-outline" disabled={isDirty} title={isDirty ? unsavedHint : 'Share the invoice on WhatsApp'} onClick={() => setSharing(true)}>
+              <MessageCircle className="h-4 w-4" strokeWidth={1.5} /> WhatsApp
+            </button>
+          </div>
         )}
+        {bill && <ShareInvoiceDialog billId={bill.id} open={sharing} onClose={() => setSharing(false)} />}
       </div>
 
       <form onSubmit={submit} className="space-y-3 pb-2">

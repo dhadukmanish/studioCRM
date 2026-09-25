@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Save } from 'lucide-react';
-import { Field, Select, Spinner, Switch, TextInput } from '@/components/ui';
+import { Field, Select, Spinner, Switch, TextArea, TextInput } from '@/components/ui';
 import { useSave, useSettings } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
 import { THEMES } from '@/lib/theme';
 import { todayISO } from '@/lib/format';
-import { DATE_FORMATS, dateFormatLabel, formatDateOnly } from '@erp/shared';
+import { DATE_FORMATS, DEFAULT_WHATSAPP_INVOICE_MESSAGE, WHATSAPP_MESSAGE_MAX, WHATSAPP_MESSAGE_VARIABLES, dateFormatLabel, formatDateOnly, unknownMessageVariables } from '@erp/shared';
 
 /** Tenant-wide settings. Keys mirror DEFAULT_SETTINGS in apps/api/src/services/settings.ts — add a control here when you add a key there. */
 export default function GeneralSettingsPage() {
@@ -17,11 +17,12 @@ export default function GeneralSettingsPage() {
   const save = useSave({ invalidate: ['settings'] });
   const set = (k: string, v: any) => setS((x) => ({ ...x, [k]: v }));
   const today = todayISO();
+  const unknownVars = unknownMessageVariables(String(s.whatsappInvoiceMessage ?? ''));
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-[20px] font-semibold text-gray-900">General Settings</h2>
-        <button className="btn-primary" disabled={!can('settings_general', 'update') || save.isPending} onClick={() => save.mutate({ method: 'put', url: '/api/settings', body: s })}>{save.isPending ? <Spinner /> : <Save className="h-4 w-4" />} Save Changes</button>
+        <button className="btn-primary" disabled={!can('settings_general', 'update') || save.isPending || unknownVars.length > 0} onClick={() => save.mutate({ method: 'put', url: '/api/settings', body: s })}>{save.isPending ? <Spinner /> : <Save className="h-4 w-4" />} Save Changes</button>
       </div>
       {q.isLoading ? <div className="py-10 text-center"><Spinner className="inline h-5 w-5" /></div> : (
         <div className="grid gap-5 lg:grid-cols-2">
@@ -41,6 +42,17 @@ export default function GeneralSettingsPage() {
             <Field label="Minimum Password Length"><TextInput type="number" min={4} max={64} value={s.passwordMinLength ?? 6} onChange={(e) => set('passwordMinLength', Number(e.target.value))} className="w-[120px]" /></Field>
             <Switch checked={!!s.requireCompanyOnUsers} onChange={(v) => set('requireCompanyOnUsers', v)} label="Users must be assigned at least one company" />
             <Switch checked={!!s.allowSelfSignup} onChange={(v) => set('allowSelfSignup', v)} label="Allow self sign-up (requires a signup route)" />
+          </div>
+          <div className="card p-5 space-y-4 lg:col-span-2">
+            <h3 className="section-title">Invoice sharing</h3>
+            <Field
+              label="WhatsApp invoice message"
+              error={unknownVars.length ? `Unknown placeholder ${unknownVars.map((v) => `{${v}}`).join(', ')}` : undefined}
+              hint={<>The message the WhatsApp share starts with — the operator can still edit it each time. Placeholders: {WHATSAPP_MESSAGE_VARIABLES.map((v) => `{${v}}`).join(' ')}</>}
+            >
+              <TextArea rows={6} maxLength={WHATSAPP_MESSAGE_MAX} value={s.whatsappInvoiceMessage ?? ''} onChange={(e) => set('whatsappInvoiceMessage', e.target.value)} />
+            </Field>
+            <button type="button" className="btn-ghost text-primary" onClick={() => set('whatsappInvoiceMessage', DEFAULT_WHATSAPP_INVOICE_MESSAGE)}>Reset to the default message</button>
           </div>
         </div>
       )}

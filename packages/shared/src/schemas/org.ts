@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DATE_FORMATS, TIME_FORMATS } from '../dates.js';
+import { WHATSAPP_MESSAGE_MAX, WHATSAPP_MESSAGE_VARIABLES, unknownMessageVariables } from '../whatsapp.js';
 
 export const companySchema = z.object({
   name: z.string().min(1, 'Company name is required'),
@@ -69,5 +70,16 @@ export const appSettingsSchema = z
   .object({
     dateFormat: z.enum(DATE_FORMATS, { errorMap: () => ({ message: `Date format must be one of ${DATE_FORMATS.join(', ')}` }) }).optional(),
     timeFormat: z.enum(TIME_FORMATS, { errorMap: () => ({ message: `Time format must be one of ${TIME_FORMATS.join(', ')}` }) }).optional(),
+    /** The default WhatsApp invoice message (docs/WHATSAPP_SHARING.md). Only the known placeholders are allowed. */
+    whatsappInvoiceMessage: z
+      .string()
+      .trim()
+      .min(1, 'The WhatsApp message cannot be empty')
+      .max(WHATSAPP_MESSAGE_MAX, `The WhatsApp message cannot exceed ${WHATSAPP_MESSAGE_MAX} characters`)
+      .superRefine((v, ctx) => {
+        const unknown = unknownMessageVariables(v);
+        if (unknown.length) ctx.addIssue({ code: 'custom', message: `Unknown placeholder ${unknown.map((u) => `{${u}}`).join(', ')}. Use ${WHATSAPP_MESSAGE_VARIABLES.map((u) => `{${u}}`).join(', ')}` });
+      })
+      .optional(),
   })
   .passthrough();

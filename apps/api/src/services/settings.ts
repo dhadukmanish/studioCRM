@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { DEFAULT_DATE_FORMAT, DEFAULT_TIME_FORMAT } from '@erp/shared';
+import { DEFAULT_DATE_FORMAT, DEFAULT_TIME_FORMAT, DEFAULT_WHATSAPP_INVOICE_MESSAGE } from '@erp/shared';
 import { db, schema } from '../db/client';
 
 /**
@@ -18,6 +18,8 @@ export const DEFAULT_SETTINGS = {
   sessionHours: 12,
   passwordMinLength: 6,
   requireCompanyOnUsers: true,
+  /** The WhatsApp invoice message, with {placeholders} (packages/shared/src/whatsapp.ts). */
+  whatsappInvoiceMessage: DEFAULT_WHATSAPP_INVOICE_MESSAGE,
 };
 export type AppSettings = typeof DEFAULT_SETTINGS & Record<string, any>;
 

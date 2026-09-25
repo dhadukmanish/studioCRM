@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { InvoiceLayoutPreset, InvoiceRenderModel, InvoiceTemplateConfig, InvoiceTemplateMode } from '@erp/shared';
+import type { InvoiceLayoutPreset, InvoiceRenderModel, InvoiceShareContext, InvoiceTemplateConfig, InvoiceTemplateMode } from '@erp/shared';
 import { api, qs } from '@/lib/api';
 
 /** A stored template as `/api/settings/invoice-templates` returns it. */
@@ -19,7 +19,7 @@ export interface InvoiceTemplateLookup { id: string; templateName: string; suppo
 
 export const TEMPLATES_KEY = 'invoice-templates';
 
-/** A saved bill's render model, plus the characters the PDF's Latin fonts cannot draw. */
+/** A saved bill's render model, plus the characters the PDF fonts cannot draw. */
 export type BillInvoice = InvoiceRenderModel & { pdfUnprintable: string[] };
 
 /** Template Master list (management). */
@@ -49,9 +49,27 @@ export const useBillInvoice = (billId?: string, templateId?: string) =>
     placeholderData: (prev) => prev,
   });
 
-/** Downloads the server-generated PDF — the authoritative document, not a screenshot of the preview. */
+/** The server-generated PDF — the authoritative document, not a screenshot of the preview. */
+export const fetchInvoicePdf = (billId: string, templateId?: string) => api.blob(`/api/bills/${billId}/invoice/pdf${qs({ templateId, download: 1 })}`);
+
+/** Downloads the server-generated PDF. */
 export async function downloadInvoicePdf(billId: string, fileName: string, templateId?: string) {
-  const blob = await api.blob(`/api/bills/${billId}/invoice/pdf${qs({ templateId, download: 1 })}`);
+  saveFile(await fetchInvoicePdf(billId, templateId), fileName);
+}
+
+/**
+ * The WhatsApp Share dialog's starting point (docs/WHATSAPP_SHARING.md): the bill's saved mobile
+ * and the tenant's message, filled from the saved bill and Company Settings. Always refetched.
+ */
+export const useInvoiceShare = (billId?: string) =>
+  useQuery({ queryKey: ['bill-invoice-share', billId], queryFn: () => api.get<InvoiceShareContext>(`/api/bills/${billId}/invoice/share`), enabled: !!billId, staleTime: 0 });
+
+/** Audit: WhatsApp was opened for this invoice. Never "sent" — click-to-chat cannot know that. Best effort. */
+export const recordInvoiceShareOpened = (billId: string, templateId?: string) =>
+  api.post(`/api/bills/${billId}/invoice/share-opened`, { transport: 'WHATSAPP_CLICK_TO_CHAT', templateId: templateId ?? null }).catch(() => undefined);
+
+/** Hands a file to the browser's download. Must run inside the user's click for some browsers. */
+export function saveFile(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

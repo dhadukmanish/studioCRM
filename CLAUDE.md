@@ -7,7 +7,8 @@ Group, Account and Book Master, the Appointment module, the settings foundation 
 date format), and the Bill (header, lines, master
 snapshots, book-wise numbering, bill-level discount, rate-wise GST summary and final totals),
 plus invoice templates, the invoice preview, print and server-side PDF (`docs/INVOICE_TEMPLATES.md`).
-Payment, ledger, WhatsApp, the CGST/SGST/IGST split and reports are not started.
+WhatsApp invoice sharing is browser click-to-chat (`docs/WHATSAPP_SHARING.md`) — it never claims a PDF
+was attached or a message sent. Payment, ledger, the CGST/SGST/IGST split and reports are not started.
 Billing honours two contracts: `docs/BILL_NUMBERING.md` for identity and `docs/BILLING_CALCULATION.md`
 for money. Current implementation status lives in `.claude/HANDOFF.md`.
 
@@ -180,6 +181,8 @@ return findings, not file dumps. Saving tokens never justifies guessing at corre
   `DateInput`, logo storage/versioning, cache invalidation, what the Invoice phase reads
 - `docs/INVOICE_TEMPLATES.md` — template model and rules, the render model, preview/print, the
   PDF renderer (pdf-lib + HarfBuzz shaping for Gujarati/Hindi, pre-subset fonts, the searchable-text
-  mapping — read before touching any of it), RBAC, WhatsApp hook
+  mapping — read before touching any of it), RBAC
+- `docs/WHATSAPP_SHARING.md` — WhatsApp sharing: what click-to-chat can and cannot do, number
+  normalisation, message placeholders, audit semantics ("opened", never "sent"), future API boundary
 - `.claude/HANDOFF.md` — live project state, DB target, gotchas, pending work (`/handoff`)
 - `README.md` — boilerplate feature map and the "add a module" recipe

@@ -6,4 +6,5 @@ export * from './api.js';
 export * from './billing.js';
 export * from './dates.js';
 export * from './invoice.js';
+export * from './whatsapp.js';
 export * from './schemas/index.js';

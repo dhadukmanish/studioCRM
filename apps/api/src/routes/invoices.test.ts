@@ -904,4 +904,79 @@ describe.skipIf(!TEST_DB)('Invoice templates and invoices API (integration, need
       expect(after.totals).toEqual(before.totals);
     });
   });
+
+  /** WhatsApp sharing (docs/WHATSAPP_SHARING.md): the same read permission and tenant scope as the PDF. */
+  describe('WhatsApp share', () => {
+    const MISSING = '00000000-0000-4000-8000-000000000000';
+
+    it('opens with the bill’s SAVED mobile, customer and stored Grand Total, and the company from Company Settings', async () => {
+      const res = await req(A.billingOnly, 'GET', `/api/bills/${A.billId}/invoice/share`);
+      expect(res.statusCode).toBe(200);
+      const ctx = res.json().data;
+      const invoice = (await req(A.billingOnly, 'GET', `/api/bills/${A.billId}/invoice`)).json().data;
+      expect(ctx).toMatchObject({ transport: 'WHATSAPP_CLICK_TO_CHAT', customerName: 'Invoice Customer', mobileNumber: '9876543210', taxMode: 'WITH_GST', fileName: 'Invoice-2026-27-1.pdf' });
+      expect(ctx.grandTotal).toBe(invoice.totals.at(-1).value);
+      expect(ctx.message).toContain('2026-27/1');
+      expect(ctx.message).toContain(ctx.grandTotal);
+      expect(ctx.message).toContain('inv-a Studio');
+    });
+
+    it('uses the tenant’s own message, and refuses an unknown placeholder in it', async () => {
+      const settingsAdmin = await (async () => {
+        const [role] = await db.insert(schema.roles).values({ tenantId: A.tenantId, name: `settings ${Date.now()}`, permissions: { settings_general: ['read', 'update'] } }).returning();
+        const [u] = await db.insert(schema.users).values({ tenantId: A.tenantId, roleId: role.id, firstName: 'S', lastName: 'T', email: `s-${Date.now()}@test.local`, passwordHash: 'x' }).returning();
+        return app.jwt.sign({ sub: u.id, tenantId: A.tenantId });
+      })();
+      expect((await req(settingsAdmin, 'PUT', '/api/settings', { whatsappInvoiceMessage: 'Hi {Customer}' })).statusCode).toBe(400);
+      expect((await req(settingsAdmin, 'PUT', '/api/settings', { whatsappInvoiceMessage: 'નમસ્તે {CustomerName} — बिल {BookNumber}/{BillNumber}, {GrandTotal}' })).statusCode).toBe(200);
+      expect((await req(A.billingOnly, 'GET', `/api/bills/${A.billId}/invoice/share`)).json().data.message).toMatch(/^નમસ્તે Invoice Customer — बिल 2026-27\/1, ₹/);
+      // Tenant B's message is its own.
+      expect((await req(B.admin, 'GET', `/api/bills/${B.billId}/invoice/share`)).json().data.message.startsWith('Hello Invoice Customer,')).toBe(true);
+    });
+
+    it('records "WhatsApp opened" — never "sent" — with the template, and no number or message', async () => {
+      const res = await req(A.billingOnly, 'POST', `/api/bills/${A.billId}/invoice/share-opened`, { transport: 'WHATSAPP_CLICK_TO_CHAT' });
+      expect(res.statusCode).toBe(200);
+      const [log] = await db.select().from(schema.activityLogs).where(eq(schema.activityLogs.entityId, A.billId)).orderBy(schema.activityLogs.createdAt);
+      expect(log).toMatchObject({ tenantId: A.tenantId, entityType: 'bill', action: 'whatsapp_share_opened' });
+      expect(log.action).not.toMatch(/sent|deliver|read/i);
+      expect(log.meta).toMatchObject({ transport: 'WHATSAPP_CLICK_TO_CHAT', templateName: 'Classic' });
+      expect(JSON.stringify(log.meta)).not.toContain('9876543210');
+      // The body may not carry the number or the text.
+      expect((await req(A.billingOnly, 'POST', `/api/bills/${A.billId}/invoice/share-opened`, { mobileNumber: '9876543210' })).statusCode).toBe(400);
+    });
+
+    it('refuses an incompatible, foreign or malformed template, like the PDF does', async () => {
+      const detailed = (await templates(A.admin)).find((t) => t.templateName === 'Detailed GST')!;
+      expect((await req(A.admin, 'POST', `/api/bills/${A.noGstBillId}/invoice/share-opened`, { templateId: detailed.id })).statusCode).toBe(400);
+      expect((await req(A.admin, 'POST', `/api/bills/${A.billId}/invoice/share-opened`, { templateId: B.templateId })).statusCode).toBe(404);
+      expect((await req(A.admin, 'POST', `/api/bills/${A.billId}/invoice/share-opened`, { templateId: 'not-a-uuid' })).statusCode).toBe(400);
+    });
+
+    it('is blocked across tenants, for a missing bill, without a session and without operations_billing', async () => {
+      expect((await req(A.admin, 'GET', `/api/bills/${B.billId}/invoice/share`)).statusCode).toBe(404);
+      expect((await req(A.admin, 'POST', `/api/bills/${B.billId}/invoice/share-opened`, {})).statusCode).toBe(404);
+      expect((await req(A.admin, 'GET', `/api/bills/${MISSING}/invoice/share`)).statusCode).toBe(404);
+      expect((await req(A.admin, 'GET', '/api/bills/not-a-uuid/invoice/share')).statusCode).toBe(404);
+      expect((await app.inject({ method: 'GET', url: `/api/bills/${A.billId}/invoice/share` })).statusCode).toBe(401);
+      expect((await req(A.templatesRead, 'GET', `/api/bills/${A.billId}/invoice/share`)).statusCode).toBe(403);
+      expect((await req(A.templatesRead, 'POST', `/api/bills/${A.billId}/invoice/share-opened`, {})).statusCode).toBe(403);
+    });
+
+    it('changes nothing but the audit log: bill, lines, GST, discount, total, book counter and default template are identical', async () => {
+      const snap = async () => JSON.stringify([
+        await db.select().from(schema.bills).where(eq(schema.bills.id, A.billId)),
+        await db.select().from(schema.billItems).where(eq(schema.billItems.billId, A.billId)),
+        await db.select({ n: schema.books.nextBillNumber }).from(schema.books).where(eq(schema.books.id, A.bookId)),
+        await db.select().from(schema.documentCounters).where(eq(schema.documentCounters.tenantId, A.tenantId)),
+        (await templates(A.admin)).map((t) => [t.templateName, t.isDefault, t.isActive]),
+      ]);
+      const before = await snap();
+      const compact = (await templates(A.admin)).find((t) => t.templateName === 'Compact')!;
+      await req(A.admin, 'GET', `/api/bills/${A.billId}/invoice/share`);
+      await req(A.admin, 'GET', `/api/bills/${A.billId}/invoice/pdf?templateId=${compact.id}`);
+      await req(A.admin, 'POST', `/api/bills/${A.billId}/invoice/share-opened`, { templateId: compact.id });
+      expect(await snap()).toBe(before);
+    });
+  });
 });

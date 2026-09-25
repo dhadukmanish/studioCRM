@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Download, FileText, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Download, FileText, MessageCircle, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { BILL_DISCOUNT_TYPES, BILL_DISCOUNT_TYPE_LABELS, INVOICE_TAX_MODES, INVOICE_TAX_MODE_LABELS, invoiceFileName, type FilterFieldDef } from '@erp/shared';
 import { Crumb } from '@/components/layout/AppShell';
 import { DataTable, useListState, type Column } from '@/components/data/DataTable';
@@ -10,6 +10,7 @@ import { useAuthStore } from '@/store/auth';
 import { fmtMoney, fmtNum } from '@/lib/format';
 import { useDateFormatters } from '@/lib/settings';
 import { downloadInvoicePdf } from '@/lib/invoice';
+import { ShareInvoiceDialog } from '@/components/invoice/ShareInvoiceDialog';
 import { toast } from '@/lib/toast';
 import { ApiError } from '@/lib/api';
 import type { BillRow } from './types';
@@ -24,6 +25,7 @@ export default function BillsPage() {
   const [state, setState] = useListState();
   const q = useList<BillRow>(QUERY_KEY, URL, state);
   const [del, setDel] = useState<BillRow | null>(null);
+  const [shareId, setShareId] = useState<string | null>(null);
   const nav = useNavigate();
   const can = useAuthStore((s) => s.can);
   const remove = useSave({ invalidate: [QUERY_KEY, 'bill-invoice'], onSuccess: () => setDel(null) });
@@ -127,12 +129,15 @@ export default function BillsPage() {
               /* Read is enough to open a bill; the form itself is view-only without update. */
               { label: canEdit ? 'Edit' : 'View', icon: <Pencil className="h-3.5 w-3.5" />, onClick: () => nav(`/modules/billing/${r.id}`) },
               { label: 'Preview invoice', icon: <FileText className="h-3.5 w-3.5" />, onClick: () => nav(`/modules/billing/${r.id}/invoice`) },
+              { label: 'Share on WhatsApp', icon: <MessageCircle className="h-3.5 w-3.5" />, onClick: () => setShareId(r.id) },
               { label: 'Download PDF', icon: <Download className="h-3.5 w-3.5" />, onClick: () => downloadInvoicePdf(r.id, invoiceFileName(r.bookNumber, r.billNumber)).catch((e) => toast.error(e instanceof ApiError ? e.message : 'The PDF could not be generated')) },
               ...(canDelete ? [{ label: 'Delete', icon: <Trash2 className="h-3.5 w-3.5" />, danger: true, onClick: () => setDel(r) }] : []),
             ]}
           />
         )}
       />
+
+      <ShareInvoiceDialog billId={shareId} open={!!shareId} onClose={() => setShareId(null)} />
 
       <ConfirmDialog
         open={!!del}
