@@ -1,4 +1,5 @@
-import { Checkbox, Combobox, Field, RadioGroup, Select, Switch, TextArea, TextInput } from '@/components/ui';
+import { isIsoDate } from '@erp/shared';
+import { Checkbox, Combobox, DateInput, Field, RadioGroup, Select, Switch, TextArea, TextInput } from '@/components/ui';
 import { useCustomFields } from '@/lib/queries';
 
 /** Renders a module's active custom fields bound to a `Record<string, any>` value. */
@@ -22,7 +23,7 @@ export function CustomFieldInputs({ moduleName, value, onChange, className }: { 
           case 'percent':
             return <Field {...common}><TextInput type="number" step="any" value={v} readOnly={f.isReadOnly} onChange={(e) => set(f.fieldName, e.target.value === '' ? null : Number(e.target.value))} /></Field>;
           case 'date':
-            return <Field {...common}><TextInput type="date" value={v} readOnly={f.isReadOnly} onChange={(e) => set(f.fieldName, e.target.value)} /></Field>;
+            return <Field {...common}><DateInput value={v} readOnly={f.isReadOnly} onChange={(x) => set(f.fieldName, isIsoDate(x) ? x : null)} /></Field>;
           case 'datetime':
             return <Field {...common}><TextInput type="datetime-local" value={v} readOnly={f.isReadOnly} onChange={(e) => set(f.fieldName, e.target.value)} /></Field>;
           case 'time':

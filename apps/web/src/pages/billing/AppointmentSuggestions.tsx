@@ -3,7 +3,7 @@ import { CalendarClock, X } from 'lucide-react';
 import { normalizeMobile } from '@erp/shared';
 import { Spinner } from '@/components/ui';
 import { useAppointmentsLookup, type AppointmentLookup } from '@/lib/queries';
-import { fmtDateOnly, fmtTime } from '@/lib/format';
+import { useDateFormatters } from '@/lib/settings';
 
 /** Below this many digits a mobile is still being typed, not yet worth a lookup. */
 const MIN_DIGITS = 4;
@@ -42,6 +42,7 @@ export function AppointmentSuggestions({ mobile, linked, onPick, onClear }: Prop
   const enough = digits.length >= MIN_DIGITS;
   // A linked bill asks nothing: the question "which booking is this?" is already answered.
   const q = useAppointmentsLookup(!linked && enough ? digits : '');
+  const fmt = useDateFormatters();
   const rows = q.data ?? [];
 
   if (linked !== null) {
@@ -78,8 +79,8 @@ export function AppointmentSuggestions({ mobile, linked, onPick, onClear }: Prop
               <CalendarClock className="h-3.5 w-3.5 shrink-0 text-gray-400" />
               <span className="font-medium text-gray-900">Appointment #{a.appointmentNumber}</span>
               <span className="text-gray-400">·</span>
-              <span>{fmtDateOnly(a.appointmentDate)}</span>
-              {a.appointmentTime && <><span className="text-gray-400">·</span><span>{fmtTime(a.appointmentTime)}</span></>}
+              <span>{fmt.date(a.appointmentDate)}</span>
+              {a.appointmentTime && <><span className="text-gray-400">·</span><span>{fmt.time(a.appointmentTime)}</span></>}
               <span className="text-gray-400">·</span>
               <span>{a.customerName}</span>
               {a.babyName && <><span className="text-gray-400">·</span><span className="text-gray-500">{a.babyName}</span></>}

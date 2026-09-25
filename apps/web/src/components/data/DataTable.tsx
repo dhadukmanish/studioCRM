@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, ArrowUpDown, Bookmark, ChevronDown, ChevronLeft, ChevronRight, Columns3, Download, Filter, GripVertical, Lock, MoreVertical, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, Upload, X } from 'lucide-react';
-import { FILTER_OPS, OPS_WITHOUT_VALUE, type FilterFieldDef, type ListFilter, type FilterOp } from '@erp/shared';
-import { Checkbox, Combobox, Dropdown, EmptyState, Modal, Select, Spinner, TextInput } from '@/components/ui';
+import { FILTER_OPS, OPS_WITHOUT_VALUE, isIsoDate, type FilterFieldDef, type ListFilter, type FilterOp } from '@erp/shared';
+import { Checkbox, Combobox, DateInput, Dropdown, EmptyState, Modal, Select, Spinner, TextInput } from '@/components/ui';
 import { api } from '@/lib/api';
 import { toast } from '@/lib/toast';
 import { cx } from '@/lib/format';
@@ -129,6 +129,9 @@ function applyClientSort<T>(rows: T[], columns: Column<T>[], sortBy?: string, or
 /* ============================================================================
  * Filter builder (field ▾ | operator ▾ | ×  /  value)
  * ========================================================================== */
+/** A date filter only ever holds a real "YYYY-MM-DD": half-typed text must not reach the server's `::date` cast. */
+const isoOrBlank = (v: string) => (isIsoDate(v) ? v : '');
+
 function FilterBuilder({ fields, value, onApply, onClose, storageKey }: { fields: FilterFieldDef[]; value: ListFilter[]; onApply: (f: ListFilter[]) => void; onClose: () => void; storageKey?: string }) {
   const qc = useQueryClient();
   const [draft, setDraft] = useState<ListFilter[]>(value.length ? value : [{ field: fields[0]?.key ?? '', op: 'contains', value: '' }]);
@@ -173,14 +176,22 @@ function FilterBuilder({ fields, value, onApply, onClose, storageKey }: { fields
                     <Select size="sm" value={String(f.value ?? '')} onChange={(v) => upd(i, { value: v })} options={d?.options ?? []} placeholder="Select value" />
                   ) : type === 'boolean' ? (
                     <Select size="sm" value={String(f.value ?? '')} onChange={(v) => upd(i, { value: v })} options={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]} placeholder="Select" />
+                  ) : type === 'date' && f.op === 'between' ? (
+                    <div className="flex items-center gap-2">
+                      <DateInput size="sm" value={Array.isArray(f.value) ? String(f.value[0] ?? '') : ''} onChange={(v) => upd(i, { value: [isoOrBlank(v), Array.isArray(f.value) ? f.value[1] : ''] })} />
+                      <span className="text-[12px] text-gray-500">and</span>
+                      <DateInput size="sm" value={Array.isArray(f.value) ? String(f.value[1] ?? '') : ''} onChange={(v) => upd(i, { value: [Array.isArray(f.value) ? f.value[0] : '', isoOrBlank(v)] })} />
+                    </div>
+                  ) : type === 'date' ? (
+                    <DateInput size="sm" value={String(f.value ?? '')} onChange={(v) => upd(i, { value: isoOrBlank(v) })} />
                   ) : f.op === 'between' ? (
                     <div className="flex items-center gap-2">
-                      <TextInput size="sm" type={type === 'date' ? 'date' : 'number'} value={Array.isArray(f.value) ? String(f.value[0] ?? '') : ''} onChange={(e) => upd(i, { value: [e.target.value, Array.isArray(f.value) ? f.value[1] : ''] })} />
+                      <TextInput size="sm" type="number" value={Array.isArray(f.value) ? String(f.value[0] ?? '') : ''} onChange={(e) => upd(i, { value: [e.target.value, Array.isArray(f.value) ? f.value[1] : ''] })} />
                       <span className="text-[12px] text-gray-500">and</span>
-                      <TextInput size="sm" type={type === 'date' ? 'date' : 'number'} value={Array.isArray(f.value) ? String(f.value[1] ?? '') : ''} onChange={(e) => upd(i, { value: [Array.isArray(f.value) ? f.value[0] : '', e.target.value] })} />
+                      <TextInput size="sm" type="number" value={Array.isArray(f.value) ? String(f.value[1] ?? '') : ''} onChange={(e) => upd(i, { value: [Array.isArray(f.value) ? f.value[0] : '', e.target.value] })} />
                     </div>
                   ) : (
-                    <TextInput size="sm" type={type === 'date' ? 'date' : type === 'number' ? 'number' : 'text'} value={String(f.value ?? '')} placeholder="Filter value" onChange={(e) => upd(i, { value: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && onApply(valid)} />
+                    <TextInput size="sm" type={type === 'number' ? 'number' : 'text'} value={String(f.value ?? '')} placeholder="Filter value" onChange={(e) => upd(i, { value: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && onApply(valid)} />
                   )}
                 </div>
               )}

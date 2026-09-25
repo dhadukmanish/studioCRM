@@ -3,7 +3,7 @@ import { Controller, useForm, type UseFormReturn } from 'react-hook-form';
 import { useQuery } from '@tanstack/react-query';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { DataTable, useListState, type Column } from '@/components/data/DataTable';
-import { Combobox, ConfirmDialog, Field, Modal, Select, Spinner, Switch, TextArea, TextInput, type Option } from '@/components/ui';
+import { Combobox, ConfirmDialog, DateInput, Field, Modal, Select, Spinner, Switch, TextArea, TextInput, validDate, type Option } from '@/components/ui';
 import { api, qs } from '@/lib/api';
 import { applyApiErrors, useSave } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
@@ -101,7 +101,7 @@ export function MasterForm({ cfg, open, onClose, row }: { cfg: MasterConfig; ope
             case 'number':
               return <Field key={f.name} label={f.label} required={f.required} error={err} hint={f.hint} className={cls}><TextInput type="number" step="any" {...register(f.name, rules)} placeholder={f.placeholder} disabled={dis} /></Field>;
             case 'date':
-              return <Field key={f.name} label={f.label} required={f.required} error={err} hint={f.hint} className={cls}><TextInput type="date" {...register(f.name, rules)} disabled={dis} /></Field>;
+              return <Field key={f.name} label={f.label} required={f.required} error={err} hint={f.hint} className={cls}><Controller control={control} name={f.name} rules={{ ...rules, validate: validDate }} render={({ field }) => <DateInput {...field} disabled={dis} />} /></Field>;
             default:
               return <Field key={f.name} label={f.label} required={f.required} error={err} hint={f.hint} className={cls}><TextInput {...register(f.name, rules)} placeholder={f.placeholder} disabled={dis} /></Field>;
           }

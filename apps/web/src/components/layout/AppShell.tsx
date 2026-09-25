@@ -9,6 +9,7 @@ import { useUiStore } from '@/store/ui';
 import { cx } from '@/lib/format';
 import { api } from '@/lib/api';
 import { Icon } from '@/lib/icons';
+import { useCompanyLogo, useCompanyProfile } from '@/lib/settings';
 
 function useVisibleNav() {
   const can = useAuthStore((s) => s.can);
@@ -57,17 +58,41 @@ function SidebarItem({ item, collapsed }: { item: NavItem; collapsed: boolean })
   );
 }
 
+const PRODUCT_NAME = import.meta.env.VITE_APP_NAME ?? 'StudioCRM';
+const initialsOf = (name: string) => name.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+
+/**
+ * The brand square: the company's logo when it has one, else its initials, else (while the
+ * profile loads) the product mark. Fixed 36px box with object-contain, so a logo of any shape
+ * or size is scaled down undistorted and can never grow the header; a logo that fails to load
+ * falls back to the initials rather than a broken-image icon.
+ */
+function BrandMark({ name, companyId, logoVersion }: { name?: string; companyId?: string; logoVersion?: string }) {
+  const logo = useCompanyLogo(companyId, logoVersion);
+  const [broken, setBroken] = useState<string | null>(null);
+  if (logo.data && broken !== logo.data) {
+    return <img src={logo.data} alt="" onError={() => setBroken(logo.data!)} className="h-9 w-9 shrink-0 rounded-lg border border-line bg-white object-contain p-0.5" />;
+  }
+  return (
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-[13px] font-semibold text-white">
+      {name ? initialsOf(name) : <Boxes className="h-5 w-5" strokeWidth={1.5} />}
+    </span>
+  );
+}
+
 function Sidebar({ collapsed }: { collapsed: boolean }) {
   const nav = useVisibleNav();
-  const tenantName = useAuthStore((s) => s.user?.tenantName);
+  // Company name and logo come from the tenant's company profile (Settings -> Companies), the
+  // product name from the build. They are different things and both are shown.
+  const company = useCompanyProfile().data;
   return (
     <aside className={cx('flex h-full flex-col border-r border-line bg-white transition-all', collapsed ? 'w-[68px]' : 'w-[260px]')}>
-      <Link to="/dashboard" className="flex h-16 items-center gap-2.5 border-b border-line px-4">
-        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-white"><Boxes className="h-5 w-5" /></span>
+      <Link to="/dashboard" className="flex h-16 items-center gap-2.5 border-b border-line px-4" title={collapsed ? company?.name ?? PRODUCT_NAME : undefined}>
+        <BrandMark name={company?.name} companyId={company?.id} logoVersion={company?.logo?.version} />
         {!collapsed && (
           <div className="min-w-0">
-            <div className="font-heading text-[15px] font-semibold text-gray-900 leading-tight">{import.meta.env.VITE_APP_NAME ?? 'StudioCRM'}</div>
-            <div className="truncate text-[11px] text-gray-500">{tenantName || 'Workspace'}</div>
+            <div className="truncate font-heading text-[15px] font-semibold leading-tight text-gray-900">{company?.name ?? PRODUCT_NAME}</div>
+            <div className="truncate text-[11px] text-gray-500">{PRODUCT_NAME}</div>
           </div>
         )}
       </Link>

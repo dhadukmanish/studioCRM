@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Save } from 'lucide-react';
 import { Field, Select, Spinner, Switch, TextInput } from '@/components/ui';
 import { useSave, useSettings } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
 import { THEMES } from '@/lib/theme';
+import { todayISO } from '@/lib/format';
+import { DATE_FORMATS, dateFormatLabel, formatDateOnly } from '@erp/shared';
 
 /** Tenant-wide settings. Keys mirror DEFAULT_SETTINGS in apps/api/src/services/settings.ts — add a control here when you add a key there. */
 export default function GeneralSettingsPage() {
@@ -13,6 +16,7 @@ export default function GeneralSettingsPage() {
   const can = useAuthStore((st) => st.can);
   const save = useSave({ invalidate: ['settings'] });
   const set = (k: string, v: any) => setS((x) => ({ ...x, [k]: v }));
+  const today = todayISO();
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -22,11 +26,11 @@ export default function GeneralSettingsPage() {
       {q.isLoading ? <div className="py-10 text-center"><Spinner className="inline h-5 w-5" /></div> : (
         <div className="grid gap-5 lg:grid-cols-2">
           <div className="card p-5 space-y-4">
-            <h3 className="section-title">Branding & locale</h3>
-            <Field label="Application Name"><TextInput value={s.appName ?? ''} onChange={(e) => set('appName', e.target.value)} /></Field>
+            <h3 className="section-title">Display & locale</h3>
+            <p className="text-[12.5px] text-gray-500">Company name, logo, address and GSTIN are set on the default company in <Link to="/modules/settings/companies" className="text-primary hover:underline">Settings → Companies</Link>.</p>
             <Field label="Default Theme" hint="Users can still switch from the top bar"><div className="flex gap-2">{THEMES.map((t) => <button key={t.key} type="button" onClick={() => set('themeMode', t.key)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] ${s.themeMode === t.key ? 'border-primary bg-primary/5 text-primary' : 'border-line text-gray-600 hover:bg-gray-50'}`}><span className="h-4 w-4 rounded-full border border-line" style={{ background: t.swatch }} />{t.label}</button>)}</div></Field>
             <Field label="Primary Color" hint="Also change `primary` in apps/web/tailwind.config.js for the compiled theme"><div className="flex items-center gap-2"><input type="color" value={s.primaryColor ?? '#006CB8'} onChange={(e) => set('primaryColor', e.target.value)} className="h-10 w-14 rounded border border-line" /><TextInput value={s.primaryColor ?? ''} onChange={(e) => set('primaryColor', e.target.value)} className="w-[140px] font-mono" /></div></Field>
-            <Field label="Date Format"><Select value={s.dateFormat} onChange={(v) => set('dateFormat', v)} placeholder="" options={['dd-MM-yyyy', 'dd/MM/yyyy', 'MM/dd/yyyy', 'yyyy-MM-dd'].map((v) => ({ value: v, label: v }))} /></Field>
+            <Field label="Date Format" hint="How every date in the app is shown and typed. Stored dates are not changed."><Select value={s.dateFormat} onChange={(v) => set('dateFormat', v)} placeholder="" options={DATE_FORMATS.map((v) => ({ value: v, label: `${dateFormatLabel(v)}  —  ${formatDateOnly(today, v)}` }))} /></Field>
             <Field label="Time Format"><Select value={s.timeFormat} onChange={(v) => set('timeFormat', v)} placeholder="" options={[{ value: 'hh:mm tt', label: '12 hours' }, { value: 'HH:mm', label: '24 hours' }]} /></Field>
             <Field label="Currency"><TextInput value={s.currency ?? ''} onChange={(e) => set('currency', e.target.value)} className="w-[120px]" /></Field>
             <Field label="Number Format"><Select value={s.numberFormat} onChange={(v) => set('numberFormat', v)} placeholder="" options={[{ value: 'en-IN', label: 'Indian (12,34,567.89)' }, { value: 'en-US', label: 'International (1,234,567.89)' }, { value: 'de-DE', label: 'European (1.234.567,89)' }]} /></Field>

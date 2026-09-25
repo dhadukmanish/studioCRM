@@ -19,7 +19,8 @@ import { Badge, Combobox, ConfirmDialog, Dropdown, Field, Modal, Select, Spinner
 import { api } from '@/lib/api';
 import { applyApiErrors, useAccountGroupsLookup, useItemsLookup, useList, useSave } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
-import { fmtDate, fmtMoney } from '@/lib/format';
+import { fmtMoney } from '@/lib/format';
+import { useDateFormatters } from '@/lib/settings';
 
 const PERMISSION = 'masters_accounts';
 const URL = '/api/masters/accounts';
@@ -357,6 +358,9 @@ export default function AccountsPage() {
     { key: 'createdAt', label: 'Created At', type: 'date' },
   ];
 
+  const fmt = useDateFormatters();
+
+
   const columns: Column<Account>[] = [
     { key: '_seq', header: '#', sortable: false, width: 56, locked: true, render: (_r, i) => <span className="text-gray-500">{(state.page - 1) * state.limit + i + 1}</span> },
     { key: 'accountName', header: 'Account Name', render: (r) => <span className="font-medium text-gray-900">{r.accountName}</span> },
@@ -364,9 +368,9 @@ export default function AccountsPage() {
     { key: 'headGroup', header: 'Type' },
     { key: 'openingAmount', header: 'Opening Balance', render: (r) => fmtOpening(r.openingAmount, r.openingSide) },
     { key: 'isActive', header: 'Status', render: (r) => <Badge color={r.isActive ? 'green' : 'gray'}>{r.isActive ? 'Active' : 'Inactive'}</Badge> },
-    { key: 'updatedAt', header: 'Last Modified', render: (r) => fmtDate(r.updatedAt) },
+    { key: 'updatedAt', header: 'Last Modified', render: (r) => fmt.stamp(r.updatedAt) },
     { key: 'remark', header: 'Remark', hidden: true, render: (r) => <span className="text-gray-600">{r.remark || '-'}</span> },
-    { key: 'createdAt', header: 'Created At', hidden: true, render: (r) => fmtDate(r.createdAt) },
+    { key: 'createdAt', header: 'Created At', hidden: true, render: (r) => fmt.stamp(r.createdAt) },
   ];
 
   return (

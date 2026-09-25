@@ -7,7 +7,7 @@ import { DataTable, useListState, type Column } from '@/components/data/DataTabl
 import { Badge, ConfirmDialog, Drawer, Dropdown, Field, Select, Spinner, Switch, TextInput } from '@/components/ui';
 import { applyApiErrors, useList, useSave } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
-import { fmtDate } from '@/lib/format';
+import { useDateFormatters } from '@/lib/settings';
 
 const PERMISSION = 'masters_items';
 const URL = '/api/masters/items';
@@ -125,14 +125,16 @@ export default function ItemsPage() {
     { key: 'createdAt', label: 'Created At', type: 'date' },
   ];
 
+  const fmt = useDateFormatters();
+
   const columns: Column<Item>[] = [
     { key: '_seq', header: '#', sortable: false, width: 56, locked: true, render: (_r, i) => <span className="text-gray-500">{(state.page - 1) * state.limit + i + 1}</span> },
     { key: 'itemName', header: 'Item Name', render: (r) => <span className="font-medium text-gray-900">{r.itemName}</span> },
     { key: 'hsnCode', header: 'HSN Code' },
     { key: 'gstRate', header: 'GST %', render: (r) => formatGst(r.gstRate) },
     { key: 'isActive', header: 'Status', render: (r) => <Badge color={r.isActive ? 'green' : 'gray'}>{r.isActive ? 'Active' : 'Inactive'}</Badge> },
-    { key: 'updatedAt', header: 'Last Modified', render: (r) => fmtDate(r.updatedAt) },
-    { key: 'createdAt', header: 'Created At', hidden: true, render: (r) => fmtDate(r.createdAt) },
+    { key: 'updatedAt', header: 'Last Modified', render: (r) => fmt.stamp(r.updatedAt) },
+    { key: 'createdAt', header: 'Created At', hidden: true, render: (r) => fmt.stamp(r.createdAt) },
   ];
 
   return (

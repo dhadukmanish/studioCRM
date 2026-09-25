@@ -3,7 +3,8 @@
 Business app for a photography/video studio, built on an in-house ERP boilerplate
 (multi-tenant auth, RBAC, custom fields, audit log, data-table kit).
 **Status: Masters + Appointments + Billing built through Phase 2** — Item, Sub Item, Account
-Group, Account and Book Master, the Appointment module, and the Bill (header, lines, master
+Group, Account and Book Master, the Appointment module, the settings foundation (company profile + logo, tenant
+date format), and the Bill (header, lines, master
 snapshots, book-wise numbering, bill-level discount, rate-wise GST summary and final totals).
 Payment, ledger, the CGST/SGST/IGST split, invoice template, PDF and reports are not started.
 Billing honours two contracts: `docs/BILL_NUMBERING.md` for identity and `docs/BILLING_CALCULATION.md`
@@ -113,6 +114,10 @@ Compact desktop-productivity CRM. White/neutral-gray dominant, sky-blue as accen
 typography, minimal bold, thin icons, flat tables, few cards, minimal shadow, low vertical
 scrolling, keyboard-friendly data entry. All colors come from CSS variables (`themes.css`) via
 Tailwind tokens — **never hard-code a hex value in a component**.
+Dates follow the tenant's Date Format setting: show them only through `useDateFormatters()` and
+enter them only through `<DateInput>` — never `<input type="date">`, `toLocaleDateString` or a
+hand-rolled formatter, and never parse a `YYYY-MM-DD` business date with `new Date()`.
+Company name and logo come from the company profile, never a hard-coded string (`docs/SETTINGS.md`).
 Details: `docs/UI_DESIGN_SYSTEM.md`.
 
 ## Testing expectations
@@ -165,5 +170,7 @@ return findings, not file dumps. Saving tokens never justifies guessing at corre
 - `docs/BILL_NUMBERING.md` — the bill number series contract Billing must honour
 - `docs/BILLING_CALCULATION.md` — the money contract: GST-exclusive rate, discount and its
   allocation, rounding, the rate-wise GST summary, and the snapshot rules an edit follows
+- `docs/SETTINGS.md` — company profile vs application settings, date storage vs display,
+  `DateInput`, logo storage/versioning, cache invalidation, what the Invoice phase reads
 - `.claude/HANDOFF.md` — live project state, DB target, gotchas, pending work (`/handoff`)
 - `README.md` — boilerplate feature map and the "add a module" recipe

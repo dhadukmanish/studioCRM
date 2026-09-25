@@ -8,7 +8,7 @@ import { Badge, Checkbox, Combobox, ConfirmDialog, Field, Modal, Select, Spinner
 import { api } from '@/lib/api';
 import { applyApiErrors, useSave } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
-import { fmtDate } from '@/lib/format';
+import { useDateFormatters } from '@/lib/settings';
 
 const typeLabel = (t: string) => CUSTOM_FIELD_TYPE_GROUPS.flatMap((g) => g.types).find((x) => x.type === t)?.label ?? t;
 const moduleLabel = (m: string) => CUSTOM_FIELD_MODULES.find((x) => x.name === m)?.label ?? m;
@@ -108,6 +108,8 @@ export default function CustomFieldsPage() {
   const can = useAuthStore((s) => s.can);
   const remove = useSave({ invalidate: ['custom-fields'], onSuccess: () => setDel(null) });
   const toggleActive = useSave({ invalidate: ['custom-fields'] });
+  const fmt = useDateFormatters();
+
   const columns: Column<any>[] = [
     { key: 'displayOrder', header: '#', width: 50, align: 'center', render: (r) => r.displayOrder },
     { key: 'fieldLabel', header: 'Field Label', render: (r) => (<div><div className="font-medium text-gray-900">{r.fieldLabel}{r.isRequired && <span className="text-red-500"> *</span>}</div><div className="font-mono text-[11px] text-gray-400">{r.fieldName}</div></div>) },
@@ -115,7 +117,7 @@ export default function CustomFieldsPage() {
     { key: 'moduleNames', header: 'Modules', render: (r) => <span className="flex flex-wrap gap-1">{(r.moduleNames ?? []).map((m: string) => <Badge key={m} color="blue">{moduleLabel(m)}</Badge>)}</span> },
     { key: 'options', header: 'Options', render: (r) => (hasOptions(r.fieldType) ? `${r.options?.length ?? 0} option(s)` : '-'), hidden: true },
     { key: 'isActive', header: 'Active', align: 'center', render: (r) => <Switch checked={r.isActive} onChange={(v) => toggleActive.mutate({ method: 'put', url: `/api/custom-fields/${r.id}`, body: { isActive: v } as any })} /> },
-    { key: 'createdAt', header: 'Created At', render: (r) => fmtDate(r.createdAt, true), hidden: true },
+    { key: 'createdAt', header: 'Created At', render: (r) => fmt.stampTime(r.createdAt), hidden: true },
   ];
   return (
     <>

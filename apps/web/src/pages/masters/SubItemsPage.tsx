@@ -7,7 +7,8 @@ import { DataTable, useListState, type Column } from '@/components/data/DataTabl
 import { Badge, Combobox, ConfirmDialog, Drawer, Dropdown, Field, Select, Spinner, Switch, TextArea, TextInput, type Option } from '@/components/ui';
 import { applyApiErrors, useItemsLookup, useList, useSave } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
-import { fmtDate, fmtNum } from '@/lib/format';
+import { fmtNum } from '@/lib/format';
+import { useDateFormatters } from '@/lib/settings';
 
 const PERMISSION = 'masters_sub_items';
 const URL = '/api/masters/sub-items';
@@ -143,6 +144,8 @@ export default function SubItemsPage() {
     { key: 'createdAt', label: 'Created At', type: 'date' },
   ];
 
+  const fmt = useDateFormatters();
+
   const columns: Column<SubItem>[] = [
     { key: '_seq', header: '#', sortable: false, width: 56, locked: true, render: (_r, i) => <span className="text-gray-500">{(state.page - 1) * state.limit + i + 1}</span> },
     { key: 'itemName', header: 'Item Name', render: (r) => r.itemName ?? '-' },
@@ -150,9 +153,9 @@ export default function SubItemsPage() {
     // The rupee sign lives in the header, so the column stays a clean stack of numbers.
     { key: 'rate', header: 'Rate (₹)', render: (r) => fmtNum(r.rate) },
     { key: 'isActive', header: 'Status', render: (r) => <Badge color={r.isActive ? 'green' : 'gray'}>{r.isActive ? 'Active' : 'Inactive'}</Badge> },
-    { key: 'updatedAt', header: 'Last Modified', render: (r) => fmtDate(r.updatedAt) },
+    { key: 'updatedAt', header: 'Last Modified', render: (r) => fmt.stamp(r.updatedAt) },
     { key: 'remark', header: 'Remark', hidden: true, render: (r) => <span className="text-gray-600">{r.remark || '-'}</span> },
-    { key: 'createdAt', header: 'Created At', hidden: true, render: (r) => fmtDate(r.createdAt) },
+    { key: 'createdAt', header: 'Created At', hidden: true, render: (r) => fmt.stamp(r.createdAt) },
   ];
 
   return (

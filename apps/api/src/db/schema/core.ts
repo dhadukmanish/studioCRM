@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, boolean, timestamp, integer, jsonb, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, timestamp, integer, jsonb, uniqueIndex, index, unique } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
@@ -93,13 +93,18 @@ export const companies = pgTable('companies', {
   pincode: text('pincode'),
   currency: text('currency').notNull().default('INR'),
   timeZone: text('time_zone').notNull().default('Asia/Kolkata'),
+  /** Retired: no longer written or read. The display date format is `app_settings.dateFormat`. */
   dateFormat: text('date_format').notNull().default('dd-MM-yyyy'),
   fiscalYearStartMonth: integer('fiscal_year_start_month').notNull().default(4),
+  /** Retired, always NULL: the logo lives in `company_logos` (see docs/SETTINGS.md). */
   logoUrl: text('logo_url'),
   isActive: boolean('is_active').notNull().default(true),
   customFields: jsonb('custom_fields').$type<Record<string, unknown>>().notNull().default({}),
   ...ts,
-});
+}, (t) => [
+  // The target of tenant-safe composite foreign keys (company_logos -> companies).
+  unique('companies_id_tenant_uk').on(t.id, t.tenantId),
+]);
 
 export const branches = pgTable('branches', {
   id: id(),

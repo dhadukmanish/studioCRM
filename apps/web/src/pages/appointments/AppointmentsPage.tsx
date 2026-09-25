@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { CalendarCheck, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { APPOINTMENT_LIMITS, type FilterFieldDef, type ListFilter } from '@erp/shared';
 import { Crumb } from '@/components/layout/AppShell';
 import { DataTable, useListState, type Column } from '@/components/data/DataTable';
-import { ConfirmDialog, Dropdown, Field, Modal, Spinner, TextArea, TextInput } from '@/components/ui';
+import { ConfirmDialog, DateInput, Dropdown, Field, Modal, Spinner, TextArea, TextInput, validDate } from '@/components/ui';
 import { applyApiErrors, useList, useSave } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
-import { fmtDate, fmtDateOnly, fmtTime, todayISO } from '@/lib/format';
+import { todayISO } from '@/lib/format';
+import { useDateFormatters } from '@/lib/settings';
 
 const PERMISSION = 'operations_appointments';
 const URL = '/api/appointments';
@@ -42,7 +43,7 @@ const emptyForm = (): FormValues => ({ appointmentDate: todayISO(), appointmentT
 
 /** One form for Add and Edit. The appointment number is never editable. */
 function AppointmentForm({ open, onClose, row }: { open: boolean; onClose: () => void; row?: Appointment | null }) {
-  const { register, handleSubmit, reset, setError, formState: { errors } } = useForm<FormValues>({ defaultValues: emptyForm() });
+  const { register, control, handleSubmit, reset, setError, formState: { errors } } = useForm<FormValues>({ defaultValues: emptyForm() });
   useEffect(() => {
     if (!open) return;
     reset(
@@ -100,7 +101,7 @@ function AppointmentForm({ open, onClose, row }: { open: boolean; onClose: () =>
         {/* tab order follows the operator's reading order: date, time, customer, mobile, baby, remark */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Appointment Date" required error={errors.appointmentDate?.message}>
-            <TextInput type="date" autoFocus {...register('appointmentDate', { required: 'Appointment date is required' })} />
+            <Controller control={control} name="appointmentDate" rules={{ required: 'Appointment date is required', validate: validDate }} render={({ field }) => <DateInput {...field} autoFocus />} />
           </Field>
           <Field label="Time" error={errors.appointmentTime?.message} hint="Optional — leave blank if the time is not fixed yet.">
             <TextInput type="time" {...register('appointmentTime')} />
@@ -132,6 +133,7 @@ export default function AppointmentsPage() {
   // one for daily work, and it cannot be expressed as a single column.
   const [state, setState] = useListState();
   const q = useList<Appointment>(QUERY_KEY, URL, state);
+  const fmt = useDateFormatters();
   const [edit, setEdit] = useState<Appointment | null | undefined>(undefined);
   const [del, setDel] = useState<Appointment | null>(null);
   const can = useAuthStore((s) => s.can);
@@ -160,15 +162,15 @@ export default function AppointmentsPage() {
   const columns: Column<Appointment>[] = [
     { key: '_seq', header: '#', sortable: false, width: 56, locked: true, render: (_r, i) => <span className="text-gray-500">{(state.page - 1) * state.limit + i + 1}</span> },
     { key: 'appointmentNumber', header: 'Appointment No.', render: (r) => <span className="font-medium text-gray-900">{r.appointmentNumber}</span> },
-    { key: 'appointmentDate', header: 'Date', render: (r) => fmtDateOnly(r.appointmentDate) },
-    { key: 'appointmentTime', header: 'Time', render: (r) => fmtTime(r.appointmentTime) },
+    { key: 'appointmentDate', header: 'Date', render: (r) => fmt.date(r.appointmentDate) },
+    { key: 'appointmentTime', header: 'Time', render: (r) => fmt.time(r.appointmentTime) },
     { key: 'customerName', header: 'Customer Name' },
     { key: 'mobileNumber', header: 'Mobile No.' },
     { key: 'babyName', header: 'Baby Name', render: (r) => r.babyName || '-' },
     /** Hidden by default: it is free text of any length and would dominate the row width. */
     { key: 'remark', header: 'Remark', hidden: true, render: (r) => r.remark || '-' },
-    { key: 'updatedAt', header: 'Last Modified', render: (r) => fmtDate(r.updatedAt) },
-    { key: 'createdAt', header: 'Created At', hidden: true, render: (r) => fmtDate(r.createdAt) },
+    { key: 'updatedAt', header: 'Last Modified', render: (r) => fmt.stamp(r.updatedAt) },
+    { key: 'createdAt', header: 'Created At', hidden: true, render: (r) => fmt.stamp(r.createdAt) },
   ];
 
   return (

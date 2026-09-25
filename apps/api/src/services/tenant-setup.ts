@@ -15,6 +15,6 @@ export async function seedTenantDefaults(db: Db, tenantId: string, opts: { compa
   const roles = Object.fromEntries(roleRows.map((r) => [r.key as SystemRoleKey, r])) as Record<SystemRoleKey, typeof roleRows[number]>;
   const [company] = await db.insert(schema.companies).values({ tenantId, name: opts.companyName, isDefault: true, currency: opts.currency ?? 'INR', countryCode: opts.countryCode ?? 'IN' }).returning();
   const [branch] = await db.insert(schema.branches).values({ tenantId, companyId: company.id, name: 'Head Office', isDefault: true }).returning();
-  await db.insert(schema.appSettings).values({ tenantId, settings: { ...DEFAULT_SETTINGS, appName: opts.companyName } });
+  await db.insert(schema.appSettings).values({ tenantId, settings: { ...DEFAULT_SETTINGS } });
   return { roles, company, branch };
 }

@@ -371,3 +371,4 @@ export const TextInput = forwardRef<HTMLInputElement, Omit<React.InputHTMLAttrib
 export const TextArea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(function TextArea({ className, ...rest }, ref) {
   return <textarea ref={ref} {...rest} className={cx('input h-auto min-h-[80px] py-2', className)} />;
 });
+export { DateInput, validDate } from './DateInput';

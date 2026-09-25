@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Controller, useFormContext } from 'react-hook-form';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { BILL_LIMITS, INVOICE_TAX_MODES, INVOICE_TAX_MODE_LABELS, type InvoiceTaxMode } from '@erp/shared';
-import { Checkbox, Combobox, Field, TextInput, type Option } from '@/components/ui';
+import { Checkbox, Combobox, DateInput, Field, TextInput, validDate, type Option } from '@/components/ui';
 import { cx } from '@/lib/format';
 import { AppointmentSuggestions } from './AppointmentSuggestions';
 import type { BillFormValues, BillRecord } from './types';
@@ -64,7 +64,7 @@ export function BillHeaderFields({ bill, bookOptions, booksLoading, linkedAppoin
         </Field>
 
         <Field label="Bill Date" required error={errors.billDate?.message}>
-          <TextInput size="sm" type="date" autoFocus={!bill} disabled={disabled} {...register('billDate', { required: 'Bill date is required' })} />
+          <Controller control={control} name="billDate" rules={{ required: 'Bill date is required', validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" autoFocus={!bill} disabled={disabled} />} />
         </Field>
 
         <Field label="Tax Mode" error={errors.taxMode?.message}>
@@ -102,7 +102,7 @@ export function BillHeaderFields({ bill, bookOptions, booksLoading, linkedAppoin
       {more && (
         <div className="mt-2 grid grid-cols-1 gap-x-4 gap-y-3 border-t border-line pt-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <Field label="Delivery Date" error={errors.deliveryDate?.message}>
-            <TextInput size="sm" type="date" disabled={disabled} {...register('deliveryDate')} />
+            <Controller control={control} name="deliveryDate" rules={{ validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" disabled={disabled} />} />
           </Field>
           <Field label="Baby Name" error={errors.babyName?.message}>
             <TextInput size="sm" placeholder="Enter baby name" maxLength={BILL_LIMITS.babyName} disabled={disabled} {...register('babyName', { setValueAs: trimmed })} />
@@ -130,7 +130,7 @@ export function BillHeaderFields({ bill, bookOptions, booksLoading, linkedAppoin
           </Field>
           {hasBirthDate && (
             <Field label="Birth Date" required error={errors.birthDate?.message}>
-              <TextInput size="sm" type="date" disabled={disabled} {...register('birthDate', { required: 'Birth date is required' })} />
+              <Controller control={control} name="birthDate" rules={{ required: 'Birth date is required', validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" disabled={disabled} />} />
             </Field>
           )}
           <Field label="Remark" error={errors.remark?.message} className={hasBirthDate ? 'sm:col-span-2' : 'sm:col-span-2 xl:col-span-3'}>

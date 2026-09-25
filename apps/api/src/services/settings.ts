@@ -1,11 +1,15 @@
 import { eq } from 'drizzle-orm';
+import { DEFAULT_DATE_FORMAT, DEFAULT_TIME_FORMAT } from '@erp/shared';
 import { db, schema } from '../db/client';
 
-/** Tenant-wide defaults. Add keys here; the UI (GeneralSettingsPage) reads/writes the same object. */
+/**
+ * Tenant-wide APPLICATION settings. Add keys here; the UI (GeneralSettingsPage) reads/writes the
+ * same object. Company identity (name, logo, address, GSTIN) is NOT here — it belongs to the
+ * default company row (services/company.ts), so it is never stored twice. See docs/SETTINGS.md.
+ */
 export const DEFAULT_SETTINGS = {
-  appName: 'ERP',
-  dateFormat: 'dd-MM-yyyy',
-  timeFormat: 'hh:mm tt',
+  dateFormat: DEFAULT_DATE_FORMAT as string,
+  timeFormat: DEFAULT_TIME_FORMAT as string,
   currency: 'INR',
   numberFormat: 'en-IN',
   themeMode: 'light',

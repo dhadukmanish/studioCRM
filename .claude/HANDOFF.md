@@ -3,7 +3,7 @@
 Context for picking this project up in a fresh session. No secrets live in this file
 (it is committed to GitHub) — credentials are in `apps/api/.env`, which is gitignored.
 
-Last updated: 2026-09-24.
+Last updated: 2026-09-25.
 
 ## What this project is
 
@@ -18,7 +18,7 @@ a data-table kit; the Masters layer, Appointments and Billing on top of it are p
   recipe is still accurate — read it before adding a module.
 - `CLAUDE.md` holds the always-loaded engineering rules — stable rules only; current
   implementation status lives in THIS file. `docs/ARCHITECTURE.md`, `docs/UI_DESIGN_SYSTEM.md`,
-  `docs/DEVELOPMENT.md`, `docs/BILL_NUMBERING.md` and `docs/BILLING_CALCULATION.md` hold the
+  `docs/DEVELOPMENT.md`, `docs/BILL_NUMBERING.md`, `docs/BILLING_CALCULATION.md` and `docs/SETTINGS.md` hold the
   detail; `.claude/agents/` has five
   specialists, `.claude/skills/studio-*` the workflows, `.claude/hooks/guard-bash.mjs` blocks
   destructive commands.
@@ -151,6 +151,37 @@ read it before touching any figure on a bill.
   Sub Total / Discount / Taxable Amount / GST / **Grand Total**, and a collapsible "GST Details"
   table sits beside them. The grid gained a **Taxable** column; GST % and GST Amt stay visible.
   No new permission — `operations_billing` covers all of it.
+
+### Settings foundation — Phase 3 (company profile, logo, tenant date format)
+
+**Full contract: `docs/SETTINGS.md`.** Built so the Invoice phase has one place to read branding
+and date format from. Not committed yet at the time of writing — check `git status`.
+
+- **Two sources, never mixed.** Company identity (name, logo, GSTIN, address, contact) = the
+  tenant's DEFAULT company row + `company_logos`, read through `GET /api/settings/company`
+  (`getCompanyProfile`). Application settings (date/time format …) = `app_settings`, read
+  through `GET /api/settings`. Both authentication-only, tenant from the token.
+- **Why "Demo Company" showed:** the sidebar rendered `tenants.name` (the seed's "Demo Company"),
+  while Settings → Companies edits `companies.name` ("ClickG"). The sidebar now reads the company
+  profile; `tenants.name` is rendered nowhere. Product name StudioCRM stays as the second line.
+- **Why MM/DD/YYYY showed:** the stored format was always `dd-MM-yyyy`, but every date FIELD was a
+  native `<input type="date">`, which renders in the OS locale. All of them are now `<DateInput>`
+  (text in the tenant's format, canonical `YYYY-MM-DD` value, native calendar via `showPicker()`
+  only). Lists never used the setting either — `fmtDate` / `fmtDateOnly` hard-coded dd-MM-yyyy;
+  they are deleted and every screen uses `useDateFormatters()` over `packages/shared/src/dates.ts`.
+- **Retired, not dropped:** `companies.date_format` (duplicate of the app setting — removed from
+  the company form and schema) and `companies.logo_url`. The `appName` setting was removed (it
+  duplicated the company name and nothing rendered it).
+- **Logo lives in the database** (`bytea`), because the host overwrites the site folder on
+  deploy. PNG/JPEG/WebP by magic bytes, SVG refused, 1 MB cap. Versioned URL
+  (`?v=<updated_at ms>`) so it caches as immutable and a replacement shows at once.
+- **Gotcha fixed during verification:** `@fastify/multipart` TRUNCATES an oversized file to the
+  limit instead of always throwing, so a 2 MB upload arrived as exactly 1 MB and was stored as a
+  broken image. The route reads `LOGO_MAX_BYTES + 1` and refuses on `truncated` or length.
+- Live effect: saving General Settings invalidates `['settings']`; saving a company or its logo
+  invalidates `companies`, which covers `['companies','profile']`. No reload, no sign-out.
+- Still native on purpose: the Appointment `type="time"` input (time behaviour was out of scope)
+  and the custom-field `datetime-local` / `time` types (no tenant uses them).
 
 ### Bill numbering
 
@@ -302,9 +333,10 @@ Two more lookups were added for Billing, both tenant-scoped:
 embeds the username (`https://dhadukmanish@github.com/...`) so git picks the right account.
 Keep the `dhadukmanish@` in the URL. Nothing needs to be deleted from Credential Manager.
 
-**`main` is the deployed branch, and it is pushed.** `origin/main` moved from `7cb23c9` (the bare
-boilerplate) to `b4a8929` on 2026-09-24 — 13 commits, the whole Masters / Appointments / Billing
-layer plus the deployment work. `masters/account-master` was fast-forward merged into `main` and
+**`main` is the deployed branch, and it is pushed** — `origin/main` was at `c4a0985` on
+2026-09-25 (the Masters / Appointments / Billing layer plus the deployment work and its fixes).
+The live site's `/api/health` reported build `6f9ac2e`; the two commits after it touch only the
+deploy script and docs. Phase 3 (Settings) is NOT deployed. `masters/account-master` was fast-forward merged into `main` and
 still exists; future feature branches start from `main` and merge back into it before a deploy.
 
 The repository is **public** (`private: false` on the GitHub API). No secret is in it —
@@ -386,8 +418,10 @@ this machine. The app points at a **hosted Postgres 18.4** instead:
 - The password contains `@@`, which **must stay percent-encoded** as `%40%40` inside the URL,
   or the connection string parses wrong
 - No SSL parameters needed
-- **24 tables** in `public`; migrations `0000` … `0011` all applied (12 rows in
-  `drizzle.__drizzle_migrations`). `0005` created `books`; `0006` dropped the sample
+- **25 tables** in `public`; migrations `0000` … `0013` all applied (14 rows in
+  `drizzle.__drizzle_migrations`). `0012` added `companies_id_tenant_uk`; `0013` added
+  `company_logos` with its composite FK to it — split in two for the generator gotcha below,
+  which recurred exactly. Both additive; the live site's older build ignores them. Earlier: `0005` created `books`; `0006` dropped the sample
   `categories` table; `0007` added `appointments` and `document_counters`; `0008` added
   `sub_items_id_tenant_uk`; `0009` added `bills` and `bill_items`; `0010` widened the three
   `bill_items` amount columns to `numeric(16, 2)`; `0011` added the four discount columns
@@ -401,8 +435,11 @@ this machine. The app points at a **hosted Postgres 18.4** instead:
   hand-edit generated SQL.
 - The demo users `admin@example.com` and `viewer@example.com` are present
 
-This is a **shared hosted database, not a scratch one.** It holds real entered data — there is
-already a `2026-27` row in `books` that the owner created by hand. Never re-run the seed against
+This is a **shared hosted database, not a scratch one.** It holds real entered data: the owner's
+`2026-27` book (now on `next_bill_number = 2`), one real item and product, Appointment #1 and
+Bill #1 (₹65,625.00) — the studio has started using the app. Verification must only READ these
+documents; anything a check creates is deleted afterwards, and a check must never issue a real
+bill or appointment number. Never re-run the seed against
 it, never drop it, never point a destructive test suite at it (see Testing below).
 
 Local Postgres also exists but **could not be used**: PG 18 on port 5432 and PG 17 on 5433 are
@@ -434,16 +471,17 @@ Dev servers are usually already running in the background from an earlier sessio
 ## Testing
 
 Vitest runs in `apps/api` only (pinned to v3 — v5 needs Vite 6, this repo is on Vite 5).
-Seven files (items, sub-items, account groups, accounts, books, appointments, bills), 780 tests.
-Each has two sections:
+Nine files (items, sub-items, account groups, accounts, books, appointments, bills, settings,
+plus `lib/listen`), 883 tests. The route suites have two sections:
 
 - **A — pure validation and calculation** (zod schemas, `normalizeMobile`, the bill money
-  functions, the discount allocation and the rate-wise GST summary). Always runs.
-  **457 tests pass today.**
+  functions, the discount allocation, the rate-wise GST summary, the shared date
+  format/parse rules incl. a TZ-shift guard, the settings payload rule, logo magic-byte
+  sniffing). Always runs. **541 tests pass today; 342 skipped.**
 - **B — database-backed** (tenant isolation, RBAC, duplicate guards, lookup field exposure, the
   allocators' sequences and concurrency, the rollback that keeps a failed create from burning a
   number, bill snapshots, the stored discount and its allocation, and the atomic line
-  replacement). `describe.skipIf(!TEST_DATABASE_URL)`, so it **skips by default** — 323 skipped.
+  replacement). `describe.skipIf(!TEST_DATABASE_URL)`, so it **skips by default** — 342 skipped.
 
 Section B creates and deletes tenants, roles and users. `TEST_DATABASE_URL` must point at a
 **throwaway** database — never at the hosted `DATABASE_URL` above. Because no throwaway database
@@ -535,7 +573,29 @@ Confirmed end-to-end against the live API / in a real browser, not just by readi
 - Every temporary bill, book, item and sub item those two passes created was deleted and the
   166 verification audit entries were removed — `bills`, `bill_items` and `appointments` are
   empty again, and the owner's `2026-27` book is still on `next_bill_number = 1`.
-- `pnpm typecheck`, `pnpm test` (457 passed, 323 skipped) and `pnpm build` all clean.
+- **Settings Phase 3 (2026-09-25), live API — 31 checks** with a temporary second tenant
+  (deleted afterwards): profile = own default company only (a `?companyId=` of another tenant is
+  ignored), 401 without a session, date format saved per tenant and refused when unknown, viewer
+  403 on settings and logo, upload → versioned profile → byte-exact image with `nosniff` and an
+  immutable cache header, cross-tenant logo read/write 404, SVG-as-PNG 400, >1 MB 400 (after the
+  truncation fix; exactly 1 MB 200), rename propagates to the profile only for that tenant, and
+  bill figures unchanged by any of it.
+- **Settings Phase 3 in headless Chrome forced to `--lang=en-US` — 44 checks, zero console
+  errors:** DD/MM/YYYY saved through General Settings and shown on the Appointment list and form,
+  Billing list, bill edit (Bill / Delivery Date), new bill (Delivery / Birth Date typed as
+  `29.2.2028` / `1-1-2026`), the appointment suggestion inside Billing, all five masters' Last
+  Modified, and the Billing date filter (typed keystroke by keystroke, then applied); `31/02/2026`
+  refused with a field error; Edit shows the row's own date and Add after Edit shows today;
+  switching to DD-MM-YYYY updates lists with no reload; MM/DD/YYYY still selectable and honoured;
+  Company form has no Date Format and has the Logo control; rename and logo upload show in the
+  sidebar at once; a 240x80 logo sits in the initials' square without growing the header;
+  removing it falls back to initials; no sideways scroll at 390px. Settings, company name and
+  logo were restored and the 37 verification audit entries removed. Only the real Appointment #1
+  and Bill #1 were read; nothing was issued a number.
+- A code review of Phase 3 found one HIGH (an autofocused `DateInput` kept stale text through a
+  form `reset()`, so Edit could show today while holding the row's date) and one MEDIUM (custom
+  date fields could store half-typed text); both fixed and re-verified in the browser.
+- `pnpm typecheck`, `pnpm test` (541 passed, 342 skipped) and `pnpm build` all clean.
 
 Demo logins: `admin@example.com` (Super Admin, everything) and `viewer@example.com`
 (read-only, useful for testing RBAC) — both password `Admin@1234`.
@@ -548,6 +608,15 @@ assumes one and will throw. Guard the login step when reusing it.
 
 ## Known pending work
 
+- **Phase 3 (Settings) is uncommitted and undeployed** at the time of writing. Its migrations
+  `0012`/`0013` are already applied to the shared database (additive; the live build ignores them).
+- **Next: Invoice Template Master, Invoice Preview / PDF, WhatsApp** — all deliberately not
+  started. They read the company profile, the logo bytes and `dateFormat` exactly as
+  `docs/SETTINGS.md` "For the Invoice phase" describes; the bill keeps its own snapshot.
+- Small known gaps left from the Phase 3 review, judged acceptable: the calendar icon does
+  nothing on browsers without `showPicker()` (Safari < 16.4 — typing still works); a half-typed
+  date in a list FILTER is cleared on blur without a message; custom-field values are still not
+  type-checked on the server.
 - **Payment, Ledger, Voucher and Reports are NOT implemented.** Nothing posts an accounting
   transaction anywhere yet — a bill is a document, not a journal entry.
 - **Billing beyond Phase 2 is NOT implemented**, deliberately and by instruction: advance, paid

@@ -14,7 +14,7 @@ export interface BillRow {
   bookNumber: string;
   billNumber: number;
   appointmentId: string | null;
-  /** "YYYY-MM-DD" calendar dates — rendered with `fmtDateOnly`, never parsed into a Date. */
+  /** "YYYY-MM-DD" calendar dates — rendered with `useDateFormatters().date`, never parsed into a Date. */
   billDate: string;
   deliveryDate: string | null;
   customerName: string;

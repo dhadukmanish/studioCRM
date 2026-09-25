@@ -7,7 +7,8 @@ import { DataTable, useListState, type Column } from '@/components/data/DataTabl
 import { Badge, ConfirmDialog, Dropdown } from '@/components/ui';
 import { useList, useSave } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
-import { fmtDate, fmtDateOnly, fmtMoney, fmtNum } from '@/lib/format';
+import { fmtMoney, fmtNum } from '@/lib/format';
+import { useDateFormatters } from '@/lib/settings';
 import type { BillRow } from './types';
 
 const PERMISSION = 'operations_billing';
@@ -42,14 +43,17 @@ export default function BillsPage() {
     { key: 'createdAt', label: 'Created At', type: 'date' },
   ];
 
+  const fmt = useDateFormatters();
+
+
   const columns: Column<BillRow>[] = [
     { key: '_seq', header: '#', sortable: false, width: 56, locked: true, render: (_r, i) => <span className="text-gray-500">{(state.page - 1) * state.limit + i + 1}</span> },
     { key: 'bookNumber', header: 'Book' },
     { key: 'billNumber', header: 'Bill No.', render: (r) => <span className="font-medium text-gray-900">{r.billNumber}</span> },
-    { key: 'billDate', header: 'Bill Date', render: (r) => fmtDateOnly(r.billDate) },
+    { key: 'billDate', header: 'Bill Date', render: (r) => fmt.date(r.billDate) },
     { key: 'customerName', header: 'Customer Name' },
     { key: 'mobileNumber', header: 'Mobile No.' },
-    { key: 'deliveryDate', header: 'Delivery Date', render: (r) => fmtDateOnly(r.deliveryDate) },
+    { key: 'deliveryDate', header: 'Delivery Date', render: (r) => fmt.date(r.deliveryDate) },
     /** Text in the badge, never colour alone — the two modes must read the same to everyone. */
     { key: 'taxMode', header: 'Tax Mode', render: (r) => <Badge color={r.taxMode === 'WITH_GST' ? 'blue' : 'gray'}>{INVOICE_TAX_MODE_LABELS[r.taxMode]}</Badge> },
     { key: 'grandTotal', header: 'Grand Total', align: 'right', render: (r) => <span className="font-medium text-gray-900">{fmtMoney(r.grandTotal)}</span> },
@@ -74,8 +78,8 @@ export default function BillsPage() {
     { key: 'gstAmount', header: 'GST Amount', align: 'right', hidden: true, render: (r) => fmtMoney(r.gstAmount) },
     { key: 'babyName', header: 'Baby Name', hidden: true, render: (r) => r.babyName || '-' },
     { key: 'remark', header: 'Remark', hidden: true, render: (r) => r.remark || '-' },
-    { key: 'updatedAt', header: 'Last Modified', render: (r) => fmtDate(r.updatedAt) },
-    { key: 'createdAt', header: 'Created At', hidden: true, render: (r) => fmtDate(r.createdAt) },
+    { key: 'updatedAt', header: 'Last Modified', render: (r) => fmt.stamp(r.updatedAt) },
+    { key: 'createdAt', header: 'Created At', hidden: true, render: (r) => fmt.stamp(r.createdAt) },
   ];
 
   return (

@@ -7,7 +7,7 @@ import { CustomFieldInputs } from '@/components/data/CustomFieldInputs';
 import { Badge, Combobox, ConfirmDialog, Field, Modal, Select, Spinner, Switch, TextInput } from '@/components/ui';
 import { applyApiErrors, useBranches, useCompanies, useList, useRoles, useSave } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
-import { fmtDate } from '@/lib/format';
+import { useDateFormatters } from '@/lib/settings';
 
 /**
  * A user has exactly one role, and the role carries the permissions. Per-user permission
@@ -83,15 +83,16 @@ export default function UsersPage() {
     { key: 'roleName', label: 'Role', type: 'select', options: (roles.data ?? []).map((r) => ({ value: r.name, label: r.name })) },
     { key: 'isActive', label: 'Active', type: 'boolean' }, { key: 'lastLoginAt', label: 'Last Login', type: 'date' }, { key: 'createdAt', label: 'Created At', type: 'date' },
   ];
+  const fmt = useDateFormatters();
   const columns: Column<any>[] = [
     { key: 'firstName', header: 'Name', locked: true, render: (r) => (<div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-lighter text-[12px] font-semibold text-primary-dark">{(r.firstName?.[0] ?? '') + (r.lastName?.[0] ?? '')}</span><div><div className="font-medium text-gray-900">{r.name}</div><div className="text-[12px] text-gray-500">{r.email}</div></div></div>) },
     { key: 'username', header: 'Username', render: (r) => r.username || '-' },
     { key: 'mobile', header: 'Mobile', render: (r) => r.mobile || '-' },
     { key: 'roleName', header: 'Role', render: (r) => <Badge color={r.roleKey === 'super_admin' ? 'purple' : r.roleKey === 'admin' ? 'blue' : 'gray'}>{r.roleName}</Badge> },
-    { key: 'lastLoginAt', header: 'Last Login', render: (r) => fmtDate(r.lastLoginAt, true) },
+    { key: 'lastLoginAt', header: 'Last Login', render: (r) => fmt.stampTime(r.lastLoginAt) },
     { key: 'isActive', header: 'Status', render: (r) => (r.isActive ? <Badge color="green">Active</Badge> : <Badge color="red">Inactive</Badge>) },
     { key: 'email', header: 'Email', hidden: true },
-    { key: 'createdAt', header: 'Created At', render: (r) => fmtDate(r.createdAt, true), hidden: true },
+    { key: 'createdAt', header: 'Created At', render: (r) => fmt.stampTime(r.createdAt), hidden: true },
   ];
   return (
     <>
