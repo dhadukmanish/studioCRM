@@ -6,7 +6,7 @@ import { useSave, useSettings } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
 import { THEMES } from '@/lib/theme';
 import { todayISO } from '@/lib/format';
-import { DATE_FORMATS, DEFAULT_WHATSAPP_INVOICE_MESSAGE, WHATSAPP_MESSAGE_MAX, WHATSAPP_MESSAGE_VARIABLES, dateFormatLabel, formatDateOnly, unknownMessageVariables } from '@erp/shared';
+import { DATE_FORMATS, DEFAULT_WHATSAPP_INVOICE_MESSAGE, INVOICE_LINK_PLACEHOLDER, WHATSAPP_MESSAGE_MAX, WHATSAPP_MESSAGE_VARIABLES, dateFormatLabel, formatDateOnly, unknownMessageVariables } from '@erp/shared';
 
 /** Tenant-wide settings. Keys mirror DEFAULT_SETTINGS in apps/api/src/services/settings.ts — add a control here when you add a key there. */
 export default function GeneralSettingsPage() {
@@ -48,7 +48,7 @@ export default function GeneralSettingsPage() {
             <Field
               label="WhatsApp invoice message"
               error={unknownVars.length ? `Unknown placeholder ${unknownVars.map((v) => `{${v}}`).join(', ')}` : undefined}
-              hint={<>The message the WhatsApp share starts with — the operator can still edit it each time. Placeholders: {WHATSAPP_MESSAGE_VARIABLES.map((v) => `{${v}}`).join(' ')}</>}
+              hint={<>The message the WhatsApp share starts with — the operator can still edit it each time. Placeholders: {WHATSAPP_MESSAGE_VARIABLES.map((v) => `{${v}}`).join(' ')}. {INVOICE_LINK_PLACEHOLDER} is the secure invoice link; a message without it gets “View Invoice:” and the link added at the end.</>}
             >
               <TextArea rows={6} maxLength={WHATSAPP_MESSAGE_MAX} value={s.whatsappInvoiceMessage ?? ''} onChange={(e) => set('whatsappInvoiceMessage', e.target.value)} />
             </Field>

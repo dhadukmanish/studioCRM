@@ -8,6 +8,8 @@ import {
   shareOpenedSchema,
   starterInvoiceTemplates,
   unknownMessageVariables,
+  fillInvoiceLink,
+  withInvoiceLinkPlaceholder,
   whatsappChatUrl,
   whatsappDestination,
   type CompanyProfile,
@@ -85,15 +87,17 @@ const bill: InvoiceBillSource = {
 
 describe('the share message', () => {
   it('fills every placeholder from the saved bill, the company and the tenant date format', () => {
-    const msg = composeInvoiceMessage('{CustomerName}|{BookNumber}|{BillNumber}|{BillDate}|{GrandTotal}|{CompanyName}', {
-      CustomerName: 'A', BookNumber: 'B', BillNumber: '7', BillDate: '25/09/2026', GrandTotal: '₹1.00', CompanyName: 'C',
+    const msg = composeInvoiceMessage('{CustomerName}|{BookNumber}|{BillNumber}|{BillDate}|{GrandTotal}|{CompanyName}|{InvoiceLink}', {
+      CustomerName: 'A', BookNumber: 'B', BillNumber: '7', BillDate: '25/09/2026', GrandTotal: '₹1.00', CompanyName: 'C', InvoiceLink: 'https://x/i/t',
     });
-    expect(msg).toBe('A|B|7|25/09/2026|₹1.00|C');
+    expect(msg).toBe('A|B|7|25/09/2026|₹1.00|C|https://x/i/t');
   });
 
-  it('the default message: customer, book/bill, the stored Grand Total as the invoice prints it, the company — and no baby name', () => {
+  it('the default message: customer, book/bill, the stored Grand Total as the invoice prints it, the invoice link, the company — and no baby name', () => {
     const ctx = buildInvoiceShareContext({ bill, company, dateFormat: 'dd/MM/yyyy' });
-    expect(ctx.message).toBe('Hello પ્રિયા હર્ષદભાઈ,\n\nPlease find your invoice 2026-27/7 for ₹12,712.50.\n\nThank you,\nશ્રી ગણેશ ફોટો સ્ટુડિયો');
+    // {InvoiceLink} stays a placeholder until a link is prepared — building the context never makes one.
+    expect(ctx.message).toBe('Hello પ્રિયા હર્ષદભાઈ,\n\nYour invoice 2026-27/7 for ₹12,712.50 is ready.\n\nView Invoice:\n{InvoiceLink}\n\nThank you,\nશ્રી ગણેશ ફોટો સ્ટુડિયો');
+    expect(fillInvoiceLink(ctx.message, 'https://studio.example/i/abc')).toContain('View Invoice:\nhttps://studio.example/i/abc\n\nThank you,');
     expect(ctx.message).not.toContain('Aarav');
     expect(ctx).toMatchObject({ transport: 'WHATSAPP_CLICK_TO_CHAT', mobileNumber: '98765 43210', fileName: 'Invoice-2026-27-7.pdf', documentLabel: '2026-27 / 7' });
   });
@@ -108,24 +112,45 @@ describe('the share message', () => {
   });
 
   it('uses the tenant’s message, with the date in the tenant’s format (not the browser locale)', () => {
-    const ctx = buildInvoiceShareContext({ bill, company, dateFormat: 'yyyy-MM-dd', messageTemplate: 'નમસ્તે {CustomerName} — बिल {BillNumber} ({BillDate}) {GrandTotal}' });
-    expect(ctx.message).toBe('નમસ્તે પ્રિયા હર્ષદભાઈ — बिल 7 (2026-09-25) ₹12,712.50');
+    const ctx = buildInvoiceShareContext({ bill, company, dateFormat: 'yyyy-MM-dd', messageTemplate: 'નમસ્તે {CustomerName} — बिल {BillNumber} ({BillDate}) {GrandTotal}\n{InvoiceLink}' });
+    expect(ctx.message).toBe('નમસ્તે પ્રિયા હર્ષદભાઈ — बिल 7 (2026-09-25) ₹12,712.50\n{InvoiceLink}');
+  });
+
+  it('a tenant message saved before Phase 5.1 (no {InvoiceLink}) still carries the link: "View Invoice:" is appended', () => {
+    const ctx = buildInvoiceShareContext({ bill, company, dateFormat: 'yyyy-MM-dd', messageTemplate: 'નમસ્તે {CustomerName} — बिल {BillNumber}' });
+    expect(ctx.message).toBe('નમસ્તે પ્રિયા હર્ષદભાઈ — बिल 7\n\nView Invoice:\n{InvoiceLink}');
+    expect(fillInvoiceLink(ctx.message, 'https://s.example/i/T')).toBe('નમસ્તે પ્રિયા હર્ષદભાઈ — बिल 7\n\nView Invoice:\nhttps://s.example/i/T');
+    expect(withInvoiceLinkPlaceholder('Hi {InvoiceLink} bye')).toBe('Hi {InvoiceLink} bye');
+  });
+
+  it('fillInvoiceLink: replaces every placeholder, and appends the link if the operator deleted it', () => {
+    expect(fillInvoiceLink('A {InvoiceLink} B {InvoiceLink}', 'U')).toBe('A U B U');
+    expect(fillInvoiceLink('Hello\r\nthere  ', 'https://s.example/i/T')).toBe('Hello\nthere\n\nView Invoice:\nhttps://s.example/i/T');
   });
 
   it('falls back to the application default for a blank tenant message, and handles no company', () => {
     const ctx = buildInvoiceShareContext({ bill, company: null, dateFormat: 'dd/MM/yyyy', messageTemplate: '   ' });
     expect(ctx.message.startsWith('Hello પ્રિયા હર્ષદભાઈ,')).toBe(true);
     expect(ctx.message.endsWith('Thank you,')).toBe(true);
+    expect(ctx.message).toContain('{InvoiceLink}');
   });
 
   it('leaves an unknown placeholder visible instead of guessing or evaluating it', () => {
-    expect(composeInvoiceMessage('Hi {Customer} {constructor} {1+1}', { CustomerName: 'A', BookNumber: '', BillNumber: '', BillDate: '', GrandTotal: '', CompanyName: '' })).toBe('Hi {Customer} {constructor} {1+1}');
+    expect(composeInvoiceMessage('Hi {Customer} {constructor} {1+1}', { CustomerName: 'A', BookNumber: '', BillNumber: '', BillDate: '', GrandTotal: '', CompanyName: '', InvoiceLink: '' })).toBe('Hi {Customer} {constructor} {1+1}');
     expect(unknownMessageVariables('Hi {Customer}, {CustomerName} {GrandTotal} {x}')).toEqual(['Customer', 'x']);
     expect(unknownMessageVariables(DEFAULT_WHATSAPP_INVOICE_MESSAGE)).toEqual([]);
   });
 });
 
 describe('whatsappChatUrl — click-to-chat, safely encoded', () => {
+  it('a message with the invoice URL survives encoding: Gujarati, Hindi, ₹, &, +, line breaks and the link', () => {
+    const link = 'https://studio.example/i/AbC-_123xyzAbC-_123xyzAbC-_12';
+    const msg = fillInvoiceLink('નમસ્તે પ્રિયા — बिल 2026-27/7 ₹12,712.50\nA & B + C\n\nView Invoice:\n{InvoiceLink}', link);
+    const url = new URL(whatsappChatUrl('919876543210', msg));
+    expect(url.searchParams.get('text')).toBe(msg);
+    expect(url.searchParams.get('text')!.endsWith(`\n${link}`)).toBe(true);
+  });
+
   const text = 'નમસ્તે પ્રિયા — बिल ₹65,625.00\nA & B + C = 100% #1 ?x=1';
   it('encodes the message so it decodes back exactly (Gujarati, Hindi, ₹, &, +, line breaks)', () => {
     const url = whatsappChatUrl('919876543210', text);
@@ -150,6 +175,7 @@ describe('settings and audit input', () => {
   it('the tenant message: known placeholders only, not empty, at most 1000 characters', () => {
     expect(appSettingsSchema.safeParse({ whatsappInvoiceMessage: DEFAULT_WHATSAPP_INVOICE_MESSAGE }).success).toBe(true);
     expect(appSettingsSchema.safeParse({ whatsappInvoiceMessage: 'નમસ્તે {CustomerName}, बिल {BillNumber}' }).success).toBe(true);
+    expect(appSettingsSchema.safeParse({ whatsappInvoiceMessage: 'Invoice: {InvoiceLink}' }).success).toBe(true);
     const unknown = appSettingsSchema.safeParse({ whatsappInvoiceMessage: 'Hi {Customer}' });
     expect(unknown.success).toBe(false);
     expect(JSON.stringify(unknown.error?.issues)).toContain('{Customer}');

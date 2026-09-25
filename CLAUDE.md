@@ -7,8 +7,9 @@ Group, Account and Book Master, the Appointment module, the settings foundation 
 date format), and the Bill (header, lines, master
 snapshots, book-wise numbering, bill-level discount, rate-wise GST summary and final totals),
 plus invoice templates, the invoice preview, print and server-side PDF (`docs/INVOICE_TEMPLATES.md`).
-WhatsApp invoice sharing is browser click-to-chat (`docs/WHATSAPP_SHARING.md`) — it never claims a PDF
-was attached or a message sent. Payment, ledger, the CGST/SGST/IGST split and reports are not started.
+WhatsApp invoice sharing is browser click-to-chat carrying a secure public invoice link (`/i/<token>`,
+`docs/WHATSAPP_SHARING.md`) — it never claims a message was sent. Payment, ledger, the CGST/SGST/IGST
+split and reports are not started.
 Billing honours two contracts: `docs/BILL_NUMBERING.md` for identity and `docs/BILLING_CALCULATION.md`
 for money. Current implementation status lives in `.claude/HANDOFF.md`.
 
@@ -90,6 +91,11 @@ Dev servers are often already running from an earlier session — probe
    WhatsApp share — comes from `buildInvoiceModel` over the SAVED bill's snapshot and stored
    totals; renderers only draw that model. A template controls presentation and can never change a
    figure, and nothing that renders an invoice may write a bill, a line or a counter.
+10. **A public invoice link is a capability for exactly one saved bill revision.** `/i/<token>` is
+    the only anonymous route that returns business data. Store only the token's hash, take its
+    origin from `PUBLIC_APP_URL` (never the Host header), never log a full token, and keep at most
+    one active link per bill. Any code path that changes a saved bill or an invoice template must
+    revoke the affected links in the same transaction (`revokeActiveLinks`).
 
 ## Architecture boundaries
 
@@ -182,7 +188,8 @@ return findings, not file dumps. Saving tokens never justifies guessing at corre
 - `docs/INVOICE_TEMPLATES.md` — template model and rules, the render model, preview/print, the
   PDF renderer (pdf-lib + HarfBuzz shaping for Gujarati/Hindi, pre-subset fonts, the searchable-text
   mapping — read before touching any of it), RBAC
-- `docs/WHATSAPP_SHARING.md` — WhatsApp sharing: what click-to-chat can and cannot do, number
-  normalisation, message placeholders, audit semantics ("opened", never "sent"), future API boundary
+- `docs/WHATSAPP_SHARING.md` — WhatsApp sharing: the secure public invoice link (token, hash-only
+  storage, one-active-link rule, revocation on bill/template edit, `/i/:token`, `PUBLIC_APP_URL`),
+  click-to-chat, number normalisation, message placeholders, audit ("opened", never "sent")
 - `.claude/HANDOFF.md` — live project state, DB target, gotchas, pending work (`/handoff`)
 - `README.md` — boilerplate feature map and the "add a module" recipe

@@ -11,6 +11,7 @@ import { listenTarget, describeTarget } from './lib/listen';
 import { db } from './db/client';
 import { sql } from 'drizzle-orm';
 import { ok } from './lib/respond';
+import { redactPublicToken } from './services/publicInvoiceLinks';
 
 /**
  * Which build this is. Both values are replaced at bundle time by `build.mjs`; running from
@@ -33,7 +34,17 @@ async function dbStatus() {
 }
 
 export async function buildApp() {
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' }, trustProxy: true });
+  const app = Fastify({
+    logger: {
+      level: process.env.LOG_LEVEL ?? 'info',
+      // Fastify's own request line, with a public invoice token cut out of the URL: a full token in
+      // a log file would be a working link to a customer's invoice (routes/publicInvoice.ts).
+      serializers: {
+        req: (req: { method: string; url: string; host?: string; ip?: string }) => ({ method: req.method, url: redactPublicToken(req.url), host: req.host, remoteAddress: req.ip }),
+      },
+    },
+    trustProxy: true,
+  });
   await app.register(cors, { origin: (process.env.CORS_ORIGIN ?? 'http://localhost:5173').split(','), credentials: true });
   await app.register(jwt, { secret: process.env.JWT_SECRET ?? 'change-me-in-production' });
   await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024 } });

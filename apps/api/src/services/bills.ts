@@ -13,6 +13,7 @@ import {
 import { db, schema } from '../db/client';
 import { notFound, validation } from '../lib/errors';
 import { allocateBillNumber } from './billNumbers';
+import { revokeActiveLinks } from './publicInvoiceLinkRevoke';
 
 /**
  * Bill business rules. The route validates the payload and authorizes; this owns everything
@@ -414,8 +415,12 @@ export async function createBill(tenantId: string, body: BillInput): Promise<Bil
  *
  * Snapshots survive the replacement for every product the bill already had — see
  * `resolveLines`.
+ *
+ * A successful save also revokes the bill's public invoice link, in this same transaction: the
+ * updated bill and a still-working old URL can never both be committed, and a save that rolls
+ * back keeps the link. No replacement link is made — the next Share makes one.
  */
-export async function updateBill(tenantId: string, id: string, body: BillUpdateInput): Promise<BillRecord> {
+export async function updateBill(tenantId: string, id: string, body: BillUpdateInput): Promise<{ bill: BillRecord; revokedLinkIds: string[] }> {
   return db.transaction(async (tx) => {
     /**
      * Lock the bill for the transaction. The lines are replaced as a set, so two operators
@@ -450,7 +455,12 @@ export async function updateBill(tenantId: string, id: string, body: BillUpdateI
       .values(rows.map((r) => ({ ...r, tenantId, billId: id })))
       .returning();
 
+    const revokedLinkIds = (await revokeActiveLinks(tx, tenantId, { billId: id }, 'BILL_UPDATED')).map((r) => r.id);
+
     const items = lines.map(shapeBillItem);
-    return { ...shapeBill(bill), bookNumber: book.bookNumber, appointmentNumber: appointment?.appointmentNumber ?? null, items, gstSummary: summaryOf(items) };
+    return {
+      bill: { ...shapeBill(bill), bookNumber: book.bookNumber, appointmentNumber: appointment?.appointmentNumber ?? null, items, gstSummary: summaryOf(items) },
+      revokedLinkIds,
+    };
   });
 }

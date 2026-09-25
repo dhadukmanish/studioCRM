@@ -55,6 +55,12 @@ export function unprintableText(model: InvoiceRenderModel): { area: string; char
   return [...byArea].map(([area, chars]) => ({ area, characters: [...chars] }));
 }
 
+/** Refuses (422) an invoice the PDF could not print — without rendering it. */
+export function assertPrintable(model: InvoiceRenderModel) {
+  const problems = unprintableText(model);
+  if (problems.length) throw unprintableError(problems);
+}
+
 /** The PDF never prints a box or a blank for a character it cannot draw: it refuses, and says where. */
 function unprintableError(problems: { area: string; characters: string[] }[]) {
   const where = problems.slice(0, 3).map((p) => `${p.characters.join(' ')} in ${p.area}`).join('; ');
@@ -84,8 +90,7 @@ export interface RenderPdfOptions { /** Written as the PDF's creation/modificati
  * drawn; the shaper's own glyph check is the backstop.
  */
 export async function renderInvoicePdf(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts: RenderPdfOptions = {}): Promise<Uint8Array> {
-  const problems = unprintableText(model);
-  if (problems.length) throw unprintableError(problems);
+  assertPrintable(model);
   try {
     return await render(model, logo, opts);
   } catch (e) {

@@ -1,0 +1,1 @@
+ALTER TABLE "invoice_templates" ADD CONSTRAINT "invoice_templates_id_tenant_uk" UNIQUE("id","tenant_id");

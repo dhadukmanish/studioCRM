@@ -9,3 +9,4 @@ export * from './appointments';
 export * from './bills';
 export * from './companyLogos';
 export * from './invoiceTemplates';
+export * from './publicInvoiceLinks';

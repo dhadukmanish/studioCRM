@@ -937,7 +937,8 @@ describe.skipIf(!TEST_DB)('Invoice templates and invoices API (integration, need
     it('records "WhatsApp opened" — never "sent" — with the template, and no number or message', async () => {
       const res = await req(A.billingOnly, 'POST', `/api/bills/${A.billId}/invoice/share-opened`, { transport: 'WHATSAPP_CLICK_TO_CHAT' });
       expect(res.statusCode).toBe(200);
-      const [log] = await db.select().from(schema.activityLogs).where(eq(schema.activityLogs.entityId, A.billId)).orderBy(schema.activityLogs.createdAt);
+      // The bill's own "created" entry is older — pick the share entry, not simply the first one.
+      const log = (await db.select().from(schema.activityLogs).where(eq(schema.activityLogs.entityId, A.billId)).orderBy(schema.activityLogs.createdAt)).find((l) => l.action === 'whatsapp_share_opened')!;
       expect(log).toMatchObject({ tenantId: A.tenantId, entityType: 'bill', action: 'whatsapp_share_opened' });
       expect(log.action).not.toMatch(/sent|deliver|read/i);
       expect(log.meta).toMatchObject({ transport: 'WHATSAPP_CLICK_TO_CHAT', templateName: 'Classic' });

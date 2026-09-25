@@ -35,8 +35,12 @@ bill, a line, a book counter or the appointment counter.
 | `is_active` | a default must be active (`invoice_templates_default_is_active_check`) |
 | `config` | jsonb, the controlled presentation config below |
 
-Nothing references a template — a bill does not remember which template printed it — so deleting
-a template can never touch a bill. Additive migration; no existing table changed.
+No bill references a template — a bill does not remember which template printed it — so deleting
+a template can never touch a bill. Additive migration; no existing table changed. Since Phase 5.1
+the one thing that references a template is a **public invoice link** (`public_invoice_links`,
+composite FK to `invoice_templates_id_tenant_uk`, migration `0015`): editing, deactivating or
+deleting a template revokes its live links in the same transaction, so a URL a customer already
+has never starts rendering differently (`docs/WHATSAPP_SHARING.md`).
 
 ## Configuration schema
 
@@ -228,7 +232,8 @@ created as a copy).
 
 ## WhatsApp
 
-Built in Phase 5 — see `docs/WHATSAPP_SHARING.md`. The share dialog downloads this same PDF
-(`GET /api/bills/:id/invoice/pdf`) for the chosen template; it adds no PDF code of its own.
-`getBillInvoicePdf` (`services/invoice.ts`) stays the reusable entry point for a future official
-WhatsApp Business API transport.
+Built in Phase 5, with the secure public link in Phase 5.1 — see `docs/WHATSAPP_SHARING.md`. The
+customer's link (`GET /i/<token>`) serves this same PDF through `getBillInvoicePdf`
+(`services/invoice.ts`) for the template the link was made with — byte-identical to the
+authenticated download; it adds no PDF code of its own. `getBillInvoicePdf` stays the reusable
+entry point for a future official WhatsApp Business API transport.

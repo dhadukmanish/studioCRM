@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { invoiceTemplateSchema } from '@erp/shared';
 import { parse } from '../lib/validate';
 import { ok } from '../lib/respond';
@@ -22,6 +22,15 @@ const PERMISSION = 'settings_invoice_templates';
 const BASE = '/api/settings/invoice-templates';
 const ENTITY = 'invoice_template';
 
+/** Editing or deleting a template revokes its live public invoice links — recorded once, with no token. */
+async function auditTemplateLinks(req: FastifyRequest, templateId: string, name: string, links: { id: string; billId: string }[]) {
+  if (!links.length) return;
+  await logActivity(req, ENTITY, templateId, 'invoice_public_link_revoked', `${links.length} public invoice link${links.length === 1 ? '' : 's'} revoked: template "${name}" was changed`, {
+    reason: 'TEMPLATE_CHANGED',
+    links: links.map((l) => ({ linkId: l.id, billId: l.billId })),
+  });
+}
+
 export async function invoiceTemplateRoutes(app: FastifyInstance) {
   app.get(BASE, { preHandler: app.requirePermission(PERMISSION) }, async (req) => {
     const rows = await listTemplates(req.user.tenantId);
@@ -37,8 +46,9 @@ export async function invoiceTemplateRoutes(app: FastifyInstance) {
   });
 
   app.put(`${BASE}/:id`, { preHandler: app.requirePermission(PERMISSION, 'update') }, async (req) => {
-    const { template: t } = await updateTemplate(req.user.tenantId, (req.params as { id: string }).id, parse(invoiceTemplateSchema, req.body));
+    const { template: t, revokedLinks } = await updateTemplate(req.user.tenantId, (req.params as { id: string }).id, parse(invoiceTemplateSchema, req.body));
     await logActivity(req, ENTITY, t.id, 'updated', `Invoice template "${t.templateName}" updated`);
+    await auditTemplateLinks(req, t.id, t.templateName, revokedLinks);
     return ok(t, 'Invoice template updated');
   });
 
@@ -55,8 +65,9 @@ export async function invoiceTemplateRoutes(app: FastifyInstance) {
   });
 
   app.delete(`${BASE}/:id`, { preHandler: app.requirePermission(PERMISSION, 'delete') }, async (req) => {
-    const t = await deleteTemplate(req.user.tenantId, (req.params as { id: string }).id);
+    const { template: t, revokedLinks } = await deleteTemplate(req.user.tenantId, (req.params as { id: string }).id);
     await logActivity(req, ENTITY, t.id, 'deleted', `Invoice template "${t.templateName}" deleted`);
+    await auditTemplateLinks(req, t.id, t.templateName, revokedLinks);
     return ok(null, 'Invoice template deleted');
   });
 

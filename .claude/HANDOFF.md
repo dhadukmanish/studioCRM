@@ -235,13 +235,13 @@ and date format from. Committed as `e64a222` on `feature/settings-branding` (see
 
 ### WhatsApp invoice sharing — Phase 5
 
-**Full contract: `docs/WHATSAPP_SHARING.md`.** Branch `feature/whatsapp-invoice-sharing` (from
-`bef9e04`), **uncommitted** at the time of writing.
+**Full contract: `docs/WHATSAPP_SHARING.md`.** Committed as `cc80226` on
+`feature/whatsapp-invoice-sharing` (from `bef9e04`). Its "download the PDF and attach it" flow was
+**replaced by Phase 5.1's secure link** (below); what follows is what still stands.
 
-- **Browser click-to-chat only** (`https://wa.me/<digits>?text=…`): it prefills number and text but
-  can NOT attach a file. The Share dialog prepares the Phase 4 PDF first; "Open WhatsApp" (a real
-  `target=_blank` link, one click) downloads it and opens the chat; the dialog then says "Attach it
-  in WhatsApp before sending". It never claims attached/sent; no bill status changes.
+- **Browser click-to-chat only** (`https://wa.me/<digits>?text=…`): it prefills number and text and
+  can NOT attach a file — which is why 5.1 sends a link instead. "Open WhatsApp" is a real
+  `target=_blank` link, one click. It never claims sent/delivered; no bill status changes.
 - **Where:** Invoice Preview (uses the preview's template), saved bill form (Preview · PDF ·
   WhatsApp — disabled while dirty, absent on a new bill), Bills list row menu.
 - **Number:** the bill's saved mobile, editable for that share only (the bill is never written).
@@ -253,6 +253,59 @@ and date format from. Committed as `e64a222` on `feature/settings-branding` (see
   `whatsapp_share_opened`, meta = transport + template; no number, no message) — both
   `operations_billing` read, tenant-scoped. The shared DB already holds a few such audit rows from
   manual and verification runs on 2026-09-25 — harmless.
+
+### Secure public invoice link — Phase 5.1
+
+**Full contract: `docs/WHATSAPP_SHARING.md`.** Branch `feature/public-invoice-links` (from
+`cc80226`), **uncommitted** at the time of writing. The WhatsApp message now carries
+`https://<PUBLIC_APP_URL>/i/<token>`; the customer taps it and the Phase 4 PDF opens inline — no
+login, no attachment, no need to be in the operator's contacts.
+
+- **Token:** 32 chars = first 24 bytes of `HMAC-SHA256(PUBLIC_LINK_SECRET, "…:v1:" + link uuid)`,
+  base64url. **Only SHA-256(token) is stored** (`public_invoice_links.token_hash`). HMAC, not a
+  stored random token, because the spec wanted both "never store the token" and "reuse the link on
+  an unchanged re-share" — the server rebuilds the token from the row id. Every request is also
+  checked (constant-time) against the token the CURRENT secret signs, so **changing
+  `PUBLIC_LINK_SECRET` invalidates every issued link** — accepted, and the emergency "revoke all".
+- **Manual revoke needs `operations_billing` update** (DELETE route; the dialog hides "Revoke link"
+  without it). Creating/reusing a link and preview/PDF stay on Billing read.
+- **One active link per bill**: partial unique index `(tenant_id, bill_id) WHERE revoked_at IS NULL`
+  + the bill row lock in `preparePublicLink`. Reuse = same template AND same bill revision.
+- **Revocation lives in the services, in the writer's transaction:** `updateBill` (every successful
+  save, even an identical one; `BILL_UPDATED`), `updateTemplate`/`deleteTemplate` (`TEMPLATE_CHANGED`),
+  a share with another template (`REPLACED`), the operator's Revoke (`MANUAL`). A bill edit makes no
+  new link. Defence in depth: a link stores `bill_revision` (= `bills.updated_at`, copied in SQL for
+  the microseconds); a mismatch on access is refused and revoked (`STALE`); the public route
+  re-checks the link after rendering and before sending.
+- **Company branding / date format changes do NOT revoke** — a link renders current presentation
+  like every invoice output; its revision is the bill's. Documented, deliberate.
+- **Public route `GET /i/:token`** (`routes/publicInvoice.ts`): outside `/api/`, no auth; shape
+  check → one hash lookup → rate limit per LINK (30 renders/min; not per IP, which behind IIS is
+  shared or spoofable) → render → re-check → PDF. Unknown / malformed / revoked / stale = the
+  identical 404 HTML page; render failure = calm 503 page. Fastify's request log serializer redacts
+  `/i/<token>` (proven: zero tokens in the built server's log) — **the host's IIS access log still
+  records full URLs**; treat it as sensitive or turn URI logging off for `/i/`.
+- **Base URL from `PUBLIC_APP_URL` only** (an origin, no path; never the Host header; https except
+  localhost). Both
+  `PUBLIC_APP_URL` and `PUBLIC_LINK_SECRET` must be set or link creation answers 503. Local
+  `apps/api/.env` has them (`http://localhost:5173` + a generated secret); **production needs its own
+  in the site-root `.env` before this is deployed** (`docs/DEPLOYMENT.md`). Vite proxies `^/i/` to
+  the API in dev.
+- **Dialog:** opening creates nothing; "Create link" / "Replace link" (another template) / subtle
+  "Revoke link" with confirm; the draft keeps the literal `{InvoiceLink}` and shows the URL, so a
+  template switch never leaves a stale URL in the text. The "attach the PDF" instruction is gone.
+- **Message:** new `{InvoiceLink}` placeholder and default; a tenant message saved before 5.1 is not
+  rewritten — `View Invoice:\n{InvoiceLink}` is appended on every compose.
+- **API:** `GET|POST|DELETE /api/bills/:id/invoice/public-link`, all `operations_billing` read (no new
+  permission). Audit `invoice_public_link_created` / `…_revoked` with link id + reason — never the
+  token, hash, number or message. Unprintable text (Tamil…) is refused 422 before a link is made.
+- **Migrations `0015`** (`invoice_templates_id_tenant_uk`) and **`0016`** (`public_invoice_links`) —
+  split for the generator gotcha again. Applied to the shared DB on 2026-09-25. An unapplied first
+  draft of `0016` was deleted and regenerated (revoke-reason rename) before anything ran it.
+- `updateBill` now returns `{ bill, revokedLinkIds }`; `updateTemplate`/`deleteTemplate` return
+  `revokedLinks`. Bill and template services import `revokeActiveLinks` from
+  `services/publicInvoiceLinkRevoke.ts` (DB layer only) — keep it that way, or the services form an
+  import cycle through `invoice.ts`.
 
 ### Bill numbering
 
@@ -416,12 +469,13 @@ exists; future feature branches start from `main` and merge back into it before 
 | --- | --- | --- |
 | `feature/settings-branding` | `e64a222` feat: add global date settings and company branding (Phase 3) | committed, not pushed, not merged |
 | `feature/invoice-templates` | branched from `e64a222`; Phase 4 (invoice templates, preview, PDF with Gujarati/Hindi shaping) — `bef9e04` feat: add invoice templates preview and PDF | committed, not pushed, not merged |
-| `feature/whatsapp-invoice-sharing` | branched from `bef9e04`; Phase 5 (WhatsApp invoice sharing) | **uncommitted** working tree at the time of writing |
+| `feature/whatsapp-invoice-sharing` | branched from `bef9e04`; Phase 5 (WhatsApp invoice sharing) — `cc80226` feat: add WhatsApp invoice sharing | committed, not pushed, not merged |
+| `feature/public-invoice-links` | branched from `cc80226`; Phase 5.1 (secure public invoice link) | **uncommitted** working tree at the time of writing |
 
-`main` has neither. Merge in order (settings, then invoices) — never start new work from `main`
-while these are open, or it will lack the settings foundation. Neither phase is deployed; their
-migrations (`0012`–`0014`) are already applied to the shared database (additive, the live build
-ignores them).
+`main` has none of them. Merge in order (settings → invoices → whatsapp → public links) — never
+start new work from `main` while these are open, or it will lack the settings foundation. None is
+deployed; their migrations (`0012`–`0016`) are already applied to the shared database (additive,
+the live build ignores them).
 
 The repository is **public** (`private: false` on the GitHub API). No secret is in it —
 `apps/api/.env` is gitignored and every deployment credential lives in the hosting panel — but the
@@ -502,8 +556,10 @@ this machine. The app points at a **hosted Postgres 18.4** instead:
 - The password contains `@@`, which **must stay percent-encoded** as `%40%40` inside the URL,
   or the connection string parses wrong
 - No SSL parameters needed
-- **26 tables** in `public`; migrations `0000` … `0014` all applied (15 rows in
-  `drizzle.__drizzle_migrations`). `0014` added `invoice_templates` (one migration, correctly
+- **27 tables** in `public`; migrations `0000` … `0016` all applied (17 rows in
+  `drizzle.__drizzle_migrations`). `0015` added `invoice_templates_id_tenant_uk` and `0016` added
+  `public_invoice_links` (Phase 5.1 — split for the generator gotcha below; the whole chain
+  `0000`–`0016` was also proven to apply cleanly to an empty database). `0014` added `invoice_templates` (one migration, correctly
   ordered — no new FK target). `0012` added `companies_id_tenant_uk`; `0013` added
   `company_logos` with its composite FK to it — split in two for the generator gotcha below,
   which recurred exactly. All additive; the live site's older build ignores them. Earlier: `0005` created `books`; `0006` dropped the sample
@@ -527,11 +583,10 @@ documents; anything a check creates is deleted afterwards, and a check must neve
 bill or appointment number. Never re-run the seed against
 it, never drop it, never point a destructive test suite at it (see Testing below).
 
-Local Postgres also exists but **could not be used**: PG 18 on port 5432 and PG 17 on 5433 are
-both running with `scram-sha-256` auth and the `postgres` superuser password is unknown, so the
-`erp` role/database the boilerplate expects could not be created. If you ever switch to local,
-that password is the only blocker. `psql` is not on PATH — it lives at
-`C:\Program Files\PostgreSQL\18\bin\psql.exe`.
+The installed local Postgres services (PG 18 on 5432, PG 17 on 5433) **cannot be used**: both use
+`scram-sha-256` and the `postgres` password is unknown. **But their binaries can run a private
+throwaway cluster** — that is how the DB-backed tests finally ran (see Testing). `psql`, `initdb`
+and `pg_ctl` are not on PATH — they live in `C:\Program Files\PostgreSQL\18\bin\`.
 
 ## Commands
 
@@ -556,8 +611,9 @@ Dev servers are usually already running in the background from an earlier sessio
 ## Testing
 
 Vitest runs in `apps/api` only (pinned to v3 — v5 needs Vite 6, this repo is on Vite 5).
-Ten files (items, sub-items, account groups, accounts, books, appointments, bills, settings,
-invoices, plus `lib/listen`), 979 tests. The route suites have two sections:
+Twelve files (items, sub-items, account groups, accounts, books, appointments, bills, settings,
+invoices, whatsapp, publicInvoiceLinks, plus `lib/listen`), 1080 tests. The route suites have two
+sections:
 
 - **A — pure validation and calculation** (zod schemas, `normalizeMobile`, the bill money
   functions, the discount allocation, the rate-wise GST summary, the shared date
@@ -565,17 +621,31 @@ invoices, plus `lib/listen`), 979 tests. The route suites have two sections:
   sniffing, the invoice template schema, template compatibility/fallback, the invoice render
   model, and real PDFs parsed back with pdf.js — text, pages, images, glyph outlines,
   determinism, nothing drawn off the page, unprintable-character refusal, Gujarati/Hindi shaping,
-  extraction and wrapping). Always runs.
-  **669 tests pass today; 364 skipped.**
+  extraction and wrapping, public-link tokens/hash/redaction/config/rate limit, malformed-token
+  refusal). Always runs. **`pnpm test`: 686 pass, 394 skipped.**
 - **B — database-backed** (tenant isolation, RBAC, duplicate guards, lookup field exposure, the
   allocators' sequences and concurrency, the rollback that keeps a failed create from burning a
-  number, bill snapshots, the stored discount and its allocation, and the atomic line
-  replacement). `describe.skipIf(!TEST_DATABASE_URL)`, so it **skips by default** — 342 skipped.
+  number, bill snapshots, the stored discount and its allocation, the atomic line replacement, and
+  the whole public-link lifecycle incl. concurrent shares and share-vs-edit races).
+  `describe.skipIf(!TEST_DATABASE_URL)`, so it **skips by default**.
 
 Section B creates and deletes tenants, roles and users. `TEST_DATABASE_URL` must point at a
-**throwaway** database — never at the hosted `DATABASE_URL` above. Because no throwaway database
-is configured on this machine, section B has never actually run; the behaviour it covers was
-instead verified by hand against the dev API and then cleaned up.
+**throwaway** database — never at the hosted `DATABASE_URL` above. **It ran for the first time on
+2026-09-25: 1080/1080 pass** (one latent Phase 5 test bug surfaced and was fixed — it read the
+bill's first audit row instead of the share row). How to get a throwaway database here, no admin
+rights or passwords needed (use a scratch folder, never the repo):
+
+```
+PG="/c/Program Files/PostgreSQL/18/bin"; D=<scratch>/pgdata
+"$PG/initdb.exe" -D "$D" -U postgres -A trust -E UTF8 --locale=C
+"$PG/pg_ctl.exe" -D "$D" -o "-p 55432 -c listen_addresses=127.0.0.1" -l <scratch>/pg.log start
+"$PG/psql.exe" -h 127.0.0.1 -p 55432 -U postgres -c "create database studio_test"
+cd apps/api && export DATABASE_URL=postgres://postgres@127.0.0.1:55432/studio_test TEST_DATABASE_URL=$DATABASE_URL
+npx tsx src/db/migrate.ts && npx vitest run      # stop afterwards: pg_ctl -D "$D" stop
+```
+
+Set **both** variables: `DATABASE_URL` too, so nothing in the run can fall back to the hosted URL
+in `apps/api/.env` (dotenv never overrides a variable that is already set).
 
 ## Verified working
 
@@ -717,7 +787,45 @@ Confirmed end-to-end against the live API / in a real browser, not just by readi
   it; a delete that raced set-default could remove the default; an undecodable logo broke every
   PDF; a stuck preview when the chosen template stopped fitting; a duplicate "Amount" column.
   Left as LOW: concurrent template edits get a generic 409/500 message (data stays consistent).
-- `pnpm typecheck`, `pnpm test` (669 passed, 364 skipped) and `pnpm build` all clean.
+- **Public invoice links, Phase 5.1 (2026-09-25):**
+  - DB-backed suite on a throwaway cluster: lifecycle, reuse, replace, revoke on every kind of bill
+    edit (customer, mobile, remark, qty, rate, discount, tax mode, identical re-save) and on
+    template edit/deactivate/delete, refused edit keeps the link, stale revision refused + revoked,
+    identical responses for unknown/malformed/revoked, tenant isolation (B's token = B's PDF byte for
+    byte), RBAC, 12 concurrent shares → one link, share racing edits → no old-revision link alive,
+    no bill/line/counter change.
+  - Live dev API, temporary `VERIFY-51` book/item/bill only — 20 checks: dialog-open creates
+    nothing, `{InvoiceLink}` in the share message, opaque URL on `PUBLIC_APP_URL`, PDF inline without
+    login and byte-identical to the authenticated download, reuse, edit → old link 404 page and no
+    new link, template switch, refused edit keeps it, preview/PDF/share-opened don't revoke, manual
+    revoke. Real Bill 2026-27/1 only READ (link state) — its data and the book counters identical
+    before/after.
+  - Headless Chrome (`--lang=en-US`) — 20 checks, zero console errors: prefilled number, template
+    picker, no "attach" wording, Revoke with confirm, Create link, URL in the message, intercepted
+    `wa.me` URL with `919876500051` and Gujarati/₹/link intact, "Press Send in WhatsApp", the link
+    opening as `application/pdf` in a separate no-session browser context, UI bill edit → the
+    friendly invalid page (screenshot at 390px), re-share → new working link, template switch →
+    "Replace link" with no stale URL, 390px dialog fits with no sideways scroll.
+  - Built bundle from an isolated folder (no `node_modules`): `/i/<token>` → 178 KB PDF with
+    Gujarati/Hindi (so `harfbuzz.wasm` + fonts load), invalid → the friendly page (not the SPA),
+    SPA deep link and `/api` JSON 404 unchanged, **zero tokens in the server log** (redacted).
+  - All `VERIFY-51` rows (books, items, products, bills, their links) and their audit rows were
+    deleted, matched by id. Shared DB afterwards: 0 links, 1 bill, `2026-27` on 2.
+  - **Genuine link, leave it alone:** at 11:12 UTC on 2026-09-25 "Super Admin" shared the real Bill
+    2026-27/1 from the dev app (one Classic link + its `invoice_public_link_created` and
+    `whatsapp_share_opened` audit rows). It points at `localhost:5173` and is signed with the DEV
+    secret, so production will neither open nor reuse it — the next production share replaces it.
+  - Code review found no blocker. Fixed from it: HIGH — choosing the picker's blank "Default" left
+    the dialog stuck (link resolved to the default's id, never matched `null`); MEDIUM — the rate
+    limit was per client IP (spoofable/shared behind IIS) → now per link, after validation; MEDIUM —
+    `deleteTemplate` locked links before the template (deadlock / dead URL vs a concurrent share) →
+    template row locked first. Also: post-lock revision check in `preparePublicLink` (409
+    `BILL_CHANGED`), a built-in-template link that can no longer render is revoked, `PUBLIC_APP_URL`
+    must be an origin (a path made every link dead), the revoke helper moved to
+    `publicInvoiceLinkRevoke.ts` so there is no import cycle. Left as documented decisions: read
+    permission may also revoke; branding/date-format changes don't revoke; IIS access logs.
+- `pnpm typecheck`, `pnpm test` (686 passed, 394 skipped; 1080/1080 with a throwaway DB) and
+  `pnpm build` all clean.
 
 Demo logins: `admin@example.com` (Super Admin, everything) and `viewer@example.com`
 (read-only, useful for testing RBAC) — both password `Admin@1234`.
@@ -730,13 +838,20 @@ assumes one and will throw. Guard the login step when reusing it.
 
 ## Known pending work
 
-- **Phases 3 and 4 are committed, Phase 5 is uncommitted; all unpushed, unmerged and undeployed** —
-  see the branch table under Git. Migrations `0012`–`0014` are already on the shared database
-  (Phase 5 has none). **The first deploy containing Phase 4/5 must be a FULL deploy — never
+- **Phases 3, 4 and 5 are committed, Phase 5.1 is uncommitted; all unpushed, unmerged and
+  undeployed** — see the branch table under Git. Migrations `0012`–`0016` are already on the shared
+  database. **The first deploy containing Phase 4/5/5.1 must be a FULL deploy — never
   `Deploy-StudioCRM.ps1 -Hotfix`**, which uploads only server.js and would leave the host without
   `dist/harfbuzz.wasm` and the new fonts.
-- **WhatsApp is browser click-to-chat only.** An official WhatsApp Business API transport (upload,
-  send, delivery status) is a later decision — no credentials exist or are wanted yet.
+- **Before that deploy, add `PUBLIC_APP_URL=https://studio.kriviinfotech.com` and a fresh
+  `PUBLIC_LINK_SECRET` to the site-root `.env`** (`docs/DEPLOYMENT.md`), or the Share dialog's
+  "Create link" answers 503. `/i/<token>` needs no IIS change (every path already reaches Node, and
+  `web.config` must keep having no rewrite rules). `http://` is still served without a redirect —
+  a customer tapping an `https://` link is fine, but the redirect is still worth adding.
+- **WhatsApp is browser click-to-chat + a public link.** An official WhatsApp Business API transport
+  (send, delivery status) is a later decision — no credentials exist or are wanted yet. Not built for
+  links: expiry (`expires_at` column is reserved), "customer opened it" tracking, a per-bill link
+  history screen.
 - **Invoice limitations, by design for now:** A4 portrait only; the screen/print preview flows
   continuously (the PDF is where pages are split); PDF text covers English, Gujarati, Hindi and ₹ —
   other scripts (Tamil, emoji…) are refused with a 422; a WebP logo stored other than

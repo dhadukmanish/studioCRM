@@ -9,12 +9,14 @@ import type { CompanyProfile } from './schemas/org.js';
  *
  * Four separate concerns, so a future official provider replaces only the last one:
  *
- *   invoice generation     — the Phase 4 PDF, unchanged (GET /api/bills/:id/invoice/pdf)
- *   message composition    — `composeInvoiceMessage` over a small, fixed variable set
+ *   invoice generation     — the Phase 4 PDF, unchanged, which the customer opens through a
+ *                            secure public link (`/i/<token>`, Phase 5.1) — no login, no attachment
+ *   message composition    — `composeInvoiceMessage` over a small, fixed variable set; the message
+ *                            always carries `{InvoiceLink}` (see `fillInvoiceLink`)
  *   destination            — `whatsappDestination`: the typed number -> international digits
  *   transport              — today WHATSAPP_CLICK_TO_CHAT: `whatsappChatUrl` opens a chat with the
- *                            number and text prefilled. It CANNOT attach a file; the operator
- *                            attaches the downloaded PDF. Nothing here can know a message was sent.
+ *                            number and text prefilled. The operator presses Send; nothing here
+ *                            can know a message was sent, delivered or read.
  */
 
 export const SHARE_TRANSPORTS = ['WHATSAPP_CLICK_TO_CHAT'] as const;
@@ -64,13 +66,38 @@ export function whatsappDestination(raw: string | null | undefined): WhatsappDes
 /* ---------------------------------------------------------------- message -- */
 
 /** The only placeholders a message may use. Text, not expressions: nothing is evaluated. */
-export const WHATSAPP_MESSAGE_VARIABLES = ['CustomerName', 'BookNumber', 'BillNumber', 'BillDate', 'GrandTotal', 'CompanyName'] as const;
+export const WHATSAPP_MESSAGE_VARIABLES = ['CustomerName', 'BookNumber', 'BillNumber', 'BillDate', 'GrandTotal', 'CompanyName', 'InvoiceLink'] as const;
 export type WhatsappMessageVariable = (typeof WHATSAPP_MESSAGE_VARIABLES)[number];
 export const WHATSAPP_MESSAGE_MAX = 1000;
 
 /** The application default; a tenant may replace it in Settings → General (`whatsappInvoiceMessage`). */
 export const DEFAULT_WHATSAPP_INVOICE_MESSAGE =
-  'Hello {CustomerName},\n\nPlease find your invoice {BookNumber}/{BillNumber} for {GrandTotal}.\n\nThank you,\n{CompanyName}';
+  'Hello {CustomerName},\n\nYour invoice {BookNumber}/{BillNumber} for {GrandTotal} is ready.\n\nView Invoice:\n{InvoiceLink}\n\nThank you,\n{CompanyName}';
+
+export const INVOICE_LINK_PLACEHOLDER = '{InvoiceLink}';
+/** Appended when a message does not place the link itself — a tenant message saved before Phase 5.1, or one edited in the dialog. */
+const invoiceLinkBlock = (link: string) => `View Invoice:\n${link}`;
+
+/**
+ * A message template that is sure to carry the invoice link. One that already places
+ * `{InvoiceLink}` is returned as it is; one that does not (every custom message saved before
+ * Phase 5.1) gets a blank line and `View Invoice:\n{InvoiceLink}` appended. The tenant's saved
+ * setting is never rewritten — this runs on every compose.
+ */
+export function withInvoiceLinkPlaceholder(template: string): string {
+  const t = template.trimEnd();
+  return t.includes(INVOICE_LINK_PLACEHOLDER) ? t : `${t}\n\n${invoiceLinkBlock(INVOICE_LINK_PLACEHOLDER)}`;
+}
+
+/**
+ * Puts the real public invoice URL wherever `{InvoiceLink}` stands. If the operator removed the
+ * placeholder while editing, the same `View Invoice:` block is appended — the message never
+ * leaves without the link.
+ */
+export function fillInvoiceLink(message: string, url: string): string {
+  const m = message.replace(/\r\n?/g, '\n').trim();
+  return m.includes(INVOICE_LINK_PLACEHOLDER) ? m.split(INVOICE_LINK_PLACEHOLDER).join(url) : `${m}\n\n${invoiceLinkBlock(url)}`;
+}
 
 /** Placeholders in a message template that are not in the allowed set, e.g. "{Customer}". */
 export function unknownMessageVariables(template: string): string[] {
@@ -100,6 +127,9 @@ export function invoiceMessageValues(bill: Pick<InvoiceBillSource, 'customerName
     BillDate: formatDateOnly(bill.billDate, dateFormat),
     GrandTotal: formatRupees(bill.grandTotal),
     CompanyName: company?.name?.trim() ?? '',
+    // Stays a placeholder here: the URL exists only once a link is prepared (`fillInvoiceLink`),
+    // and opening the Share dialog never creates one.
+    InvoiceLink: INVOICE_LINK_PLACEHOLDER,
   };
 }
 
@@ -115,6 +145,7 @@ export interface InvoiceShareContext {
   documentLabel: string;
   grandTotal: string;
   fileName: string;
+  /** The composed message. It still holds the literal `{InvoiceLink}` — `fillInvoiceLink` puts the URL in once a link is prepared. */
   message: string;
 }
 
@@ -134,7 +165,7 @@ export function buildInvoiceShareContext(input: {
     documentLabel: `${bill.bookNumber} / ${bill.billNumber}`,
     grandTotal: values.GrandTotal,
     fileName: invoiceFileName(bill.bookNumber, bill.billNumber),
-    message: composeInvoiceMessage(input.messageTemplate?.trim() || DEFAULT_WHATSAPP_INVOICE_MESSAGE, values),
+    message: composeInvoiceMessage(withInvoiceLinkPlaceholder(input.messageTemplate?.trim() || DEFAULT_WHATSAPP_INVOICE_MESSAGE), values),
   };
 }
 
@@ -159,3 +190,29 @@ export const shareOpenedSchema = z
   })
   .strict();
 export type ShareOpenedInput = z.infer<typeof shareOpenedSchema>;
+
+/* ------------------------------------------------------ public invoice link -- */
+
+/**
+ * A bill's public invoice link as the operator sees it (docs/WHATSAPP_SHARING.md, Phase 5.1).
+ * At most one is active per bill. `url` is null exactly when there is no active link.
+ */
+export interface PublicInvoiceLinkState {
+  active: boolean;
+  url: string | null;
+  /** The template the link renders with; null = the built-in Classic. */
+  templateId: string | null;
+  templateName: string | null;
+  createdAt: string | null;
+}
+
+/** POST …/public-link — whether the bill's existing link was reused or a new one was made. */
+export interface PreparedPublicInvoiceLink extends PublicInvoiceLinkState {
+  active: true;
+  url: string;
+  outcome: 'CREATED' | 'REUSED';
+}
+
+/** Body of "prepare the public link for this template" — nothing else may be sent. */
+export const publicLinkCreateSchema = z.object({ templateId: z.string().trim().nullish() }).strict();
+export type PublicLinkCreateInput = z.infer<typeof publicLinkCreateSchema>;

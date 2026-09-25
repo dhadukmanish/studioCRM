@@ -158,6 +158,8 @@ by any script and never in git. `PORT` and `NODE_ENV` come from `web.config` ins
 | `JWT_SECRET` | site-root `.env` | Signing key for access/refresh tokens. **Must be a fresh random value, not the development `change-me-in-production`.** Generate one with `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Changing it invalidates existing refresh tokens, which is fine — everyone logs in again. |
 | `PORT` | `web.config` | `%HTTP_PLATFORM_PORT%`. IIS owns it. Never set it in `.env` — a value there is ignored anyway, because `dotenv` does not override what the process already has, but it invites confusion. |
 | `NODE_ENV` | `web.config` | `production`. |
+| `PUBLIC_APP_URL` | site-root `.env` | The origin customers open invoice links on: `https://studio.kriviinfotech.com`. Put into every WhatsApp invoice link (`/i/<token>`, docs/WHATSAPP_SHARING.md) — never taken from the request's Host header. `https` required. Missing → creating a link answers 503. |
+| `PUBLIC_LINK_SECRET` | site-root `.env` | Signs public invoice link tokens. 32+ random characters, a **different** value from the development one: `node -e "console.log(require('crypto').randomBytes(36).toString('base64url'))"`. Server-side only — never in git or the web bundle. **Changing it invalidates every invoice link already sent** (accepted; it doubles as the emergency "revoke all links"). |
 | `CORS_ORIGIN` | — | Deliberately unnecessary: the browser and the API share an origin, so no request is cross-origin. |
 | `LOG_LEVEL` | optional | Defaults to `info`. |
 | `WEB_ROOT` | optional | Defaults to `public/` beside `server.js`, which is the layout above. |

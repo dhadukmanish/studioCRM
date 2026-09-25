@@ -14,6 +14,7 @@ import {
 } from '@erp/shared';
 import { db, schema, type Db } from '../db/client';
 import { notFound, validation } from '../lib/errors';
+import { revokeActiveLinks } from './publicInvoiceLinkRevoke';
 
 /**
  * Invoice Template Master — business rules (docs/INVOICE_TEMPLATES.md).
@@ -23,7 +24,8 @@ import { notFound, validation } from '../lib/errors';
  *   - the default cannot be deleted or deactivated — make another template the default first;
  *   - starter templates are seeded once per tenant (a tenant with zero templates has never been
  *     seeded, because the default can never be deleted) and never overwritten;
- *   - nothing references a template, so no delete can reach a bill.
+ *   - no bill references a template, so no delete can reach a bill; the only reference is a public
+ *     invoice link, which any edit or delete of its template revokes in the same transaction.
  */
 
 const T = schema.invoiceTemplates;
@@ -81,8 +83,13 @@ export async function updateTemplate(tenantId: string, id: string, body: Invoice
   const existing = await getTemplate(tenantId, id);
   if (existing.isDefault && !body.isActive) throw validation('The default template cannot be made inactive — make another template the default first');
   await assertNameFree(tenantId, body.templateName, id);
-  const [row] = await db.update(T).set({ ...body, updatedAt: new Date() }).where(and(eq(T.tenantId, tenantId), eq(T.id, id))).returning();
-  return { previous: existing, template: shapeTemplate(row) };
+  // Any edit (including deactivation) revokes the template's public invoice links in the same
+  // transaction: a URL a customer already has must not quietly start rendering differently.
+  return db.transaction(async (tx) => {
+    const [row] = await tx.update(T).set({ ...body, updatedAt: new Date() }).where(and(eq(T.tenantId, tenantId), eq(T.id, id))).returning();
+    const revokedLinks = await revokeActiveLinks(tx, tenantId, { templateId: id }, 'TEMPLATE_CHANGED');
+    return { previous: existing, template: shapeTemplate(row), revokedLinks };
+  });
 }
 
 /** Makes one template the tenant default — clears the old one first, in the same transaction. */
@@ -115,11 +122,20 @@ export async function deleteTemplate(tenantId: string, id: string) {
   const existing = await getTemplate(tenantId, id);
   const refuse = () => validation('The default template cannot be deleted — make another template the default first');
   if (existing.isDefault) throw refuse();
-  // `is_default = false` in the DELETE itself: a set-default that commits between the read above
-  // and this statement must not have its new default removed.
-  const gone = await db.delete(T).where(and(eq(T.tenantId, tenantId), eq(T.id, id), eq(T.isDefault, false))).returning({ id: T.id });
-  if (!gone.length) throw refuse();
-  return existing;
+  return db.transaction(async (tx) => {
+    // Template row first, then its links — the order `preparePublicLink` takes them in (template
+    // FOR SHARE, then links), so the two cannot deadlock, and a share waiting on this lock finds the
+    // template gone instead of handing out a link the cascade is about to delete.
+    await tx.select({ id: T.id }).from(T).where(and(eq(T.tenantId, tenantId), eq(T.id, id))).for('update');
+    // Revoked first (for the audit), then removed with the template by the cascading FK — no
+    // public URL can outlive the template it renders with.
+    const revokedLinks = await revokeActiveLinks(tx, tenantId, { templateId: id }, 'TEMPLATE_CHANGED');
+    // `is_default = false` in the DELETE itself: a set-default that commits between the read above
+    // and this statement must not have its new default removed.
+    const gone = await tx.delete(T).where(and(eq(T.tenantId, tenantId), eq(T.id, id), eq(T.isDefault, false))).returning({ id: T.id });
+    if (!gone.length) throw refuse();
+    return { template: existing, revokedLinks };
+  });
 }
 
 /** Active templates for the invoice preview's template picker — picker fields only. */

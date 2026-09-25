@@ -37,7 +37,9 @@ const RULES = [
     why: 'git clean deletes untracked files — this working tree holds untracked files the user kept on purpose.',
   },
   {
-    test: /\bgit\s+add\b[^\n]*(^|[\s/])\.env\b/,
+    // .env and every .env.* variant (.env.local, .env.production, ...) — except the exact
+    // .env.example template, which holds placeholders only. Cases: guard-bash.test.mjs
+    test: /\bgit\s+add\b[^\n]*(^|[\s/"'])\.env(?!\.example(?![\w.-]))\b/,
     why: 'apps/api/.env holds live credentials and must never be committed.',
   },
   {

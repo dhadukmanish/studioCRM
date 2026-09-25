@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { InvoiceLayoutPreset, InvoiceRenderModel, InvoiceShareContext, InvoiceTemplateConfig, InvoiceTemplateMode } from '@erp/shared';
+import type { InvoiceLayoutPreset, InvoiceRenderModel, InvoiceShareContext, InvoiceTemplateConfig, InvoiceTemplateMode, PreparedPublicInvoiceLink, PublicInvoiceLinkState } from '@erp/shared';
 import { api, qs } from '@/lib/api';
 
 /** A stored template as `/api/settings/invoice-templates` returns it. */
@@ -59,10 +59,25 @@ export async function downloadInvoicePdf(billId: string, fileName: string, templ
 
 /**
  * The WhatsApp Share dialog's starting point (docs/WHATSAPP_SHARING.md): the bill's saved mobile
- * and the tenant's message, filled from the saved bill and Company Settings. Always refetched.
+ * and the tenant's message, filled from the saved bill and Company Settings (with `{InvoiceLink}`
+ * still a placeholder). Always refetched.
  */
 export const useInvoiceShare = (billId?: string) =>
   useQuery({ queryKey: ['bill-invoice-share', billId], queryFn: () => api.get<InvoiceShareContext>(`/api/bills/${billId}/invoice/share`), enabled: !!billId, staleTime: 0 });
+
+/**
+ * The bill's public invoice link (Phase 5.1) — state only. Reading it never creates a link: the
+ * Share dialog opens without publishing anything.
+ */
+export const usePublicInvoiceLink = (billId?: string) =>
+  useQuery({ queryKey: ['bill-public-link', billId], queryFn: () => api.get<PublicInvoiceLinkState>(`/api/bills/${billId}/invoice/public-link`), enabled: !!billId, staleTime: 0, gcTime: 0 });
+
+/** Prepare the link a share sends: the server reuses the live one for this template, or replaces it. */
+export const preparePublicInvoiceLink = (billId: string, templateId?: string) =>
+  api.post<PreparedPublicInvoiceLink>(`/api/bills/${billId}/invoice/public-link`, { templateId: templateId ?? null });
+
+/** Revoke the bill's live link — the URL stops opening at once. */
+export const revokePublicInvoiceLink = (billId: string) => api.delete<{ revoked: boolean }>(`/api/bills/${billId}/invoice/public-link`);
 
 /** Audit: WhatsApp was opened for this invoice. Never "sent" — click-to-chat cannot know that. Best effort. */
 export const recordInvoiceShareOpened = (billId: string, templateId?: string) =>

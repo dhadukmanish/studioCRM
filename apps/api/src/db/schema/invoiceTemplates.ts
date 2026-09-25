@@ -1,12 +1,14 @@
-import { pgTable, text, boolean, jsonb, uniqueIndex, index, check } from 'drizzle-orm/pg-core';
+import { pgTable, text, boolean, jsonb, uniqueIndex, index, check, unique } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import type { InvoiceTemplateConfig } from '@erp/shared';
 import { id, ts, tenantRef } from './core';
 
 /**
  * Invoice Template Master — how a bill is PRESENTED (docs/INVOICE_TEMPLATES.md). A template
- * never stores money and nothing references it: a bill does not remember which template printed
- * it, so deleting a template can never touch a bill.
+ * never stores money and a bill does not reference it: a bill does not remember which template
+ * printed it, so deleting a template can never touch a bill. The one thing that references a
+ * template is a public invoice link (`public_invoice_links`), which is revoked by any edit and
+ * removed with the template.
  *
  * `config` is the controlled presentation JSON, validated by `invoiceTemplateConfigSchema` on
  * every write — never HTML, CSS or script.
@@ -29,6 +31,8 @@ export const invoiceTemplates = pgTable(
   },
   (t) => [
     uniqueIndex('invoice_templates_tenant_name_lower_idx').on(t.tenantId, sql`lower(${t.templateName})`),
+    /** The target `public_invoice_links` references (template_id, tenant_id) together. */
+    unique('invoice_templates_id_tenant_uk').on(t.id, t.tenantId),
     // At most ONE default per tenant, enforced by the database: moving the default is two
     // updates in one transaction, and a race between two of them fails here instead of leaving
     // two defaults behind.

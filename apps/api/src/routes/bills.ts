@@ -9,6 +9,7 @@ import { parseListQuery } from '../lib/list';
 import { filterWhere, sortBy, tableColumns, type ColumnMap } from '../lib/filters';
 import { logActivity } from '../services/activity';
 import { createBill, getBill, shapeBill, updateBill } from '../services/bills';
+import { auditRevokedLinks } from '../services/publicInvoiceLinks';
 
 /**
  * Billing — the studio's invoice document.
@@ -106,8 +107,9 @@ export async function billRoutes(app: FastifyInstance) {
   app.put(`${BASE}/:id`, { preHandler: app.requirePermission(PERMISSION, 'update') }, async (req) => {
     const { id } = req.params as { id: string };
     const body = parse(billUpdateSchema, req.body);
-    const updated = await updateBill(req.user.tenantId, id, body);
+    const { bill: updated, revokedLinkIds } = await updateBill(req.user.tenantId, id, body);
     await logActivity(req, 'bill', updated.id, 'updated', `${LABEL} ${updated.bookNumber}/${updated.billNumber} for "${updated.customerName}" updated`, { grandTotal: updated.grandTotal });
+    await auditRevokedLinks(req, updated.id, `${updated.bookNumber}/${updated.billNumber}`, revokedLinkIds, 'BILL_UPDATED');
     return ok(updated, `${LABEL} updated successfully`);
   });
 
