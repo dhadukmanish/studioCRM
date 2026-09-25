@@ -8,3 +8,4 @@ export * from './counters';
 export * from './appointments';
 export * from './bills';
 export * from './companyLogos';
+export * from './invoiceTemplates';

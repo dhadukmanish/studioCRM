@@ -15,6 +15,8 @@
 // bundle locally.
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
+import { cp, rm } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 /** Short commit SHA + build time, so a deployed instance can say which build it is. */
 function commit() {
@@ -50,4 +52,14 @@ for (const entry of ['src/server.ts', 'src/db/migrate.ts', 'src/db/seed.ts']) {
     banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
   });
 }
+// The invoice PDF's fonts (services/invoicePdfText.ts reads `dist/fonts/*.ttf` beside server.js).
+// Font files are data, not code, so they are copied rather than bundled — replaced outright, so a
+// font from an older build can never linger. Source: assets/fonts (scripts/build-invoice-fonts.mjs).
+await rm('dist/fonts', { recursive: true, force: true });
+await cp('assets/fonts', 'dist/fonts', { recursive: true });
+// HarfBuzz, the invoice PDF's text shaper. harfbuzzjs (bundled into server.js) loads its WASM from
+// `new URL('harfbuzz.wasm', import.meta.url)` — once bundled, that is dist/harfbuzz.wasm beside
+// server.js, whatever the working directory. Nothing is read from node_modules at runtime.
+await cp(fileURLToPath(import.meta.resolve('harfbuzzjs/dist/harfbuzz.wasm')), 'dist/harfbuzz.wasm');
+
 console.log(`API bundled → dist/ (commit ${commit()}${sourcemap ? ', with source maps' : ''})`);

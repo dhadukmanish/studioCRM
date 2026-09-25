@@ -10,3 +10,4 @@ export * from './accounts.js';
 export * from './books.js';
 export * from './appointments.js';
 export * from './bills.js';
+export * from './invoiceTemplates.js';

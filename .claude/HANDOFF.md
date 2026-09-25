@@ -18,7 +18,7 @@ a data-table kit; the Masters layer, Appointments and Billing on top of it are p
   recipe is still accurate — read it before adding a module.
 - `CLAUDE.md` holds the always-loaded engineering rules — stable rules only; current
   implementation status lives in THIS file. `docs/ARCHITECTURE.md`, `docs/UI_DESIGN_SYSTEM.md`,
-  `docs/DEVELOPMENT.md`, `docs/BILL_NUMBERING.md`, `docs/BILLING_CALCULATION.md` and `docs/SETTINGS.md` hold the
+  `docs/DEVELOPMENT.md`, `docs/BILL_NUMBERING.md`, `docs/BILLING_CALCULATION.md`, `docs/SETTINGS.md` and `docs/INVOICE_TEMPLATES.md` hold the
   detail; `.claude/agents/` has five
   specialists, `.claude/skills/studio-*` the workflows, `.claude/hooks/guard-bash.mjs` blocks
   destructive commands.
@@ -155,7 +155,7 @@ read it before touching any figure on a bill.
 ### Settings foundation — Phase 3 (company profile, logo, tenant date format)
 
 **Full contract: `docs/SETTINGS.md`.** Built so the Invoice phase has one place to read branding
-and date format from. Not committed yet at the time of writing — check `git status`.
+and date format from. Committed as `e64a222` on `feature/settings-branding` (see Git).
 
 - **Two sources, never mixed.** Company identity (name, logo, GSTIN, address, contact) = the
   tenant's DEFAULT company row + `company_logos`, read through `GET /api/settings/company`
@@ -182,6 +182,56 @@ and date format from. Not committed yet at the time of writing — check `git st
   invalidates `companies`, which covers `['companies','profile']`. No reload, no sign-out.
 - Still native on purpose: the Appointment `type="time"` input (time behaviour was out of scope)
   and the custom-field `datetime-local` / `time` types (no tenant uses them).
+
+### Invoice templates, preview and PDF — Phase 4
+
+**Full contract: `docs/INVOICE_TEMPLATES.md`.** Branch `feature/invoice-templates` (from `e64a222`).
+
+- **One model, two renderers.** `buildInvoiceModel` (shared) turns the SAVED bill + company
+  profile + date format + template into an `InvoiceRenderModel`; the browser (`InvoiceDocument`)
+  and the PDF (`renderInvoicePdf`) only draw it. It formats; it never calculates, and it never
+  reads Item/Sub Item Master. `getBillInvoicePdf` is the reusable entry point for WhatsApp.
+- **Templates are controlled config** (strict zod, plain text only), three presets
+  (Classic/Compact/Detailed), `supportedMode` BOTH/WITH_GST/WITHOUT_GST. Starters Classic
+  (default, BOTH), Compact, Detailed GST are seeded ONCE per tenant (lazily on first use for
+  existing tenants — the real tenant got them on 2026-09-25). One default per tenant: set in one
+  transaction, backed by a partial unique index; the default can't be deleted or deactivated.
+  An explicitly chosen incompatible template is refused; otherwise default → first compatible
+  (BOTH first) → built-in Classic.
+- **WITHOUT_GST** prints `titleWithoutGst` ("Invoice"), drops GST %, GST and Taxable columns, GST
+  and Taxable totals and the GST summary; the lines' GST snapshot is untouched.
+- **PDF = pdf-lib for layout + HarfBuzz (harfbuzzjs WASM) for text** — English, Gujarati and
+  Hindi/Devanagari, mixed in one string, shaped like Chrome shapes them (`services/invoicePdfText.ts`).
+  Bundled into `dist/server.js`; the only files read at runtime are `dist/fonts/*` and
+  `dist/harfbuzz.wasm`, both copied by `build.mjs`. Proven by running the built server from a folder
+  with no `node_modules` above it and downloading English/Gujarati/Hindi PDFs of Bill #1.
+  **`Deploy-StudioCRM.ps1 -Hotfix` uploads only server.js — the first deploy of this needs a full
+  deploy** (new fonts + WASM).
+- **Font gotcha (cost an hour):** pdf-lib's own subsetting drops Noto glyph OUTLINES — the text
+  layer is perfect but the page prints almost blank. Fonts (Noto Sans, Sans Gujarati, Sans
+  Devanagari × regular/semibold) are pre-subset once by `pnpm --filter @erp/api fonts:invoice`
+  and embedded whole by our own CID-font writer; a test checks every drawn glyph has an outline.
+- **Searchable-text gotcha (cost the most time):** pdf.js treats a glyph whose ToUnicode text
+  contains a nonspacing mark (virama, vowel signs, anusvara) as ZERO-width, and ignores an empty
+  mapping (`<>` extracts as the raw CID code). Naive "whole cluster on the first glyph" mapping
+  therefore extracts with stray control characters and invented/missing spaces. The fix — tokens
+  dealt to advancing glyphs, marks on zero-width space-glyph "carriers", marks and surplus glyphs
+  drawn as outlines — is explained in `docs/INVOICE_TEMPLATES.md` ("PDF text"). Don't "simplify" it.
+- **Unsupported characters** (Tamil, emoji…) → the PDF endpoint answers 422
+  `INVOICE_UNPRINTABLE_TEXT` naming the characters and where; it never prints boxes.
+- **Scratch-testing gotcha:** Node's `fetch` refuses some ports outright ("bad port", e.g. 4190 —
+  ManageSieve). Pick another port for a smoke server rather than debugging the server.
+- **Bundle gotcha:** `build.mjs`'s banner declares `createRequire` in `dist/server.js`; a module
+  that imports `{ createRequire }` from `node:module` makes the bundled server refuse to start
+  ("already declared"). Found by a bundle smoke test before it shipped.
+- **Layout rules found by looking at real PDFs:** numbers, serial and HSN never wrap (natural
+  width; the table's type steps down to 6 pt before a figure breaks); text is split into lines
+  before control characters are stripped (terms kept their line breaks).
+- **Logo**: PNG/JPEG embed; pdf-lib can't embed WebP, so the logo form converts WebP → PNG in the
+  browser before upload.
+- **Print** = only the invoice (portal under `<body>` + print CSS), A4 with the template's margin.
+- **RBAC**: `settings_invoice_templates` to manage; previewing/printing/downloading a bill's
+  invoice needs only `operations_billing` read. Existing roles need re-saving to get the new key.
 
 ### Bill numbering
 
@@ -336,8 +386,20 @@ Keep the `dhadukmanish@` in the URL. Nothing needs to be deleted from Credential
 **`main` is the deployed branch, and it is pushed** — `origin/main` was at `c4a0985` on
 2026-09-25 (the Masters / Appointments / Billing layer plus the deployment work and its fixes).
 The live site's `/api/health` reported build `6f9ac2e`; the two commits after it touch only the
-deploy script and docs. Phase 3 (Settings) is NOT deployed. `masters/account-master` was fast-forward merged into `main` and
-still exists; future feature branches start from `main` and merge back into it before a deploy.
+deploy script and docs. `masters/account-master` was fast-forward merged into `main` and still
+exists; future feature branches start from `main` and merge back into it before a deploy.
+
+**Unmerged, unpushed feature branches — a stack, oldest first:**
+
+| Branch | Holds | State |
+| --- | --- | --- |
+| `feature/settings-branding` | `e64a222` feat: add global date settings and company branding (Phase 3) | committed, not pushed, not merged |
+| `feature/invoice-templates` | branched from `e64a222`; Phase 4 (invoice templates, preview, PDF with Gujarati/Hindi shaping) — `feat: add invoice templates preview and PDF` | committed, not pushed, not merged |
+
+`main` has neither. Merge in order (settings, then invoices) — never start new work from `main`
+while these are open, or it will lack the settings foundation. Neither phase is deployed; their
+migrations (`0012`–`0014`) are already applied to the shared database (additive, the live build
+ignores them).
 
 The repository is **public** (`private: false` on the GitHub API). No secret is in it —
 `apps/api/.env` is gitignored and every deployment credential lives in the hosting panel — but the
@@ -418,10 +480,11 @@ this machine. The app points at a **hosted Postgres 18.4** instead:
 - The password contains `@@`, which **must stay percent-encoded** as `%40%40` inside the URL,
   or the connection string parses wrong
 - No SSL parameters needed
-- **25 tables** in `public`; migrations `0000` … `0013` all applied (14 rows in
-  `drizzle.__drizzle_migrations`). `0012` added `companies_id_tenant_uk`; `0013` added
+- **26 tables** in `public`; migrations `0000` … `0014` all applied (15 rows in
+  `drizzle.__drizzle_migrations`). `0014` added `invoice_templates` (one migration, correctly
+  ordered — no new FK target). `0012` added `companies_id_tenant_uk`; `0013` added
   `company_logos` with its composite FK to it — split in two for the generator gotcha below,
-  which recurred exactly. Both additive; the live site's older build ignores them. Earlier: `0005` created `books`; `0006` dropped the sample
+  which recurred exactly. All additive; the live site's older build ignores them. Earlier: `0005` created `books`; `0006` dropped the sample
   `categories` table; `0007` added `appointments` and `document_counters`; `0008` added
   `sub_items_id_tenant_uk`; `0009` added `bills` and `bill_items`; `0010` widened the three
   `bill_items` amount columns to `numeric(16, 2)`; `0011` added the four discount columns
@@ -471,13 +534,17 @@ Dev servers are usually already running in the background from an earlier sessio
 ## Testing
 
 Vitest runs in `apps/api` only (pinned to v3 — v5 needs Vite 6, this repo is on Vite 5).
-Nine files (items, sub-items, account groups, accounts, books, appointments, bills, settings,
-plus `lib/listen`), 883 tests. The route suites have two sections:
+Ten files (items, sub-items, account groups, accounts, books, appointments, bills, settings,
+invoices, plus `lib/listen`), 979 tests. The route suites have two sections:
 
 - **A — pure validation and calculation** (zod schemas, `normalizeMobile`, the bill money
   functions, the discount allocation, the rate-wise GST summary, the shared date
   format/parse rules incl. a TZ-shift guard, the settings payload rule, logo magic-byte
-  sniffing). Always runs. **541 tests pass today; 342 skipped.**
+  sniffing, the invoice template schema, template compatibility/fallback, the invoice render
+  model, and real PDFs parsed back with pdf.js — text, pages, images, glyph outlines,
+  determinism, nothing drawn off the page, unprintable-character refusal, Gujarati/Hindi shaping,
+  extraction and wrapping). Always runs.
+  **631 tests pass today; 358 skipped.**
 - **B — database-backed** (tenant isolation, RBAC, duplicate guards, lookup field exposure, the
   allocators' sequences and concurrency, the rollback that keeps a failed create from burning a
   number, bill snapshots, the stored discount and its allocation, and the atomic line
@@ -595,7 +662,40 @@ Confirmed end-to-end against the live API / in a real browser, not just by readi
 - A code review of Phase 3 found one HIGH (an autofocused `DateInput` kept stale text through a
   form `reset()`, so Edit could show today while holding the row's date) and one MEDIUM (custom
   date fields could store half-typed text); both fixed and re-verified in the browser.
-- `pnpm typecheck`, `pnpm test` (541 passed, 342 skipped) and `pnpm build` all clean.
+- **Invoice Phase 4 (2026-09-25), live API — 27 checks** with a temporary second tenant (deleted
+  afterwards): starters seeded once, bill #1's invoice (Classic, ₹65,625.00, company, date format),
+  switching to Compact without moving the default, the PDF's headers/file name/text, 401/403/404
+  paths, template create/refuse-bad-config/refuse-duplicate-name/duplicate/set-default/one
+  default/refuse-delete-default/delete, a WITHOUT_GST bill's presentation, an incompatible
+  template refused, and cross-tenant bill/PDF/template access all 404. Bill #1, its lines, every
+  book counter and the appointment counter were byte-identical before and after.
+- **Invoice Phase 4 in headless Chrome (`--lang=en-US`) — 35 + 2 checks, zero console errors:**
+  gallery with real thumbnails and the Default badge, sample preview modal, designer live preview
+  (add/reorder a column, title, Without-GST sample), create / edit / duplicate / set default /
+  default has no Delete / delete, bill Preview with DD/MM/YYYY, the bill's own totals and GST
+  summary, template switch without moving the default, Download PDF (`Invoice-2026-27-1.pdf`,
+  application/pdf — captured from the page; headless Chrome does not write downloads to disk),
+  print media showing only the invoice, list row actions, no Preview on an unsaved bill, 390px.
+- **The production bundle** (`apps/api/dist`, run from a folder with no `node_modules`) served bill
+  #1's PDF: 200, `application/pdf`, correct file name, fully rendered text.
+- **Incident, fixed and restored (2026-09-25):** a sloppy menu helper in my browser test script
+  clicked Delete in the wrong open menu and deleted the real tenant's **Classic** starter template
+  (its cleanup then could not restore the default). Only template rows were affected — no bill,
+  line or counter. Classic was recreated from the exact starter config and made default again and
+  the test template removed; all three starters verified identical to their seeded config. The
+  script now refuses to delete anything not named `VERIFY…`. Browser runs also exposed a real UI
+  bug (the card menu was clipped by `overflow-hidden`) — fixed.
+- A code review of Phase 4 found no blocker and one HIGH (after editing a bill, the cached preview
+  and Print could show the old figures for 30 s while the PDF was right) — fixed: the invoice is
+  always refetched, bill/company/logo saves invalidate it, Print waits for fresh data. Also fixed
+  from that review: section labels and layout metrics moved into the shared model (the two
+  renderers had each hard-coded them); a PDF warning for characters the fonts cannot print
+  (since replaced: Gujarati and Hindi now PRINT, and unsupported scripts are refused); rows /
+  terms taller than a page continue line by line instead of running off
+  it; a delete that raced set-default could remove the default; an undecodable logo broke every
+  PDF; a stuck preview when the chosen template stopped fitting; a duplicate "Amount" column.
+  Left as LOW: concurrent template edits get a generic 409/500 message (data stays consistent).
+- `pnpm typecheck`, `pnpm test` (631 passed, 358 skipped) and `pnpm build` all clean.
 
 Demo logins: `admin@example.com` (Super Admin, everything) and `viewer@example.com`
 (read-only, useful for testing RBAC) — both password `Admin@1234`.
@@ -608,11 +708,15 @@ assumes one and will throw. Guard the login step when reusing it.
 
 ## Known pending work
 
-- **Phase 3 (Settings) is uncommitted and undeployed** at the time of writing. Its migrations
-  `0012`/`0013` are already applied to the shared database (additive; the live build ignores them).
-- **Next: Invoice Template Master, Invoice Preview / PDF, WhatsApp** — all deliberately not
-  started. They read the company profile, the logo bytes and `dateFormat` exactly as
-  `docs/SETTINGS.md` "For the Invoice phase" describes; the bill keeps its own snapshot.
+- **Phases 3 and 4 are committed but unpushed, unmerged and undeployed** — see the
+  branch table under Git. Migrations `0012`–`0014` are already on the shared database.
+- **Next: WhatsApp sharing** — deliberately not started. It should call `getBillInvoicePdf`
+  (`services/invoice.ts`) and use the bill's mobile number; no unofficial automation.
+- **Invoice limitations, by design for now:** A4 portrait only; the screen/print preview flows
+  continuously (the PDF is where pages are split); PDF text covers English, Gujarati, Hindi and ₹ —
+  other scripts (Tamil, emoji…) are refused with a 422; a WebP logo stored other than
+  through the form is left out of the PDF; the invoice uses CURRENT company branding (no
+  historical branding snapshot — no requirement asked for one).
 - Small known gaps left from the Phase 3 review, judged acceptable: the calendar icon does
   nothing on browsers without `showPicker()` (Safari < 16.4 — typing still works); a half-typed
   date in a list FILTER is cleared on blur without a message; custom-field values are still not
@@ -621,8 +725,8 @@ assumes one and will throw. Guard the login step when reusing it.
   transaction anywhere yet — a bill is a document, not a journal entry.
 - **Billing beyond Phase 2 is NOT implemented**, deliberately and by instruction: advance, paid
   and outstanding; the CGST/SGST/IGST split; the delivery workflow (the `delivery_date` column
-  exists, the statuses do not); Invoice Template Master, invoice preview and PDF; WhatsApp
-  sharing; a draft/cancelled bill status; a Customer Master. The data is shaped so each of these
+  exists, the statuses do not); WhatsApp sharing; a draft/cancelled bill status; a Customer
+  Master. (Invoice templates, preview, print and PDF are built — Phase 4.) The data is shaped so each of these
   is an addition, not a rewrite.
 - **The CGST/SGST/IGST split needs business input before it can be built:** the studio's state,
   the place-of-supply rule and how an intra-state bill is told from an inter-state one. Nothing

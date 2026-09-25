@@ -26,6 +26,9 @@ const BooksPage = lazy(() => import('@/pages/masters/BooksPage'));
 const AppointmentsPage = lazy(() => import('@/pages/appointments/AppointmentsPage'));
 const BillsPage = lazy(() => import('@/pages/billing/BillsPage'));
 const BillFormPage = lazy(() => import('@/pages/billing/BillFormPage'));
+const InvoicePreviewPage = lazy(() => import('@/pages/billing/InvoicePreviewPage'));
+const InvoiceTemplatesPage = lazy(() => import('@/pages/settings/invoice-templates/InvoiceTemplatesPage'));
+const InvoiceTemplateDesignerPage = lazy(() => import('@/pages/settings/invoice-templates/InvoiceTemplateDesignerPage'));
 
 /** Redirects to /signin when logged out. */
 function Protected() {
@@ -73,8 +76,11 @@ export default function App() {
               <Route path="/modules/billing" element={<Guard permission="operations_billing"><BillsPage /></Guard>} />
               <Route path="/modules/billing/new" element={<Guard permission="operations_billing"><BillFormPage /></Guard>} />
               <Route path="/modules/billing/:id" element={<Guard permission="operations_billing"><BillFormPage /></Guard>} />
+              <Route path="/modules/billing/:id/invoice" element={<Guard permission="operations_billing"><InvoicePreviewPage /></Guard>} />
               {/* ---- Settings ---- */}
               <Route path="/modules/settings" element={<SettingsHub />} />
+              {/* The designer needs the full width, so it sits outside the settings sub-nav. */}
+              <Route path="/modules/settings/invoice-templates/:id" element={<Guard permission="settings_invoice_templates"><InvoiceTemplateDesignerPage /></Guard>} />
               <Route path="/modules/settings" element={<SettingsLayout />}>
                 <Route path="companies" element={<Guard permission="admin_companies"><CompaniesPage /></Guard>} />
                 <Route path="branches" element={<Guard permission="admin_branches"><BranchesPage /></Guard>} />
@@ -83,6 +89,7 @@ export default function App() {
                 <Route path="activity-logs" element={<Guard permission="admin_activity_logs"><ActivityLogsPage /></Guard>} />
                 <Route path="custom-fields" element={<Guard permission="settings_custom_fields"><CustomFieldsPage /></Guard>} />
                 <Route path="general" element={<Guard permission="settings_general"><GeneralSettingsPage /></Guard>} />
+                <Route path="invoice-templates" element={<Guard permission="settings_invoice_templates"><InvoiceTemplatesPage /></Guard>} />
                 <Route path="*" element={<ComingSoon />} />
               </Route>
               <Route path="*" element={<NotFound />} />

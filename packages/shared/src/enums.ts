@@ -130,3 +130,38 @@ export type BillDiscountType = (typeof BILL_DISCOUNT_TYPES)[number];
 export const BILL_DISCOUNT_TYPE_LABELS: Record<BillDiscountType, string> = { NONE: 'None', AMOUNT: 'Amount', PERCENT: 'Percent' };
 /** The compact form the billing screen puts on a segmented control. */
 export const BILL_DISCOUNT_TYPE_SHORT: Record<BillDiscountType, string> = { NONE: 'None', AMOUNT: '₹', PERCENT: '%' };
+
+/**
+ * Invoice templates (docs/INVOICE_TEMPLATES.md). A template controls PRESENTATION only —
+ * nothing here can change a figure on a bill.
+ *
+ * `supportedMode` says which bills a template may render: BOTH, or only one tax mode.
+ */
+export const INVOICE_TEMPLATE_MODES = ['BOTH', 'WITH_GST', 'WITHOUT_GST'] as const;
+export type InvoiceTemplateMode = (typeof INVOICE_TEMPLATE_MODES)[number];
+export const INVOICE_TEMPLATE_MODE_LABELS: Record<InvoiceTemplateMode, string> = { BOTH: 'With & without GST', WITH_GST: 'With GST only', WITHOUT_GST: 'Without GST only' };
+
+/** The controlled visual styles. Each is a fixed set of typography/border rules, not free CSS. */
+export const INVOICE_LAYOUT_PRESETS = ['CLASSIC', 'COMPACT', 'DETAILED'] as const;
+export type InvoiceLayoutPreset = (typeof INVOICE_LAYOUT_PRESETS)[number];
+export const INVOICE_LAYOUT_PRESET_LABELS: Record<InvoiceLayoutPreset, string> = { CLASSIC: 'Classic', COMPACT: 'Compact', DETAILED: 'Detailed' };
+
+/**
+ * The item-table columns an invoice can print, all read from the bill line's own snapshot.
+ * `amount` is Qty x Rate before the bill discount; `taxable` is the net base after it.
+ */
+export const INVOICE_COLUMNS = ['serial', 'item', 'product', 'hsn', 'quantity', 'rate', 'amount', 'taxable', 'gstRate', 'gstAmount', 'total', 'remark'] as const;
+export type InvoiceColumn = (typeof INVOICE_COLUMNS)[number];
+export const INVOICE_COLUMN_LABELS: Record<InvoiceColumn, string> = {
+  serial: '#', item: 'Item', product: 'Product', hsn: 'HSN/SAC', quantity: 'Qty', rate: 'Rate', amount: 'Amount',
+  taxable: 'Taxable', gstRate: 'GST %', gstAmount: 'GST', total: 'Total', remark: 'Remark',
+};
+
+export const INVOICE_ALIGNMENTS = ['LEFT', 'CENTER', 'RIGHT'] as const;
+export type InvoiceAlignment = (typeof INVOICE_ALIGNMENTS)[number];
+export const INVOICE_PAPER_SIZES = ['A4'] as const;
+export const INVOICE_ORIENTATIONS = ['PORTRAIT'] as const;
+export const INVOICE_MARGINS = ['NARROW', 'NORMAL'] as const;
+export type InvoiceMargin = (typeof INVOICE_MARGINS)[number];
+export const INVOICE_DENSITIES = ['COMPACT', 'NORMAL'] as const;
+export type InvoiceDensity = (typeof INVOICE_DENSITIES)[number];

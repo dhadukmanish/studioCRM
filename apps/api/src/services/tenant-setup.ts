@@ -2,9 +2,10 @@ import type { Db } from '../db/client';
 import { schema } from '../db/client';
 import { SYSTEM_ROLES, defaultRoleGrants, type SystemRoleKey } from '@erp/shared';
 import { DEFAULT_SETTINGS } from './settings';
+import { ensureStarterTemplates } from './invoiceTemplates';
 
 /**
- * Bootstraps a brand-new tenant: system roles, default company + branch, settings.
+ * Bootstraps a brand-new tenant: system roles, default company + branch, settings, starter invoice templates.
  * Called by the seed script and by any future self-signup flow.
  */
 export async function seedTenantDefaults(db: Db, tenantId: string, opts: { companyName: string; currency?: string; countryCode?: string }) {
@@ -16,5 +17,6 @@ export async function seedTenantDefaults(db: Db, tenantId: string, opts: { compa
   const [company] = await db.insert(schema.companies).values({ tenantId, name: opts.companyName, isDefault: true, currency: opts.currency ?? 'INR', countryCode: opts.countryCode ?? 'IN' }).returning();
   const [branch] = await db.insert(schema.branches).values({ tenantId, companyId: company.id, name: 'Head Office', isDefault: true }).returning();
   await db.insert(schema.appSettings).values({ tenantId, settings: { ...DEFAULT_SETTINGS } });
+  await ensureStarterTemplates(tenantId, db);
   return { roles, company, branch };
 }

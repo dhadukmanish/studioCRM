@@ -5,8 +5,9 @@ Business app for a photography/video studio, built on an in-house ERP boilerplat
 **Status: Masters + Appointments + Billing built through Phase 2** — Item, Sub Item, Account
 Group, Account and Book Master, the Appointment module, the settings foundation (company profile + logo, tenant
 date format), and the Bill (header, lines, master
-snapshots, book-wise numbering, bill-level discount, rate-wise GST summary and final totals).
-Payment, ledger, the CGST/SGST/IGST split, invoice template, PDF and reports are not started.
+snapshots, book-wise numbering, bill-level discount, rate-wise GST summary and final totals),
+plus invoice templates, the invoice preview, print and server-side PDF (`docs/INVOICE_TEMPLATES.md`).
+Payment, ledger, WhatsApp, the CGST/SGST/IGST split and reports are not started.
 Billing honours two contracts: `docs/BILL_NUMBERING.md` for identity and `docs/BILLING_CALCULATION.md`
 for money. Current implementation status lives in `.claude/HANDOFF.md`.
 
@@ -84,6 +85,10 @@ Dev servers are often already running from an earlier session — probe
    document number comes from `document_counters` (`allocateDocumentNumber`). Never
    `SELECT max(...) + 1`, never number a document in the browser, and never let one document
    type move another's counter.
+9. **An invoice is drawn, never calculated.** Every invoice output — preview, print, PDF, a future
+   WhatsApp share — comes from `buildInvoiceModel` over the SAVED bill's snapshot and stored
+   totals; renderers only draw that model. A template controls presentation and can never change a
+   figure, and nothing that renders an invoice may write a bill, a line or a counter.
 
 ## Architecture boundaries
 
@@ -113,7 +118,8 @@ Before writing a new API module or list/form screen, read the "Adding a module" 
 Compact desktop-productivity CRM. White/neutral-gray dominant, sky-blue as accent only, sharp
 typography, minimal bold, thin icons, flat tables, few cards, minimal shadow, low vertical
 scrolling, keyboard-friendly data entry. All colors come from CSS variables (`themes.css`) via
-Tailwind tokens — **never hard-code a hex value in a component**.
+Tailwind tokens — **never hard-code a hex value in a component**. (The invoice document is the one
+exception: paper ignores the app theme, so it uses the shared `INVOICE_COLORS`.)
 Dates follow the tenant's Date Format setting: show them only through `useDateFormatters()` and
 enter them only through `<DateInput>` — never `<input type="date">`, `toLocaleDateString` or a
 hand-rolled formatter, and never parse a `YYYY-MM-DD` business date with `new Date()`.
@@ -172,5 +178,8 @@ return findings, not file dumps. Saving tokens never justifies guessing at corre
   allocation, rounding, the rate-wise GST summary, and the snapshot rules an edit follows
 - `docs/SETTINGS.md` — company profile vs application settings, date storage vs display,
   `DateInput`, logo storage/versioning, cache invalidation, what the Invoice phase reads
+- `docs/INVOICE_TEMPLATES.md` — template model and rules, the render model, preview/print, the
+  PDF renderer (pdf-lib + HarfBuzz shaping for Gujarati/Hindi, pre-subset fonts, the searchable-text
+  mapping — read before touching any of it), RBAC, WhatsApp hook
 - `.claude/HANDOFF.md` — live project state, DB target, gotchas, pending work (`/handoff`)
 - `README.md` — boilerplate feature map and the "add a module" recipe

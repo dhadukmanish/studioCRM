@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { BILL_DISCOUNT_TYPES, BILL_DISCOUNT_TYPE_LABELS, INVOICE_TAX_MODES, INVOICE_TAX_MODE_LABELS, type FilterFieldDef } from '@erp/shared';
+import { Download, FileText, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { BILL_DISCOUNT_TYPES, BILL_DISCOUNT_TYPE_LABELS, INVOICE_TAX_MODES, INVOICE_TAX_MODE_LABELS, invoiceFileName, type FilterFieldDef } from '@erp/shared';
 import { Crumb } from '@/components/layout/AppShell';
 import { DataTable, useListState, type Column } from '@/components/data/DataTable';
 import { Badge, ConfirmDialog, Dropdown } from '@/components/ui';
@@ -9,6 +9,9 @@ import { useList, useSave } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
 import { fmtMoney, fmtNum } from '@/lib/format';
 import { useDateFormatters } from '@/lib/settings';
+import { downloadInvoicePdf } from '@/lib/invoice';
+import { toast } from '@/lib/toast';
+import { ApiError } from '@/lib/api';
 import type { BillRow } from './types';
 
 const PERMISSION = 'operations_billing';
@@ -23,7 +26,7 @@ export default function BillsPage() {
   const [del, setDel] = useState<BillRow | null>(null);
   const nav = useNavigate();
   const can = useAuthStore((s) => s.can);
-  const remove = useSave({ invalidate: [QUERY_KEY], onSuccess: () => setDel(null) });
+  const remove = useSave({ invalidate: [QUERY_KEY, 'bill-invoice'], onSuccess: () => setDel(null) });
 
   const total = q.data?.total ?? 0;
   const canEdit = can(PERMISSION, 'update');
@@ -123,6 +126,8 @@ export default function BillsPage() {
             items={[
               /* Read is enough to open a bill; the form itself is view-only without update. */
               { label: canEdit ? 'Edit' : 'View', icon: <Pencil className="h-3.5 w-3.5" />, onClick: () => nav(`/modules/billing/${r.id}`) },
+              { label: 'Preview invoice', icon: <FileText className="h-3.5 w-3.5" />, onClick: () => nav(`/modules/billing/${r.id}/invoice`) },
+              { label: 'Download PDF', icon: <Download className="h-3.5 w-3.5" />, onClick: () => downloadInvoicePdf(r.id, invoiceFileName(r.bookNumber, r.billNumber)).catch((e) => toast.error(e instanceof ApiError ? e.message : 'The PDF could not be generated')) },
               ...(canDelete ? [{ label: 'Delete', icon: <Trash2 className="h-3.5 w-3.5" />, danger: true, onClick: () => setDel(r) }] : []),
             ]}
           />

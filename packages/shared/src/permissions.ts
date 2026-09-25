@@ -60,6 +60,8 @@ export const PERMISSIONS: PermissionDef[] = [
   // Settings
   { name: 'settings_general', displayName: 'General Settings', module: 'settings', actions: ['read', 'update'] },
   { name: 'settings_custom_fields', displayName: 'Custom Fields', module: 'settings' },
+  // Managing templates. Previewing / printing a bill's invoice needs only operations_billing read.
+  { name: 'settings_invoice_templates', displayName: 'Invoice Templates', module: 'settings' },
 ];
 
 /** Feature packages can extend the catalog at startup (both API and web import the same shared package). */

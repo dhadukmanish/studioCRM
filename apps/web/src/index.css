@@ -35,3 +35,12 @@
   .section-title { @apply flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide text-gray-700 font-heading; }
   .link { @apply text-primary font-medium hover:underline; }
 }
+
+/* Invoice print: only the invoice copy rendered under <body> prints — never the app shell.
+   See InvoicePrintRoot (components/invoice/InvoiceDocument.tsx). */
+.invoice-print-root { display: none; }
+@media print {
+  body > *:not(.invoice-print-root) { display: none !important; }
+  .invoice-print-root { display: block; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  html, body { background: #fff !important; }
+}

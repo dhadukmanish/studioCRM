@@ -23,25 +23,35 @@ export function CompanyLogoField({ companyId, logoUpdatedAt }: { companyId?: str
   const logo = useCompanyLogo(companyId, version);
   const input = useRef<HTMLInputElement>(null);
   const canEdit = useAuthStore((s) => s.can)('admin_companies', 'update');
-  const upload = useSave<FormData, { version: string }>({ invalidate: ['companies'], onSuccess: (r) => setVersion(r.version) });
-  const remove = useSave({ invalidate: ['companies'], onSuccess: () => setVersion(null) });
+  const upload = useSave<FormData, { version: string }>({ invalidate: ['companies', 'bill-invoice'], onSuccess: (r) => setVersion(r.version) });
+  const remove = useSave({ invalidate: ['companies', 'bill-invoice'], onSuccess: () => setVersion(null) });
   const busy = upload.isPending || remove.isPending;
 
   if (!companyId) {
     return <Field label="Logo"><p className="text-[12.5px] text-gray-500">Save the company first, then add its logo.</p></Field>;
   }
 
-  const pick = (file?: File) => {
+  const pick = async (file?: File) => {
     if (!file) return;
     if (!(LOGO_CONTENT_TYPES as readonly string[]).includes(file.type)) return toast.error('The logo must be a PNG, JPEG or WebP image');
-    if (file.size > LOGO_MAX_BYTES) return toast.error('The logo must be 1 MB or smaller');
+    // The invoice PDF can embed PNG and JPEG only, so a WebP logo is converted to PNG here —
+    // in the browser, which decodes WebP natively — before it is stored.
+    let toSend = file;
+    if (file.type === 'image/webp') {
+      try {
+        toSend = await webpToPng(file);
+      } catch {
+        return toast.error('This WebP image could not be read — try a PNG or JPEG');
+      }
+    }
+    if (toSend.size > LOGO_MAX_BYTES) return toast.error('The logo must be 1 MB or smaller');
     const body = new FormData();
-    body.append('file', file);
+    body.append('file', toSend);
     upload.mutate({ method: 'put', url: `/api/admin/companies/${companyId}/logo`, body });
   };
 
   return (
-    <Field label="Logo" hint="PNG, JPEG or WebP, up to 1 MB. Shown in the sidebar and, later, on invoices.">
+    <Field label="Logo" hint="PNG, JPEG or WebP (saved as PNG), up to 1 MB. Shown in the sidebar and on invoices.">
       <div className="flex items-center gap-3">
         <div className="flex h-16 w-32 shrink-0 items-center justify-center rounded-md border border-line bg-white">
           {version && logo.data ? <img src={logo.data} alt="Company logo" className="max-h-14 max-w-[7.5rem] object-contain" /> : <span className="text-[12px] text-gray-400">{version && logo.isLoading ? 'Loading…' : 'No logo'}</span>}
@@ -62,4 +72,18 @@ export function CompanyLogoField({ companyId, logoUpdatedAt }: { companyId?: str
       </div>
     </Field>
   );
+}
+
+/** WebP -> PNG through a canvas, scaled down to at most 800 px on the long side (plenty for a letterhead). */
+async function webpToPng(file: File): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 800 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) throw new Error('conversion failed');
+  return new File([blob], file.name.replace(/\.webp$/i, '') + '.png', { type: 'image/png' });
 }

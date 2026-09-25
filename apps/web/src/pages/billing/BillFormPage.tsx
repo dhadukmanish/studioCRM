@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Controller, FormProvider, useFieldArray, useForm, useWatch } from 'react-hook-form';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, ChevronDown } from 'lucide-react';
+import { ArrowLeft, ChevronDown, FileText } from 'lucide-react';
 import {
   BILL_DISCOUNT_TYPES,
   BILL_DISCOUNT_TYPE_SHORT,
@@ -120,7 +120,7 @@ function BillForm({ bill }: { bill?: BillRecord }) {
   const allowed = can(PERMISSION, bill ? 'update' : 'create');
 
   const form = useForm<BillFormValues>({ defaultValues: toForm(bill) });
-  const { control, handleSubmit, register, setValue, setError, formState: { errors } } = form;
+  const { control, handleSubmit, register, setValue, setError, formState: { errors, isDirty } } = form;
   const { fields, append, remove } = useFieldArray({ control, name: 'items' });
 
   const books = useBooksLookup();
@@ -196,7 +196,7 @@ function BillForm({ bill }: { bill?: BillRecord }) {
     [addLine, fields.length],
   );
 
-  const save = useSave<Record<string, unknown>, BillRecord>({ invalidate: [QUERY_KEY], onSuccess: () => nav('/modules/billing') });
+  const save = useSave<Record<string, unknown>, BillRecord>({ invalidate: [QUERY_KEY, 'bill-invoice'], onSuccess: () => nav('/modules/billing') });
 
   const submit = handleSubmit((v) => {
     if (lines.length === 0) {
@@ -270,6 +270,19 @@ function BillForm({ bill }: { bill?: BillRecord }) {
         </button>
         <h2 className="text-[20px] font-semibold text-gray-900">{title}</h2>
         {bill && <span className="text-[13px] text-gray-500">{bill.customerName}</span>}
+        {/* An invoice exists only for a SAVED bill — it needs the issued number. It shows the
+            saved version, so unsaved edits must be saved first. */}
+        {bill && (
+          <button
+            type="button"
+            className="btn-outline ml-auto"
+            disabled={isDirty}
+            title={isDirty ? 'Save your changes first — the invoice shows the saved bill' : 'Preview, print or download the invoice'}
+            onClick={() => nav(`/modules/billing/${bill.id}/invoice`)}
+          >
+            <FileText className="h-4 w-4" strokeWidth={1.5} /> Preview
+          </button>
+        )}
       </div>
 
       <form onSubmit={submit} className="space-y-3 pb-2">

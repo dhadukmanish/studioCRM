@@ -69,6 +69,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     items: [
       { label: 'General', href: '/modules/settings/general', permission: 'settings_general' },
       { label: 'Custom Fields', href: '/modules/settings/custom-fields', permission: 'settings_custom_fields' },
+      { label: 'Invoice Templates', href: '/modules/settings/invoice-templates', permission: 'settings_invoice_templates' },
     ],
   },
 ];

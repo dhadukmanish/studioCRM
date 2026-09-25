@@ -17,7 +17,7 @@ export function CompaniesPage() {
   const fmt = useDateFormatters();
 
   const cfg: MasterConfig = {
-    title: 'Companies', label: 'Company', url: '/api/admin/companies', permission: 'admin_companies', queryKey: 'companies', modalSize: 'lg',
+    title: 'Companies', label: 'Company', url: '/api/admin/companies', permission: 'admin_companies', queryKey: 'companies', modalSize: 'lg', invalidate: ['bill-invoice'],
     columns: [
       { key: 'name', header: 'Company', locked: true, render: (r) => <span className="flex items-center gap-2 font-medium text-gray-900">{r.name}{r.isDefault && <Badge color="blue">Default</Badge>}</span> },
       { key: 'legalName', header: 'Legal Name', render: (r) => r.legalName || '-' },
