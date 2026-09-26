@@ -1,14 +1,16 @@
 import type { FastifyInstance } from 'fastify';
-import { and, count, desc, eq, ilike, or, sql } from 'drizzle-orm';
-import { appointmentSchema, normalizeMobile } from '@erp/shared';
+import { and, count, desc, eq, ilike, or } from 'drizzle-orm';
+import { APPOINTMENT_VIEWS, WORK_EXPORT_MAX_ROWS, appointmentSchema, appointmentViewQuerySchema, normalizeMobile } from '@erp/shared';
 import { db, schema } from '../db/client';
 import { parse } from '../lib/validate';
-import { notFound, validation } from '../lib/errors';
+import { AppError, notFound, validation } from '../lib/errors';
 import { ok } from '../lib/respond';
 import { parseListQuery } from '../lib/list';
 import { filterWhere, sortBy, tableColumns } from '../lib/filters';
 import { logActivity } from '../services/activity';
-import { appointmentRow, createAppointment, shapeAppointment } from '../services/appointments';
+import { appointmentRow, appointmentView, completeAppointment, createAppointment, reopenAppointment, shapeAppointment } from '../services/appointments';
+import { businessToday } from '../services/company';
+import { csvInteger, toCsv } from '../lib/csv';
 
 /**
  * Appointment — the studio's booking record, and the customer information Billing will later
@@ -33,11 +35,24 @@ const MIN_MOBILE_SEARCH_DIGITS = 4;
 const INT4_MAX = 2147483647;
 
 /**
- * Operational default: the most recent booking first, latest time first within a day, and the
- * appointment number as the stable tie-breaker so paging never repeats or drops a row.
- * An appointment with no time yet sorts after the ones that have one.
+ * The list / export search: the appointment number, the customer, the mobile (in whatever shape it
+ * was typed) and the baby name. The ORDER comes from the view (`appointmentView`): ALL keeps the
+ * historical "latest booking first", PENDING / TODAY / UPCOMING show the soonest first.
  */
-const DEFAULT_ORDER = [desc(A.appointmentDate), sql`${A.appointmentTime} DESC NULLS LAST`, desc(A.appointmentNumber)];
+function appointmentSearch(term: string | undefined) {
+  if (!term) return undefined;
+  const digits = normalizeMobile(term);
+  const isNumber = /^\d+$/.test(term);
+  // A digit string longer than the column can hold is a phone number, not an appointment
+  // number — comparing it would ask Postgres to cast past `integer` and fail the request.
+  const asNumber = isNumber && Number(term) <= INT4_MAX ? Number(term) : null;
+  return or(
+    // Text fields only when the operator typed something that is not just a number.
+    ...(isNumber ? [] : [ilike(A.customerName, `%${term}%`), ilike(A.mobileNumber, `%${term}%`), ilike(A.babyName, `%${term}%`)]),
+    ...(digits.length >= MIN_MOBILE_SEARCH_DIGITS ? [ilike(A.mobileSearch, `%${digits}%`)] : []),
+    ...(asNumber !== null ? [eq(A.appointmentNumber, asNumber)] : []),
+  );
+}
 
 export async function appointmentRoutes(app: FastifyInstance) {
   /**
@@ -52,32 +67,78 @@ export async function appointmentRoutes(app: FastifyInstance) {
   app.get(BASE, { preHandler: app.requirePermission(PERMISSION) }, async (req) => {
     const q = parseListQuery(req.query as Record<string, unknown>);
     const cols = tableColumns(A);
-    const term = q.search;
-    const digits = term ? normalizeMobile(term) : '';
-    const isNumber = !!term && /^\d+$/.test(term);
-    // A digit string longer than the column can hold is a phone number, not an appointment
-    // number — comparing it would ask Postgres to cast past `integer` and fail the request.
-    const asNumber = isNumber && Number(term) <= INT4_MAX ? Number(term) : null;
-    const matches = term
-      ? or(
-          // Text fields only when the operator typed something that is not just a number.
-          ...(isNumber ? [] : [ilike(A.customerName, `%${term}%`), ilike(A.mobileNumber, `%${term}%`), ilike(A.babyName, `%${term}%`)]),
-          ...(digits.length >= MIN_MOBILE_SEARCH_DIGITS ? [ilike(A.mobileSearch, `%${digits}%`)] : []),
-          ...(asNumber !== null ? [eq(A.appointmentNumber, asNumber)] : []),
-        )
-      : undefined;
-    const where = and(eq(A.tenantId, req.user.tenantId), matches, filterWhere((req.query as Record<string, unknown>).filters, cols));
+    const matches = appointmentSearch(q.search);
+    const f = parse(appointmentViewQuerySchema, req.query ?? {});
+    const today = await businessToday(req.user.tenantId);
+    const view = appointmentView(f.view, today, f.from, f.to);
+    const base = and(eq(A.tenantId, req.user.tenantId), matches, filterWhere((req.query as Record<string, unknown>).filters, cols));
+    const where = and(base, view.where);
 
     const [{ total }] = await db.select({ total: count() }).from(A).where(where);
-    const order = q.sortBy && cols[q.sortBy] ? [sortBy(q.sortBy, q.sortOrder, cols, A.appointmentDate), desc(A.appointmentNumber)] : DEFAULT_ORDER;
+    if (f.full && Number(total) > WORK_EXPORT_MAX_ROWS) throw new AppError('REPORT_TOO_LARGE', `This report has ${total} rows; print carries at most ${WORK_EXPORT_MAX_ROWS}. Narrow the filters and try again.`, 422);
+    const order = q.sortBy && cols[q.sortBy] ? [sortBy(q.sortBy, q.sortOrder, cols, A.appointmentDate), desc(A.appointmentNumber)] : view.order;
     const rows = await db
       .select()
       .from(A)
       .where(where)
       .orderBy(...order)
-      .limit(q.limit)
-      .offset((q.page - 1) * q.limit);
-    return ok({ rows: rows.map(shapeAppointment), total: Number(total), page: q.page, pageSize: q.limit }, `${LABEL}s retrieved successfully`);
+      .limit(f.full ? WORK_EXPORT_MAX_ROWS : q.limit)
+      .offset(f.full ? 0 : (q.page - 1) * q.limit);
+    // Each view's size for its chip — same search and date range, no view narrowing.
+    const counts = Object.fromEntries(
+      await Promise.all(
+        APPOINTMENT_VIEWS.map(async (v) => [v, Number((await db.select({ n: count() }).from(A).where(and(base, appointmentView(v, today, f.from, f.to).where)))[0].n)]),
+      ),
+    );
+    return ok({ rows: rows.map(shapeAppointment), total: Number(total), page: q.page, pageSize: q.limit, today, counts }, `${LABEL}s retrieved successfully`);
+  });
+
+  /** CSV of the WHOLE filtered result (Reports -> Appointments), through the formula-safe `toCsv`. */
+  app.get(`${BASE}/export`, { preHandler: app.requirePermission(PERMISSION) }, async (req, reply) => {
+    const f = parse(appointmentViewQuerySchema, req.query ?? {});
+    const term = typeof (req.query as { search?: unknown }).search === 'string' ? ((req.query as { search: string }).search.trim() || undefined) : undefined;
+    const today = await businessToday(req.user.tenantId);
+    const view = appointmentView(f.view, today, f.from, f.to);
+    const where = and(eq(A.tenantId, req.user.tenantId), appointmentSearch(term), view.where);
+    const [{ total }] = await db.select({ total: count() }).from(A).where(where);
+    if (Number(total) > WORK_EXPORT_MAX_ROWS) throw new AppError('REPORT_TOO_LARGE', `This report has ${total} rows; export carries at most ${WORK_EXPORT_MAX_ROWS}. Narrow the filters and try again.`, 422);
+    const rows = await db.select().from(A).where(where).orderBy(...view.order).limit(WORK_EXPORT_MAX_ROWS);
+    const csv = toCsv(
+      ['Appointment No', 'Date', 'Time', 'Customer', 'Mobile', 'Baby', 'Status', 'Done At', 'Remark', 'From Next Visit'],
+      rows.map((r) => [
+        csvInteger(r.appointmentNumber),
+        r.appointmentDate,
+        r.appointmentTime ? r.appointmentTime.slice(0, 5) : null,
+        r.customerName,
+        r.mobileNumber,
+        r.babyName,
+        r.completedAt ? 'Done' : 'Pending',
+        r.completedAt ? r.completedAt.toISOString() : null,
+        r.remark,
+        r.sourceBillId ? 'Yes' : 'No',
+      ]),
+    );
+    return reply
+      .header('content-type', 'text/csv; charset=utf-8')
+      .header('content-disposition', `attachment; filename="Appointments-${f.view.toLowerCase()}-${today}.csv"`)
+      .header('cache-control', 'no-store')
+      .send(csv);
+  });
+
+  /** Done — one click, no form. Idempotent. The appointment stays, under Done / All. */
+  app.post(`${BASE}/:id/done`, { preHandler: app.requirePermission(PERMISSION, 'update') }, async (req) => {
+    const { id } = req.params as { id: string };
+    const { row, changed } = await completeAppointment(req.user.tenantId, req.user.id, id);
+    if (changed) await logActivity(req, 'appointment', row.id, 'appointment_done', `${LABEL} #${row.appointmentNumber} for "${row.customerName}" marked done`);
+    return ok(shapeAppointment(row), changed ? `${LABEL} #${row.appointmentNumber} done` : `${LABEL} #${row.appointmentNumber} was already done`);
+  });
+
+  /** Back to Pending — correcting a mistaken Done. */
+  app.post(`${BASE}/:id/reopen`, { preHandler: app.requirePermission(PERMISSION, 'update') }, async (req) => {
+    const { id } = req.params as { id: string };
+    const { row, changed } = await reopenAppointment(req.user.tenantId, id);
+    if (changed) await logActivity(req, 'appointment', row.id, 'appointment_reopened', `${LABEL} #${row.appointmentNumber} for "${row.customerName}" reopened`);
+    return ok(shapeAppointment(row), `${LABEL} #${row.appointmentNumber} is pending again`);
   });
 
   app.get(`${BASE}/:id`, { preHandler: app.requirePermission(PERMISSION) }, async (req) => {

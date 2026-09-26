@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, ilike, inArray, or, type SQL } from 'drizzle-orm';
 import {
   calculateBill,
@@ -6,6 +7,7 @@ import {
   INVOICE_TAX_MODE_LABELS,
   billMobileSchema,
   normalizeMobile,
+  splitPayment,
   toPaise,
   type BillDiscountValues,
   type BillInput,
@@ -16,8 +18,10 @@ import {
 } from '@erp/shared';
 import { db, schema } from '../db/client';
 import { AppError, notFound, validation } from '../lib/errors';
+import { containsPattern } from '../lib/filters';
 import { allocateBillNumber } from './billNumbers';
 import { billHasAllocations, paidPaiseByBill } from './billPayments';
+import { createReceiptIn } from './receipts';
 import { revokeActiveLinks } from './publicInvoiceLinkRevoke';
 import { getSettings } from './settings';
 import { detachNextVisit, linkedAppointment, syncNextVisit, type NextVisitResult } from './nextVisit';
@@ -61,7 +65,7 @@ const BI = schema.billItems;
 /* ------------------------------------------------------------------ search -- */
 
 /** Below this, a digit string is a document number, not a phone fragment. */
-const MIN_MOBILE_SEARCH_DIGITS = 4;
+export const MIN_MOBILE_SEARCH_DIGITS = 4;
 /** The `integer` column's ceiling — `bill_number` cannot be compared past it. */
 const INT4_MAX = 2147483647;
 
@@ -78,8 +82,8 @@ export function billSearch(term: string | undefined): SQL | undefined {
   const isNumber = /^\d+$/.test(term);
   const asNumber = isNumber && Number(term) <= INT4_MAX ? Number(term) : null;
   return or(
-    ...(isNumber ? [] : [ilike(B.customerName, `%${term}%`), ilike(B.mobileNumber, `%${term}%`), ilike(B.babyName, `%${term}%`)]),
-    ilike(schema.books.bookNumber, `%${term}%`),
+    ...(isNumber ? [] : [ilike(B.customerName, containsPattern(term)), ilike(B.mobileNumber, containsPattern(term)), ilike(B.babyName, containsPattern(term))]),
+    ilike(schema.books.bookNumber, containsPattern(term)),
     ...(digits.length >= MIN_MOBILE_SEARCH_DIGITS ? [ilike(B.mobileSearch, `%${digits}%`)] : []),
     ...(asNumber !== null ? [eq(B.billNumber, asNumber)] : []),
   );
@@ -98,8 +102,10 @@ export function billSearch(term: string | undefined): SQL | undefined {
 export const shapeBill = <T extends { subTotal: unknown; discountValue: unknown; discountAmount: unknown; gstAmount: unknown; grandTotal: unknown }>(row: T) => {
   const subTotal = Number(row.subTotal);
   const discountAmount = Number(row.discountAmount);
+  // The create request's id and fingerprint are the server's idempotency bookkeeping — never in a response.
+  const { createRequestId: _id, createRequestHash: _hash, ...rest } = row as T & { createRequestId?: unknown; createRequestHash?: unknown };
   return {
-    ...row,
+    ...rest,
     subTotal,
     discountValue: Number(row.discountValue),
     discountAmount,
@@ -479,7 +485,7 @@ export async function resolveDefaultBook(tenantId: string): Promise<{ bookId: st
  * A bill row as the API returns it: the stored columns with `numeric` read back as numbers,
  * plus `netTaxable`, which is derived from two of them rather than stored.
  */
-export type BillShaped = Omit<typeof B.$inferSelect, 'subTotal' | 'discountValue' | 'discountAmount' | 'gstAmount' | 'grandTotal'> & {
+export type BillShaped = Omit<typeof B.$inferSelect, 'subTotal' | 'discountValue' | 'discountAmount' | 'gstAmount' | 'grandTotal' | 'createRequestId' | 'createRequestHash'> & {
   subTotal: number;
   discountValue: number;
   discountAmount: number;
@@ -548,10 +554,77 @@ const nextOf = (a: { id: string; appointmentNumber: number } | null) => ({ nextA
  * rejected bill normally never reaches the allocator at all. If anything after it fails, the
  * transaction rolls back and `books.next_bill_number` goes back with it — the number is not
  * burned. Nothing else in this file ever calls the allocator.
+ *
+ * Two things only a new bill has:
+ *
+ *  - An ADVANCE received with it becomes an ordinary receipt (`createReceiptIn`) in this same
+ *    transaction, dated the bill date and put against this bill up to its Grand Total (any excess
+ *    stays as the customer's advance). The bill's figures never change — its Paid does. An account
+ *    or amount the receipt rules refuse rolls the whole bill back: no bill claiming money that was
+ *    not recorded, and no number burned.
+ *  - The form's REQUEST ID makes create idempotent. It is checked after the book row is locked, so
+ *    a double-submitted or retried create waits for the first one and then finds its bill; the
+ *    unique key `bills_tenant_create_request_uk` is the backstop. A replay returns that bill and
+ *    writes nothing — no second bill, number or receipt. A replay whose CONTENT differs (the form was
+ *    changed after a lost response) is refused with 409 BILL_ALREADY_SAVED rather than answered with
+ *    the first bill as if it were the new one — compared by `create_request_hash`.
  */
-export async function createBill(tenantId: string, body: BillInput): Promise<{ bill: BillRecord; nextVisit: NextVisitResult }> {
+export async function createBill(
+  tenantId: string,
+  userId: string,
+  body: BillInput,
+): Promise<{ bill: BillRecord; nextVisit: NextVisitResult; receiptId: string | null; replayed: boolean }> {
+  const hash = body.requestId ? requestHash(body) : null;
+  const replay = async (prior: PriorCreate) => {
+    if (prior.hash !== hash) {
+      throw new AppError('BILL_ALREADY_SAVED', `This bill was already saved as Bill No. ${prior.billNumber}. Open it from the Bills list to make changes.`, 409);
+    }
+    return { bill: await getBill(tenantId, prior.id), nextVisit: { action: null, appointment: null }, receiptId: null, replayed: true };
+  };
+  try {
+    const made = await createBillTx(tenantId, userId, body, hash);
+    if (made.kind === 'replay') return replay(made.prior);
+    return { bill: made.bill, nextVisit: made.nextVisit, receiptId: made.receiptId, replayed: false };
+  } catch (e) {
+    const prior = body.requestId && isRequestIdClash(e) ? await billByRequestId(db, tenantId, body.requestId) : null;
+    if (prior) return replay(prior);
+    throw e;
+  }
+}
+
+type PriorCreate = { id: string; billNumber: number; hash: string | null };
+const billByRequestId = async (exec: Pick<typeof db, 'select'>, tenantId: string, requestId: string): Promise<PriorCreate | null> =>
+  (await exec.select({ id: B.id, billNumber: B.billNumber, hash: B.createRequestHash }).from(B).where(and(eq(B.tenantId, tenantId), eq(B.createRequestId, requestId))).limit(1))[0] ?? null;
+
+/** The create request's content fingerprint — the validated payload, without the id itself. */
+const requestHash = (body: BillInput) => createHash('sha256').update(JSON.stringify({ ...body, requestId: undefined })).digest('hex');
+
+/** The unique-key violation a racing duplicate create hits (postgres error, possibly wrapped by the ORM). */
+const isRequestIdClash = (e: unknown) =>
+  [e, (e as { cause?: unknown })?.cause].some((x) => (x as { code?: string })?.code === '23505' && (x as { constraint_name?: string })?.constraint_name === 'bills_tenant_create_request_uk');
+
+/**
+ * A receipt refusal, re-addressed to the bill form: its account / mode / amount problems land on the
+ * Advance fields (`advance.accountId` …), anything else on the Advance box as a whole.
+ */
+function asAdvanceError(e: unknown) {
+  if (!(e instanceof AppError) || !Array.isArray(e.details)) return e;
+  const fields = new Set(['accountId', 'paymentMode', 'amount']);
+  const details = (e.details as { path?: (string | number)[]; message: string }[]).map((d) => ({
+    ...d,
+    path: ['advance', typeof d.path?.[0] === 'string' && fields.has(d.path[0]) ? d.path[0] : 'amount'],
+  }));
+  return new AppError(e.code, e.message, e.statusCode, details);
+}
+
+async function createBillTx(tenantId: string, userId: string, body: BillInput, hash: string | null) {
   return db.transaction(async (tx) => {
     const book = await resolveBook(tx, tenantId, body.bookId, true);
+    // After the book lock: a duplicate of a create still in flight has waited here for it.
+    if (body.requestId) {
+      const prior = await billByRequestId(tx, tenantId, body.requestId);
+      if (prior) return { kind: 'replay' as const, prior };
+    }
     const taxMode = billTaxMode(book.seriesType as InvoiceTaxMode, body.taxMode, `Book "${book.bookNumber}"`);
     const appointment = body.appointmentId ? await resolveAppointment(tx, tenantId, body.appointmentId) : null;
     const { rows, totals } = await resolveLines(tx, tenantId, body.items, taxMode, discountOf(body), new Map());
@@ -565,6 +638,8 @@ export async function createBill(tenantId: string, body: BillInput): Promise<{ b
         tenantId,
         bookId: book.id,
         billNumber,
+        createRequestId: body.requestId,
+        createRequestHash: hash,
         subTotal: totals.subTotal.toFixed(2),
         discountAmount: totals.discountAmount.toFixed(2),
         gstAmount: totals.gstAmount.toFixed(2),
@@ -580,10 +655,30 @@ export async function createBill(tenantId: string, body: BillInput): Promise<{ b
     // Same transaction: a failed appointment takes the bill (and both numbers) back with it.
     const nextVisit = await syncNextVisit(tx, tenantId, { ...bill, bookNumber: book.bookNumber });
 
+    // Same transaction again: the advance is a real receipt, or the bill is not saved at all.
+    let receiptId: string | null = null;
+    if (body.advance) {
+      const onBill = splitPayment(toPaise(body.advance.amount), toPaise(bill.grandTotal)).toBill;
+      receiptId = await createReceiptIn(tx, tenantId, userId, {
+        receiptDate: bill.billDate,
+        customerMobile: bill.mobileSearch,
+        customerName: null,
+        paymentMode: body.advance.paymentMode,
+        accountId: body.advance.accountId,
+        amount: body.advance.amount,
+        remark: null,
+        allocations: onBill > 0 ? [{ billId: bill.id, amount: fromPaise(onBill) }] : [],
+      }).catch((e) => {
+        throw asAdvanceError(e);
+      });
+    }
+
     const items = lines.map(shapeBillItem);
     return {
+      kind: 'made' as const,
       bill: { ...shapeBill(bill), bookNumber: book.bookNumber, appointmentNumber: appointment?.appointmentNumber ?? null, ...nextOf(nextVisit.action === 'detached' ? null : nextVisit.appointment), items, gstSummary: summaryOf(items) },
       nextVisit,
+      receiptId,
     };
   });
 }

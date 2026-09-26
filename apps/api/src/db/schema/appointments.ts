@@ -1,6 +1,6 @@
-import { pgTable, uuid, text, integer, date, time, unique, uniqueIndex, index, check, foreignKey, type PgTableExtraConfigValue } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, date, time, timestamp, unique, uniqueIndex, index, check, foreignKey, type PgTableExtraConfigValue } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { id, ts, tenantRef } from './core';
+import { id, ts, tenantRef, users } from './core';
 // Circular with bills.ts on purpose: each side only reads the other inside the lazily-built
 // table config (foreign keys), never at module load.
 import { bills } from './bills';
@@ -14,8 +14,9 @@ import { bills } from './bills';
  * and no deduplication: the same mobile number may appear on any number of appointments, which
  * is exactly why Billing's lookup returns candidates rather than one row.
  *
- * Nothing here models a status, a studio room, a photographer, a duration or a slot: none of
- * those is established by the requirement, so two appointments may share a date and time.
+ * The only status is Pending / Done (`completed_at`). Nothing here models a studio room, a
+ * photographer, a duration or a slot: none of those is established by the requirement, so two
+ * appointments may share a date and time.
  *
  * Audited through `activity_logs`, like every other module.
  */
@@ -55,6 +56,14 @@ export const appointments = pgTable(
      * is what makes a repeated or concurrent save unable to create a second.
      */
     sourceBillId: uuid('source_bill_id'),
+    /**
+     * When the appointment was marked Done (one click — docs/STUDIO_WORKFLOW.md). NULL = pending.
+     * Done is history, not deletion: the row stays searchable under Done / All. The pair is the
+     * whole status; there is no separate status column that could disagree with it.
+     */
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    /** Who marked it Done. SET NULL: removing a user never removes the appointment's history. */
+    completedBy: uuid('completed_by').references(() => users.id, { onDelete: 'set null' }),
     ...ts,
   },
   (t): PgTableExtraConfigValue[] => [
@@ -72,6 +81,9 @@ export const appointments = pgTable(
     /** The Billing lookup: an exact match on the normalized number, within one tenant. */
     index('appointments_tenant_mobile_idx').on(t.tenantId, t.mobileSearch),
     uniqueIndex('appointments_tenant_source_bill_uk').on(t.tenantId, t.sourceBillId),
+    /** The Done view (most recently completed first) and the pending/done split. */
+    index('appointments_tenant_completed_idx').on(t.tenantId, t.completedAt),
+    check('appointments_completed_by_check', sql`${t.completedBy} IS NULL OR ${t.completedAt} IS NOT NULL`),
     /**
      * ON DELETE SET NULL: deleting a bill DETACHES its next-visit appointment — the booking itself is
      * never deleted with the bill — and a tenant's cascade delete works in any order. Single-column on

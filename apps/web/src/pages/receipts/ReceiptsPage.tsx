@@ -56,6 +56,14 @@ export default function ReceiptsPage() {
       // A cancelled receipt's amount no longer counts anywhere, so it reads as struck through.
       render: (r) => <span className={r.status === 'CANCELLED' ? 'text-gray-400 line-through' : 'font-medium text-gray-900'}>{fmtMoney(r.amount)}</span>,
     },
+    /** Advance still on the receipt — received, not yet on any bill. The server's figure. */
+    {
+      key: 'availableAmount',
+      header: 'Advance',
+      align: 'right',
+      sortable: false,
+      render: (r) => (r.availableAmount > 0 ? <span className="tabular-nums text-primary-dark">{fmtMoney(r.availableAmount)}</span> : <span className="text-gray-400">-</span>),
+    },
     { key: 'status', header: 'Status', render: (r) => <ReceiptStatusBadge status={r.status} /> },
     { key: 'createdByName', header: 'Created By', sortable: false, render: (r) => r.createdByName || '-' },
     { key: 'createdAt', header: 'Created At', hidden: true, render: (r) => fmt.stampTime(r.createdAt) },
@@ -72,7 +80,7 @@ export default function ReceiptsPage() {
         <div className="flex items-center gap-2">
           <button type="button" className="icon-btn" title="Refresh" aria-label="Refresh" onClick={() => q.refetch()}><RefreshCw className="h-4 w-4" /></button>
           {can(PERMISSION, 'create') && (
-            <button type="button" className="btn-primary" onClick={() => nav('/modules/receipts/new')}><Plus className="h-4 w-4" /> New Receipt</button>
+            <button type="button" className="btn-primary" onClick={() => nav('/modules/receipts/new')}><Plus className="h-4 w-4" /> Receive Payment</button>
           )}
         </div>
       </div>
@@ -98,7 +106,7 @@ export default function ReceiptsPage() {
         onRowClick={(r) => nav(`/modules/receipts/${r.id}`)}
         toolbar={filtered ? <button type="button" className="btn-ghost text-primary" onClick={() => setState({ search: '', filters: [], page: 1 })}>Clear</button> : undefined}
         emptyTitle={filtered ? 'No matching receipts' : 'No receipts yet'}
-        emptyDescription={filtered ? 'Try a different search or clear the filters.' : 'Use New Receipt to record money received against bills.'}
+        emptyDescription={filtered ? 'Try a different search or clear the filters.' : 'Use Receive Payment to record money received — against bills, or as an advance.'}
         rowActions={(r) => (
           <Dropdown
             trigger={<button type="button" className="row-action" title="Actions" aria-label={`Actions for receipt ${r.receiptNumber}`}>…</button>}

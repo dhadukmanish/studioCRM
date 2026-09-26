@@ -187,6 +187,11 @@ export const shareOpenedSchema = z
   .object({
     transport: z.enum(SHARE_TRANSPORTS).default('WHATSAPP_CLICK_TO_CHAT'),
     templateId: z.string().trim().nullish(),
+    /**
+     * Opened from the studio workflow's "Share on WhatsApp" action: the same share also records the
+     * job's WhatsApp stage (docs/STUDIO_WORKFLOW.md). A plain invoice share does not.
+     */
+    workStage: z.literal('WHATSAPP').optional(),
   })
   .strict();
 export type ShareOpenedInput = z.infer<typeof shareOpenedSchema>;

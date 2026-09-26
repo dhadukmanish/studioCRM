@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Link2, MessageCircle } from 'lucide-react';
 import { INVOICE_LINK_PLACEHOLDER, fillInvoiceLink, isTemplateCompatible, whatsappChatUrl, whatsappDestination, type PreparedPublicInvoiceLink } from '@erp/shared';
 import { ConfirmDialog, Field, Modal, Select, Spinner, TextArea, TextInput } from '@/components/ui';
@@ -6,6 +7,7 @@ import { ApiError } from '@/lib/api';
 import { preparePublicInvoiceLink, recordInvoiceShareOpened, revokePublicInvoiceLink, useInvoiceShare, useInvoiceTemplateLookup, usePublicInvoiceLink } from '@/lib/invoice';
 import { useDateFormatters } from '@/lib/settings';
 import { useAuthStore } from '@/store/auth';
+import { WORK_INVALIDATES } from '@/lib/work';
 
 /**
  * Share a SAVED bill's invoice on WhatsApp (docs/WHATSAPP_SHARING.md, Phase 5.1).
@@ -22,7 +24,8 @@ import { useAuthStore } from '@/store/auth';
  * The number defaults to the bill's saved mobile; changing it here affects this share only — the
  * bill is never edited. The template defaults to the one the preview shows (or the default).
  */
-export function ShareInvoiceDialog({ billId, open, onClose, templateId }: { billId: string | null; open: boolean; onClose: () => void; templateId?: string }) {
+export function ShareInvoiceDialog({ billId, open, onClose, templateId, workStage }: { billId: string | null; open: boolean; onClose: () => void; templateId?: string; /** Opened from the studio workflow: opening WhatsApp also records the job's WhatsApp stage. */ workStage?: 'WHATSAPP' }) {
+  const qc = useQueryClient();
   const active = open && billId ? billId : undefined;
   const ctx = useInvoiceShare(active);
   const linkState = usePublicInvoiceLink(active);
@@ -116,7 +119,9 @@ export function ShareInvoiceDialog({ billId, open, onClose, templateId }: { bill
 
   const onOpenWhatsApp = () => {
     if (!chatUrl) return;
-    void recordInvoiceShareOpened(billId!, chosen ?? undefined);
+    void recordInvoiceShareOpened(billId!, chosen ?? undefined, workStage).then((recorded) => {
+      if (recorded && workStage) WORK_INVALIDATES.forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    });
     setOpened(true);
     // The link itself opens WhatsApp (target=_blank) — a direct user action, never a scripted popup.
   };
@@ -165,6 +170,7 @@ export function ShareInvoiceDialog({ billId, open, onClose, templateId }: { bill
             </span>
           </p>
           <p className="text-gray-500">The customer opens the invoice from the link — no login needed. Nothing is sent until you press Send.</p>
+          {workStage && <p className="text-gray-500">The job’s WhatsApp step is marked as <span className="text-gray-700">WhatsApp opened</span> — the app cannot see whether the message was sent or read.</p>}
         </div>
       ) : (
         <div className="space-y-3">

@@ -71,6 +71,18 @@ export const bills = pgTable(
      * `services/nextVisit.ts`. NULL = no next visit planned.
      */
     nextVisitDate: date('next_visit_date', { mode: 'string' }),
+    /**
+     * The new-bill form's one-time request id (`billSchema.requestId`). A retried or double-submitted
+     * create carrying the same id finds this bill instead of making a second bill, number or advance
+     * receipt. NULL for bills created without one (older clients, tests). Never shown, never edited.
+     */
+    createRequestId: uuid('create_request_id'),
+    /**
+     * SHA-256 of that create request's content. A replay with the same id but DIFFERENT content (the
+     * operator changed the form after a lost response) is refused with 409 instead of silently
+     * returning the first bill as if it were the new one.
+     */
+    createRequestHash: text('create_request_hash'),
     /** WITH_GST | WITHOUT_GST — how this bill charges tax. See `INVOICE_TAX_MODES`. */
     taxMode: text('tax_mode').notNull().default('WITH_GST'),
     /**
@@ -113,6 +125,8 @@ export const bills = pgTable(
     unique('bills_tenant_book_number_uk').on(t.tenantId, t.bookId, t.billNumber),
     /** The target `bill_items` needs to reference (bill_id, tenant_id) together. */
     unique('bills_id_tenant_uk').on(t.id, t.tenantId),
+    /** One bill per create request — the idempotency backstop. NULLs are distinct, so bills without one are unaffected. */
+    unique('bills_tenant_create_request_uk').on(t.tenantId, t.createRequestId),
     /**
      * The book reference carries the tenant, so a bill can only ever be numbered under a book
      * of its own tenant — cross-tenant is structurally impossible, not merely checked for.

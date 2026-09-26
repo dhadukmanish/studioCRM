@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { BillPayments, PaymentAccountOption, PaymentMode, PendingBill, ReceiptRecord, ReceivableCustomer } from '@erp/shared';
+import type { BillPayments, CustomerAdvance, PaymentAccountOption, PaymentMode, PendingBill, ReceiptRecord, ReceivableCustomer } from '@erp/shared';
 import { api, qs } from '@/lib/api';
 
 /**
@@ -14,8 +14,24 @@ import { api, qs } from '@/lib/api';
 export const RECEIPTS_KEY = 'receipts';
 export const BILL_PAYMENTS_KEY = 'bill-payments';
 export const RECEIPTS_URL = '/api/receipts';
-/** What a receipt save or cancel changes: receipts, the bills' paid/outstanding, each bill's history, and the receivables reports. */
-export const RECEIPT_INVALIDATES = [RECEIPTS_KEY, 'bills', BILL_PAYMENTS_KEY, 'receivables'];
+/**
+ * What a receipt save or cancel — or applying / reversing an advance — changes: receipts, the bills'
+ * paid/outstanding, each bill's history, the receivables reports, and the work screens that show
+ * a job's outstanding next to its progress.
+ */
+export const RECEIPT_INVALIDATES = [RECEIPTS_KEY, 'bills', BILL_PAYMENTS_KEY, 'receivables', 'work', 'delivery-report'];
+
+/** A customer's advance still available (0 when none) — for the receipt form. */
+export const useCustomerAdvance = (customerKey?: string | null) =>
+  useQuery({
+    queryKey: [RECEIPTS_KEY, 'advance', customerKey ?? ''],
+    queryFn: () => api.get<CustomerAdvance>(`${RECEIPTS_URL}/advance${qs({ customer: customerKey })}`),
+    enabled: !!customerKey,
+  });
+
+/** Apply advance to a bill. The amount is always the operator's explicit choice. */
+export const applyAdvance = (billId: string, amount: number) => api.raw<{ message: string; data: { amount: number } }>('POST', `${RECEIPTS_URL}/apply-advance`, { billId, amount });
+export const reverseAdvanceApplication = (id: string, reason?: string) => api.raw<{ message: string }>('POST', `${RECEIPTS_URL}/applications/${id}/reverse`, { reason: reason || null });
 
 /** Customers with something outstanding, matching a name or mobile. The caller debounces. */
 export const useReceivableCustomers = (search: string, enabled = true) =>
@@ -67,4 +83,4 @@ export const useBillPayments = (billId?: string) =>
   });
 
 /** Where "Receive payment" goes: the new-receipt form, customer preselected, and that bill prefilled when one is named. */
-export const receivePaymentHref = (customerKey: string, billId?: string) => `/modules/receipts/new${qs({ customer: customerKey, bill: billId })}`;
+export const receivePaymentHref = (customerKey: string, billId?: string, name?: string) => `/modules/receipts/new${qs({ customer: customerKey, bill: billId, name })}`;

@@ -80,8 +80,16 @@ export const preparePublicInvoiceLink = (billId: string, templateId?: string) =>
 export const revokePublicInvoiceLink = (billId: string) => api.delete<{ revoked: boolean }>(`/api/bills/${billId}/invoice/public-link`);
 
 /** Audit: WhatsApp was opened for this invoice. Never "sent" — click-to-chat cannot know that. Best effort. */
-export const recordInvoiceShareOpened = (billId: string, templateId?: string) =>
-  api.post(`/api/bills/${billId}/invoice/share-opened`, { transport: 'WHATSAPP_CLICK_TO_CHAT', templateId: templateId ?? null }).catch(() => undefined);
+/**
+ * Audit "WhatsApp opened". With `workStage` (the studio workflow's Share on WhatsApp) the server also
+ * records the job's WhatsApp stage. Resolves `true` when recorded — never throws: WhatsApp is
+ * already open, and a failed audit must not get in the operator's way.
+ */
+export const recordInvoiceShareOpened = (billId: string, templateId?: string, workStage?: 'WHATSAPP') =>
+  api
+    .post(`/api/bills/${billId}/invoice/share-opened`, { transport: 'WHATSAPP_CLICK_TO_CHAT', templateId: templateId ?? null, ...(workStage ? { workStage } : {}) })
+    .then(() => true)
+    .catch(() => false);
 
 /** Hands a file to the browser's download. Must run inside the user's click for some browsers. */
 export function saveFile(blob: Blob, fileName: string) {

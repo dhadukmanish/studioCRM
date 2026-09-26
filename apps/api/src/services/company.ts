@@ -1,6 +1,6 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { db, schema } from '../db/client';
-import { LOGO_MAX_BYTES, type CompanyProfile, type LogoContentType } from '@erp/shared';
+import { DEFAULT_TIME_ZONE, LOGO_MAX_BYTES, todayInTimeZone, type CompanyProfile, type LogoContentType } from '@erp/shared';
 import { notFound, validation } from '../lib/errors';
 
 export { LOGO_MAX_BYTES };
@@ -78,4 +78,10 @@ export async function deleteCompanyLogo(tenantId: string, companyId: string) {
   const company = await requireCompany(tenantId, companyId);
   await db.delete(l).where(and(eq(l.companyId, companyId), eq(l.tenantId, tenantId)));
   return company;
+}
+
+/** Today's business date for the tenant: the default company's time zone decides, never the server's or a browser's. */
+export async function businessToday(tenantId: string): Promise<string> {
+  const [company] = await db.select({ timeZone: c.timeZone }).from(c).where(eq(c.tenantId, tenantId)).orderBy(desc(c.isDefault), asc(c.createdAt)).limit(1);
+  return todayInTimeZone(company?.timeZone ?? DEFAULT_TIME_ZONE);
 }

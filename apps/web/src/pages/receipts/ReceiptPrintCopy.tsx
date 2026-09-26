@@ -71,6 +71,12 @@ export function ReceiptPrintCopy({ receipt, company }: { receipt: ReceiptRecord;
               <td style={num}>{fmtMoney(a.amount)}</td>
             </tr>
           ))}
+          {receipt.advanceAmount > 0 && (
+            <tr>
+              <td style={cell} colSpan={3}>Advance (not yet against a bill)</td>
+              <td style={num}>{fmtMoney(receipt.advanceAmount)}</td>
+            </tr>
+          )}
           <tr>
             <td style={{ ...cell, fontWeight: 600, borderBottom: 'none' }} colSpan={3}>Total received</td>
             <td style={{ ...num, fontWeight: 600, borderBottom: 'none' }}>{fmtMoney(receipt.amount)}</td>

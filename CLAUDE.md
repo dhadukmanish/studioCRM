@@ -15,7 +15,12 @@ Summary, Outstanding Bills, Aging from bill date, drill-down, CSV, print — rea
 figures (`docs/RECEIVABLES_REPORTS.md`). Each Book is a With GST or Without GST series that decides a new bill's tax mode;
 a new bill opens on the only / configured / last-used active book; the bill mobile is exactly 10
 digits; a Next Visit Date creates one linked appointment in the bill's transaction
-(`docs/BILL_NUMBERING.md`). The ledger / GL, customer advances, a customer master and
+(`docs/BILL_NUMBERING.md`). Each saved bill is a studio job — Selection → Editing → WhatsApp →
+Delivery recorded one click at a time, position derived, never a status dropdown; appointments are
+Pending until one-click Done; Today's Work shows each job's one next step with one button (`docs/STUDIO_WORKFLOW.md`). Money
+received beyond a bill — or before any bill — is an advance that reduces nothing until explicitly
+applied (`docs/ADVANCE_PAYMENTS.md`). Reports → Bill Summary lists a period's bills (Summary / Detailed
+tabs over one scope; Advance = received against the bill) (`docs/BILL_SUMMARY_REPORT.md`). The ledger / GL, a customer master and
 the CGST/SGST/IGST split are not started.
 Billing honours two contracts: `docs/BILL_NUMBERING.md` for identity and `docs/BILLING_CALCULATION.md`
 for money. Current implementation status lives in `.claude/HANDOFF.md`.
@@ -103,13 +108,17 @@ Dev servers are often already running from an earlier session — probe
     origin from `PUBLIC_APP_URL` (never the Host header), never log a full token, and keep at most
     one active link per bill. Any code path that changes a saved bill or an invoice template must
     revoke the affected links in the same transaction (`revokeActiveLinks`).
-11. **A bill's Paid and Outstanding are derived, never stored.** Paid = the sum of its allocations on
-    ACTIVE receipts (`services/billPayments.ts` is the only definition). A receipt's amount equals its
-    allocations exactly; it is never edited or deleted, only cancelled. Anything that can change a
-    bill's payment position — creating a receipt, editing or deleting a bill — takes the bill's
-    `FOR UPDATE` lock first (receipts lock in bill-id order), so Paid can never exceed Grand Total.
-    A bill with any receipt history is never deleted (`docs/RECEIPTS_PAYMENTS.md`). Reports aggregate
-    that same definition (`services/receivables.ts`) — never a stored balance or a second formula.
+11. **A bill's Paid and Outstanding are derived, never stored.** Paid = its allocations on ACTIVE
+    receipts + its ACTIVE advance applications on ACTIVE receipts (`services/billPayments.ts` is the
+    only definition). A receipt's amount is at least its allocations; the rest is ADVANCE, which reduces
+    no bill until an explicit Apply, and whose available balance is derived, never stored
+    (`docs/ADVANCE_PAYMENTS.md`). A receipt is never edited or deleted, only cancelled — and not while
+    its advance is applied; an application is reversed, never deleted. Anything that can change a
+    bill's payment position — creating a receipt, applying advance, editing or deleting a bill — takes
+    the bill's `FOR UPDATE` lock first (receipts lock in bill-id order; apply then locks the customer's
+    receipts), so Paid can never exceed Grand Total and no advance is spent twice. A bill with any
+    payment history is never deleted (`docs/RECEIPTS_PAYMENTS.md`). Reports aggregate that same
+    definition (`services/receivables.ts`) — never a stored balance or a second formula.
 
 ## Architecture boundaries
 
@@ -217,5 +226,11 @@ return findings, not file dumps. Saving tokens never justifies guessing at corre
   customer key, Cash/Bank account rule, credit, locking, cancel, bill edit/delete protection, RBAC
 - `docs/RECEIVABLES_REPORTS.md` — receivables reports: shared scope, As-of semantics and limits,
   aging anchor (bill date) and buckets, reconciliation, CSV (formula-injection guard), print, RBAC
+- `docs/STUDIO_WORKFLOW.md` — the job stages (derived position, one click, skip/undo, WhatsApp =
+  "opened" only, planned vs delivered, delivery ≠ payment), appointment Done, Today's Work, quick Receive payment, RBAC
+- `docs/ADVANCE_PAYMENTS.md` — advance received before/beyond bills, explicit Apply, the extended
+  Paid definition, locking against double spending, reversal before cancel
+- `docs/BILL_SUMMARY_REPORT.md` — Bill Summary / Detailed report: shared scope, Advance definition,
+  line-level reconciliation, print / preview / CSV, why there is no Entry By
 - `.claude/HANDOFF.md` — live project state, DB target, gotchas, pending work (`/handoff`)
 - `README.md` — boilerplate feature map and the "add a module" recipe

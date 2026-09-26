@@ -18,6 +18,8 @@ import { invoiceRoutes } from './invoices';
 import { publicInvoiceRoutes } from './publicInvoice';
 import { receiptRoutes } from './receipts';
 import { receivableRoutes } from './receivables';
+import { billReportRoutes } from './billReport';
+import { workRoutes } from './work';
 
 /** Register every route module here. Feature modules: add one line. */
 export async function registerRoutes(app: FastifyInstance) {
@@ -39,6 +41,8 @@ export async function registerRoutes(app: FastifyInstance) {
   await app.register(invoiceRoutes);
   await app.register(receiptRoutes);
   await app.register(receivableRoutes);
+  await app.register(billReportRoutes);
+  await app.register(workRoutes);
   // The one anonymous invoice route (`/i/:token`) — token-scoped, no ERP session.
   await app.register(publicInvoiceRoutes);
 }

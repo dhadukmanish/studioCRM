@@ -403,6 +403,28 @@ backfill: a book whose bills are ALL Without GST becomes Without GST; nothing el
 - **Skills** added: `studio-billing-domain`, `studio-db-safety`, `studio-ui-verification`,
   `studio-release`; `studio-testing` / `studio-database` point at `studio-db-safety`.
 
+### Studio workflow + advance payments — Phase 9 (UNCOMMITTED, awaiting review)
+
+**Contracts: `docs/STUDIO_WORKFLOW.md`, `docs/ADVANCE_PAYMENTS.md`.** Branch `feature/studio-workflow`
+from `14bc91c`; **not committed on purpose** — the user is bringing another legacy report first.
+Migration **`0020_round_pride`** (additive only: tables `bill_work_stages`, `advance_applications`;
+`appointments.completed_at/completed_by`); applied to the throwaway DB only — **NOT to the live DB**.
+
+- **Workflow:** Selection → Editing → WhatsApp → Delivery per bill, recorded as rows (DONE/SKIPPED),
+  position derived (`workPosition` / `workPositionSql`), one click, undo = delete row (audited).
+  WhatsApp done only via `share-opened {workStage:'WHATSAPP'}` from the workflow action. Delivery
+  closes the job; `bills.delivery_date` stays the PLANNED date. Work Queue page, bill-list Work
+  column, bill Studio Progress strip, Reports → Delivery. New permission `operations_work` (View/Edit)
+  — existing roles must be re-saved.
+- **Appointments:** Done / Mark as pending (one click), views Pending (default) / Today / Upcoming /
+  Done / All with counts, CSV; Reports → Appointments.
+- **Advance:** receipt amount ≥ allocations, rest = advance; no-bill receipts for a new 10-digit
+  mobile; `applyAdvance` (bill lock → customer receipts lock, FIFO), `reverseApplication`, cancel
+  refused while applied. Paid = allocations + active applications (`billPayments.ts`, one place).
+- **Known consequence:** bills that existed before this phase all start at *Selection* and fill the
+  Work Queue (the throwaway tenant shows 2,257). Live has 1 bill. A "mark historical bills complete"
+  decision may be wanted before go-live.
+
 ### Bill numbering
 
 `allocateBillNumber` (`apps/api/src/services/billNumbers.ts`) is unchanged from the phase that
@@ -992,12 +1014,11 @@ assumes one and will throw. Guard the login step when reusing it.
 - **Ledger, Voucher and GL posting are NOT implemented.** Receipts (Phase 6) record money
   received and settle bills, and Phase 7's receivables reports read them — but nothing posts an
   accounting transaction; a later GL phase posts from `receipts` once the account mappings are
-  decided. Customer advances / on-account money, receipt PDF + WhatsApp share, refunds, a Customer /
+  decided. Receipt PDF + WhatsApp share, refunds, a Customer /
   Party Master, payment reminders, collection follow-ups and a bill due date are also not built.
 - **Before the first real receipt, the studio needs a CASH and a BANK account** in Account Master
   (group under head group CASH / the group named BANK) — the shared DB has no account groups yet.
-- **Billing beyond Phase 2 is NOT implemented**, deliberately and by instruction: advance; the CGST/SGST/IGST split; the delivery workflow (the `delivery_date` column
-  exists, the statuses do not); a draft/cancelled bill status; a Customer
+- **Billing beyond Phase 2 is NOT implemented**, deliberately and by instruction: the CGST/SGST/IGST split; a draft/cancelled bill status; a Customer
   Master. (Invoice templates, preview, print and PDF are built — Phase 4.) The data is shaped so each of these
   is an addition, not a rewrite.
 - **The CGST/SGST/IGST split needs business input before it can be built:** the studio's state,

@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { ok } from '../lib/respond';
-import { notFound, validation } from '../lib/errors';
-import { publicLinkCreateSchema, shareOpenedSchema } from '@erp/shared';
+import { forbidden, notFound, validation } from '../lib/errors';
+import { hasPermission, publicLinkCreateSchema, shareOpenedSchema } from '@erp/shared';
+import { recordStage } from '../services/work';
 import { getBillInvoice, getBillInvoicePdf, getBillInvoiceShare, resolveShareTemplate } from '../services/invoice';
 import { logActivity } from '../services/activity';
 import { parse } from '../lib/validate';
@@ -62,6 +63,13 @@ export async function invoiceRoutes(app: FastifyInstance) {
     if (body.templateId && !isUuid(body.templateId)) throw validation('Unknown invoice template');
     const t = await resolveShareTemplate(req.user.tenantId, id, body.templateId || undefined);
     await logActivity(req, 'bill', id, 'whatsapp_share_opened', `Invoice ${t.documentLabel} — WhatsApp opened to share it`, { transport: body.transport, templateId: t.templateId, templateName: t.templateName });
+    // From the workflow's "Share on WhatsApp": the job's WhatsApp stage is recorded as what it is —
+    // WhatsApp opened. Moving a job along is Studio Work edit, whatever permission sharing needs.
+    if (body.workStage) {
+      if (!req.user.isSuperAdmin && !hasPermission(req.user.grants, 'operations_work', 'update')) throw forbidden();
+      const r = await recordStage(req.user.tenantId, req.user.id, id, 'WHATSAPP', 'DONE', true);
+      if (r.changed) await logActivity(req, 'bill', id, 'work_stage_done', `Bill ${r.billLabel} — WhatsApp opened (workflow)`, { stage: 'WHATSAPP', outcome: 'DONE' });
+    }
     return ok({ recorded: true });
   });
 

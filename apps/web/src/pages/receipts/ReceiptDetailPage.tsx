@@ -109,13 +109,64 @@ function ReceiptDetail({ receipt }: { receipt: ReceiptRecord }) {
             <Item label="Payment">
               {PAYMENT_MODE_LABELS[receipt.paymentMode]} <span className="text-gray-500">· {receipt.accountName}</span>
             </Item>
-            <Item label="Amount">
+            <Item label="Received">
               <span className={cancelled ? 'text-[16px] tabular-nums text-gray-400 line-through' : 'text-[16px] font-semibold tabular-nums text-gray-900'}>{fmtMoney(receipt.amount)}</span>
             </Item>
+            {/* Received = Applied + Available — the server's figures, never added up here. */}
+            {!cancelled && (receipt.availableAmount > 0 || receipt.applications.length > 0) && (
+              <>
+                <Item label="Applied to Bills">
+                  <span className="tabular-nums">{fmtMoney(receipt.appliedAmount)}</span>
+                </Item>
+                <Item label="Available Advance">
+                  <span className={receipt.availableAmount > 0 ? 'font-medium tabular-nums text-primary-dark' : 'tabular-nums text-gray-500'}>{fmtMoney(receipt.availableAmount)}</span>
+                  {receipt.availableAmount > 0 && <span className="ml-2 text-[12px] text-gray-500">Apply it from the customer’s bill.</span>}
+                </Item>
+              </>
+            )}
             {receipt.remark && <Item label="Remark" wide>{receipt.remark}</Item>}
           </dl>
         </div>
 
+        {receipt.applications.length > 0 && (
+          <div className="card overflow-hidden">
+            <h3 className="section-title px-4 pb-2 pt-3">Advance Applied Later</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="bg-head">
+                    <th scope="col" className="table-head px-4">Bill</th>
+                    <th scope="col" className="table-head px-4">Applied On</th>
+                    <th scope="col" className="table-head px-4">Status</th>
+                    <th scope="col" className="table-head px-4 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {receipt.applications.map((a) => (
+                    <tr key={a.id} className="border-t border-line">
+                      <td className="whitespace-nowrap px-4 py-2">
+                        {canOpenBills ? <Link className="link" to={`/modules/billing/${a.billId}`}>{a.bookNumber}/{a.billNumber}</Link> : `${a.bookNumber}/${a.billNumber}`}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2 text-gray-700">{fmt.date(a.appliedOn)}</td>
+                      <td className="px-4 py-2">
+                        {a.status === 'REVERSED' ? (
+                          <span className="text-gray-500">Reversed{a.reversedAt && ` ${fmt.stamp(a.reversedAt)}`}{a.reverseReason && ` — ${a.reverseReason}`}</span>
+                        ) : (
+                          <span className="text-gray-700">Applied</span>
+                        )}
+                      </td>
+                      <td className={a.status === 'REVERSED' ? 'px-4 py-2 text-right tabular-nums text-gray-400 line-through' : 'px-4 py-2 text-right tabular-nums text-gray-900'}>{fmtMoney(a.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {receipt.allocations.length === 0 ? (
+          receipt.applications.length === 0 && <p className="card px-4 py-3 text-[13px] text-gray-600">Received as advance — no bill yet. {cancelled ? '' : 'Apply it from the customer’s bill once there is one.'}</p>
+        ) : (
         <div className="card overflow-hidden">
           <h3 className="section-title px-4 pb-2 pt-3">Bills Settled</h3>
           <div className="overflow-x-auto">
@@ -149,6 +200,7 @@ function ReceiptDetail({ receipt }: { receipt: ReceiptRecord }) {
             </table>
           </div>
         </div>
+        )}
 
         <p className="text-[12px] text-gray-500">
           Created {fmt.stampTime(receipt.createdAt)}

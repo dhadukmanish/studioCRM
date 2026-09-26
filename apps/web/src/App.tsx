@@ -31,7 +31,11 @@ const ReceiptsPage = lazy(() => import('@/pages/receipts/ReceiptsPage'));
 const ReceiptFormPage = lazy(() => import('@/pages/receipts/ReceiptFormPage'));
 const ReceiptDetailPage = lazy(() => import('@/pages/receipts/ReceiptDetailPage'));
 const ReceivablesPage = lazy(() => import('@/pages/reports/ReceivablesPage'));
+const BillReportPage = lazy(() => import('@/pages/reports/BillReportPage'));
 const ReceivableCustomerPage = lazy(() => import('@/pages/reports/ReceivableCustomerPage'));
+const TodaysWorkPage = lazy(() => import('@/pages/work/TodaysWorkPage'));
+const DeliveryReportPage = lazy(() => import('@/pages/reports/DeliveryReportPage'));
+const AppointmentReportPage = lazy(() => import('@/pages/reports/AppointmentReportPage'));
 const InvoiceTemplatesPage = lazy(() => import('@/pages/settings/invoice-templates/InvoiceTemplatesPage'));
 const InvoiceTemplateDesignerPage = lazy(() => import('@/pages/settings/invoice-templates/InvoiceTemplateDesignerPage'));
 
@@ -76,6 +80,7 @@ export default function App() {
               <Route path="/modules/masters/accounts" element={<Guard permission="masters_accounts"><AccountsPage /></Guard>} />
               <Route path="/modules/masters/books" element={<Guard permission="masters_books"><BooksPage /></Guard>} />
               {/* ---- Operations ---- */}
+              <Route path="/modules/work" element={<Guard permission="operations_work"><TodaysWorkPage /></Guard>} />
               <Route path="/modules/appointments" element={<Guard permission="operations_appointments"><AppointmentsPage /></Guard>} />
               {/* "new" is declared before ":id" so the literal path can never be read as a bill id. */}
               <Route path="/modules/billing" element={<Guard permission="operations_billing"><BillsPage /></Guard>} />
@@ -87,8 +92,11 @@ export default function App() {
               <Route path="/modules/receipts/new" element={<Guard permission="operations_receipts"><ReceiptFormPage /></Guard>} />
               <Route path="/modules/receipts/:id" element={<Guard permission="operations_receipts"><ReceiptDetailPage /></Guard>} />
               {/* ---- Reports ---- */}
+              <Route path="/modules/reports/bills" element={<Guard permission="reports_bills"><BillReportPage /></Guard>} />
               <Route path="/modules/reports/receivables" element={<Guard permission="reports_receivables"><ReceivablesPage /></Guard>} />
               <Route path="/modules/reports/receivables/customers/:key" element={<Guard permission="reports_receivables"><ReceivableCustomerPage /></Guard>} />
+              <Route path="/modules/reports/delivery" element={<Guard permission="operations_work"><DeliveryReportPage /></Guard>} />
+              <Route path="/modules/reports/appointments" element={<Guard permission="operations_appointments"><AppointmentReportPage /></Guard>} />
               {/* ---- Settings ---- */}
               <Route path="/modules/settings" element={<SettingsHub />} />
               {/* The designer needs the full width, so it sits outside the settings sub-nav. */}

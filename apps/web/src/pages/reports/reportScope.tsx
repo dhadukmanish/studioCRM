@@ -29,7 +29,7 @@ export function useReportScope() {
 }
 
 /** Every book, closed ones too: an inactive book is closed to new bills but still reportable. */
-const useReportBooks = () =>
+export const useReportBooks = () =>
   useQuery({ queryKey: ['lookup', 'books', 'all'], queryFn: () => api.get<{ id: string; bookNumber: string; isActive: boolean }[]>('/api/common/lookups/books?includeInactive=1'), staleTime: 60_000 });
 
 export const useBookLabel = (bookId?: string) => useReportBooks().data?.find((b) => b.id === bookId)?.bookNumber;

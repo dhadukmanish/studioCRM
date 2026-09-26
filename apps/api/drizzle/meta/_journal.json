@@ -141,6 +141,27 @@
       "when": 1790402247341,
       "tag": "0019_backfill_book_series_type",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790405575090,
+      "tag": "0020_round_pride",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790420642180,
+      "tag": "0021_unique_major_mapleleaf",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1790421897017,
+      "tag": "0022_empty_gamma_corps",
+      "breakpoints": true
     }
   ]
 }

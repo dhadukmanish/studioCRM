@@ -11,3 +11,4 @@ export * from './companyLogos';
 export * from './invoiceTemplates';
 export * from './publicInvoiceLinks';
 export * from './receipts';
+export * from './work';

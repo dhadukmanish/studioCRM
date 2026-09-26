@@ -1,4 +1,4 @@
-import type { BillDiscountType, BillPaymentPosition, GstSummaryRow, InvoiceTaxMode } from '@erp/shared';
+import type { BillDiscountType, BillPaymentPosition, GstSummaryRow, InvoiceTaxMode, WorkPosition } from '@erp/shared';
 
 /**
  * The Billing screens' view of the API contract (`apps/api/src/routes/bills.ts` +
@@ -46,7 +46,10 @@ export interface BillRow {
  * A row of `GET /api/bills`: the bill plus its payment position, which the server derives from
  * active receipt allocations. Never computed on this side.
  */
-export interface BillListRow extends BillRow, Omit<BillPaymentPosition, 'grandTotal'> {}
+export interface BillListRow extends BillRow, Omit<BillPaymentPosition, 'grandTotal'> {
+  /** The job's studio-workflow position, derived by the server from its recorded stages. */
+  workPosition: WorkPosition;
+}
 
 /** One saved line. The snapshots are the server's copy of the masters at the time of saving. */
 export interface BillItemRow {

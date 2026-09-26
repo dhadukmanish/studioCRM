@@ -30,6 +30,8 @@
   .row-action { @apply inline-flex items-center justify-center h-7 w-7 rounded-lg text-gray-500 transition duration-150 hover:bg-gray-100 hover:text-gray-900; }
   .row-action-danger { @apply row-action hover:bg-red-50 hover:text-red-600; }
   /* A tinted accent action (a grid row's + Add): easy to find, still quiet. Theme tokens only. */
+  /* The studio workflow's quiet "done" tick (WorkProgress). Semantic green, like the Paid badge; dark theme lifts it in themes.css. */
+  .work-check { @apply text-green-600; }
   .row-action-add { @apply inline-flex items-center justify-center h-7 w-7 rounded-lg transition duration-150 bg-primary-50 text-primary hover:bg-primary-lighter hover:text-primary-dark focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50; }
   .table-head { @apply text-[12px] font-bold uppercase tracking-[0.6px] text-gray-500 px-5 py-2.5 text-left whitespace-nowrap; }
   .table-cell { @apply px-5 py-3 text-[14px] text-gray-700 whitespace-nowrap; }

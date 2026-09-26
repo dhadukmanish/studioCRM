@@ -24,6 +24,7 @@ export const NAV: NavSection[] = [
   {
     title: 'Operations',
     items: [
+      { label: "Today's Work", href: '/modules/work', icon: 'ListTodo', permission: 'operations_work' },
       { label: 'Appointments', href: '/modules/appointments', icon: 'CalendarClock', permission: 'operations_appointments' },
       { label: 'Billing', href: '/modules/billing', icon: 'ReceiptText', permission: 'operations_billing' },
       { label: 'Receipts', href: '/modules/receipts', icon: 'HandCoins', permission: 'operations_receipts' },
@@ -31,7 +32,12 @@ export const NAV: NavSection[] = [
   },
   {
     title: 'Reports',
-    items: [{ label: 'Receivables', href: '/modules/reports/receivables', icon: 'ChartColumn', permission: 'reports_receivables' }],
+    items: [
+      { label: 'Bill Summary', href: '/modules/reports/bills', icon: 'FileSpreadsheet', permission: 'reports_bills' },
+      { label: 'Receivables', href: '/modules/reports/receivables', icon: 'ChartColumn', permission: 'reports_receivables' },
+      { label: 'Delivery', href: '/modules/reports/delivery', icon: 'PackageCheck', permission: 'operations_work' },
+      { label: 'Appointments', href: '/modules/reports/appointments', icon: 'CalendarRange', permission: 'operations_appointments' },
+    ],
   },
   {
     title: 'Masters',

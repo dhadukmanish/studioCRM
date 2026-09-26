@@ -9,4 +9,6 @@ export * from './invoice.js';
 export * from './whatsapp.js';
 export * from './receipts.js';
 export * from './receivables.js';
+export * from './billReport.js';
 export * from './schemas/index.js';
+export * from './workflow.js';

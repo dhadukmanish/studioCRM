@@ -13,8 +13,10 @@ import { accountDetailFor, normalizeGroupName, type HeadGroup } from './enums.js
  *
  *  - A bill's Paid is the sum of its allocations on ACTIVE receipts, and its Outstanding is its
  *    Grand Total minus that. Neither is stored anywhere — the allocations are the only truth.
- *  - A receipt's amount is exactly the sum of its allocations. Nothing is left unallocated
- *    (customer advances are a later, separate decision).
+ *  - A receipt's amount is what was received. What it puts against bills when it is saved are its
+ *    allocations; anything more is ADVANCE (docs/ADVANCE_PAYMENTS.md), which stays on the receipt,
+ *    reduces no bill, and is later APPLIED to a bill (`advance_applications`) by an explicit action.
+ *    Received = Allocated + Applied + Available — Available is derived, never stored.
  *  - "Credit" is not a payment mode: a bill sold on credit simply has no receipt yet.
  *  - Money is compared in whole paise, never as floats.
  */
@@ -86,7 +88,7 @@ export const RECEIPT_STATUS_LABELS: Record<ReceiptStatus, string> = { ACTIVE: 'A
 
 /* ----------------------------------------------------------------- schemas -- */
 
-export const RECEIPT_LIMITS = { remark: 500, cancelReason: 250, maxAllocations: 100 } as const;
+export const RECEIPT_LIMITS = { remark: 500, cancelReason: 250, maxAllocations: 100, customerName: 120 } as const;
 
 const isBlank = (v: unknown) => v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
 const optionalText = (label: string, max: number) =>
@@ -104,6 +106,30 @@ const positiveAmount = (label: string) =>
       .refine((n) => /^\d+(\.\d{1,2})?$/.test(String(n)), `${label} can have at most 2 decimal places`),
   );
 
+/**
+ * Money received WITH a new bill — the bill form's Advance box. Not a bill field: the server turns it
+ * into an ordinary receipt (numbered, account-checked, audited) put against that bill, inside the
+ * bill's own create transaction, so the bill and the money are saved together or not at all. The
+ * bill's Grand Total never changes; its Paid does. Only a NEW bill carries it — once saved, money
+ * is received, cancelled or reversed through receipts, never by editing the bill.
+ */
+export const billAdvanceSchema = z.object({
+  amount: positiveAmount('Advance'),
+  paymentMode: z.enum(PAYMENT_MODES, { errorMap: () => ({ message: 'Choose Cash or Bank' }) }),
+  accountId: z.string({ required_error: 'Account is required', invalid_type_error: 'Account is required' }).min(1, 'Account is required').uuid('Select a valid account'),
+});
+export type BillAdvanceInput = z.infer<typeof billAdvanceSchema>;
+
+/**
+ * One payment against ONE bill, in paise: up to the bill's due goes on the bill, anything beyond is
+ * the customer's advance, and what the bill still owes after it. The one rule for money received
+ * with a new bill (`createBill`) and for the screens that preview it — the server decides under lock.
+ */
+export function splitPayment(receivedPaise: number, duePaise: number) {
+  const toBill = Math.max(0, Math.min(receivedPaise, duePaise));
+  return { toBill, toAdvance: Math.max(0, receivedPaise - toBill), stillDue: Math.max(0, duePaise - toBill) };
+}
+
 export const receiptAllocationSchema = z.object({
   billId: z.string({ required_error: 'Bill is required', invalid_type_error: 'Bill is required' }).uuid('Select a valid bill'),
   amount: positiveAmount('Amount'),
@@ -111,12 +137,13 @@ export const receiptAllocationSchema = z.object({
 export type ReceiptAllocationInput = z.infer<typeof receiptAllocationSchema>;
 
 /**
- * A new receipt. The client names the customer (by mobile, the key every bill of theirs shares),
- * the account, and how much goes to which bill. It never sends a receipt number, a customer name
- * or a bill's outstanding — the server reads those itself, under lock.
+ * A new receipt ("Receive Payment"). The client names the customer (by mobile, the key every bill
+ * of theirs shares), the account, the amount received and how much of it goes to which bill. It
+ * never sends a receipt number or a bill's outstanding — the server reads those itself, under lock.
  *
- * `amount` is what the operator sees as the receipt total; it must equal the allocations to the
- * paisa, so money can never be left floating.
+ * `amount` may exceed the allocations; the difference is the customer's ADVANCE. With no
+ * allocations at all the whole receipt is an advance — money received before any bill exists.
+ * `customerName` is used only for a customer with no bill yet; otherwise their latest bill names them.
  */
 export const receiptSchema = z
   .object({
@@ -129,10 +156,11 @@ export const receiptSchema = z
     accountId: z.string({ required_error: 'Account is required', invalid_type_error: 'Account is required' }).min(1, 'Account is required').uuid('Select a valid account'),
     amount: positiveAmount('Receipt amount'),
     remark: optionalText('Remark', RECEIPT_LIMITS.remark),
+    customerName: optionalText('Customer name', RECEIPT_LIMITS.customerName),
     allocations: z
-      .array(receiptAllocationSchema, { required_error: 'Allocate the amount to at least one bill', invalid_type_error: 'Allocate the amount to at least one bill' })
-      .min(1, 'Allocate the amount to at least one bill')
-      .max(RECEIPT_LIMITS.maxAllocations, `A receipt can settle at most ${RECEIPT_LIMITS.maxAllocations} bills`),
+      .array(receiptAllocationSchema, { invalid_type_error: 'Allocations must be a list' })
+      .max(RECEIPT_LIMITS.maxAllocations, `A receipt can settle at most ${RECEIPT_LIMITS.maxAllocations} bills`)
+      .default([]),
   })
   .superRefine((v, ctx) => {
     const seen = new Set<string>();
@@ -141,9 +169,23 @@ export const receiptSchema = z
       seen.add(a.billId);
     });
     const allocated = v.allocations.reduce((s, a) => s + toPaise(a.amount), 0);
-    if (allocated !== toPaise(v.amount)) ctx.addIssue({ code: 'custom', path: ['amount'], message: 'The receipt amount must equal the total allocated to bills' });
+    if (allocated > toPaise(v.amount)) ctx.addIssue({ code: 'custom', path: ['amount'], message: 'The amount received cannot be less than the total put against bills' });
   });
 export type ReceiptInput = z.infer<typeof receiptSchema>;
+
+/**
+ * Apply a customer's available advance to one of their bills. The amount is explicit — never
+ * applied silently; the screen proposes min(available advance, outstanding). The server takes the
+ * money from the customer's oldest advances first, under lock.
+ */
+export const applyAdvanceSchema = z.object({
+  billId: z.string({ required_error: 'Bill is required', invalid_type_error: 'Bill is required' }).uuid('Select a valid bill'),
+  amount: positiveAmount('Amount'),
+});
+export type ApplyAdvanceInput = z.infer<typeof applyAdvanceSchema>;
+
+/** Reverse an applied advance: the money goes back to the customer's available advance. */
+export const reverseApplicationSchema = z.object({ reason: optionalText('Reason', RECEIPT_LIMITS.cancelReason) });
 
 export const receiptCancelSchema = z.object({ reason: optionalText('Reason', RECEIPT_LIMITS.cancelReason) });
 export type ReceiptCancelInput = z.infer<typeof receiptCancelSchema>;
@@ -198,9 +240,13 @@ export interface ReceiptRow {
   accountId: string;
   accountName: string;
   amount: number;
+  /** Put against bills: allocations plus ACTIVE advance applications. */
+  appliedAmount: number;
+  /** Advance still available: amount - applied while ACTIVE, 0 once cancelled. Derived, never stored. */
+  availableAmount: number;
   remark: string | null;
   status: ReceiptStatus;
-  /** "Book/Bill" of every bill it settles, in allocation order — for the list and its search. */
+  /** "Book/Bill" of every bill it settles (allocations and applied advance) — for the list and its search. */
   billNumbers: string;
   createdByName: string | null;
   cancelledAt: string | null;
@@ -220,22 +266,63 @@ export interface ReceiptAllocationRow extends BillPaymentPosition {
   amount: number;
 }
 
-export interface ReceiptRecord extends ReceiptRow {
-  allocations: ReceiptAllocationRow[];
+/** An advance applied from a receipt to a bill. REVERSED ones stay listed and stop counting. */
+export const ADVANCE_APPLICATION_STATUSES = ['ACTIVE', 'REVERSED'] as const;
+export type AdvanceApplicationStatus = (typeof ADVANCE_APPLICATION_STATUSES)[number];
+
+export interface AdvanceApplicationRow {
+  id: string;
+  billId: string;
+  bookNumber: string;
+  billNumber: number;
+  appliedOn: string;
+  amount: number;
+  status: AdvanceApplicationStatus;
+  reversedAt: string | null;
+  reverseReason: string | null;
 }
 
-/** One receipt line in a bill's payment history — cancelled ones included, marked as such. */
+export interface ReceiptRecord extends ReceiptRow {
+  allocations: ReceiptAllocationRow[];
+  /** What the receipt kept as advance when it was saved: amount - allocations. (Some may be applied since.) */
+  advanceAmount: number;
+  /** Advance from this receipt applied to bills later — reversed ones included, marked so. */
+  applications: AdvanceApplicationRow[];
+}
+
+/**
+ * One line in a bill's payment history: money a receipt put on it when saved (RECEIPT), or advance
+ * applied to it later (ADVANCE). Cancelled receipts and reversed applications stay listed.
+ */
 export interface BillPaymentHistoryRow {
+  kind: 'RECEIPT' | 'ADVANCE';
   receiptId: string;
   receiptNumber: number;
-  receiptDate: string;
+  /** The receipt date, or the date the advance was applied. */
+  date: string;
   paymentMode: PaymentMode;
   accountName: string;
   amount: number;
+  /** Counts towards Paid only while true: an ACTIVE receipt (and, for ADVANCE, an ACTIVE application). */
+  counts: boolean;
   status: ReceiptStatus;
+  /** ADVANCE rows only. */
+  applicationId: string | null;
+  applicationStatus: AdvanceApplicationStatus | null;
 }
 
 /** GET /api/bills/:id/payments */
 export interface BillPayments extends BillPaymentPosition {
   history: BillPaymentHistoryRow[];
+  /** The bill's customer's advance not yet applied anywhere. */
+  availableAdvance: number;
+  /** What "Apply Advance" proposes: min(available advance, outstanding). 0 = nothing to apply. */
+  advanceToApply: number;
+}
+
+/** GET /api/receipts/advance?customer= — a customer's available advance, oldest receipt first. */
+export interface CustomerAdvance {
+  customerKey: string;
+  availableAdvance: number;
+  receipts: { id: string; receiptNumber: number; receiptDate: string; amount: number; availableAmount: number }[];
 }

@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { CalendarCheck, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { APPOINTMENT_LIMITS, type FilterFieldDef, type ListFilter } from '@erp/shared';
+import { useNavigate } from 'react-router-dom';
+import { CheckCircle2, HandCoins, Pencil, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
+import { APPOINTMENT_LIMITS, APPOINTMENT_VIEWS, APPOINTMENT_VIEW_LABELS, normalizeMobile, type AppointmentView, type FilterFieldDef } from '@erp/shared';
 import { Crumb } from '@/components/layout/AppShell';
 import { DataTable, useListState, type Column } from '@/components/data/DataTable';
-import { ConfirmDialog, DateInput, Dropdown, Field, Modal, Spinner, TextArea, TextInput, validDate } from '@/components/ui';
+import { Badge, ConfirmDialog, DateInput, Dropdown, Field, Modal, Spinner, TextArea, TextInput, validDate } from '@/components/ui';
 import { applyApiErrors, useList, useSave } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
-import { todayISO } from '@/lib/format';
+import { cx, todayISO } from '@/lib/format';
 import { useDateFormatters } from '@/lib/settings';
+import { ReceivePaymentDialog, type ReceivePaymentFor } from '@/pages/receipts/ReceivePaymentDialog';
+import { useWorkActions } from '@/lib/work';
 
 const PERMISSION = 'operations_appointments';
 const URL = '/api/appointments';
@@ -26,6 +29,10 @@ interface Appointment {
   mobileNumber: string;
   babyName: string | null;
   remark: string | null;
+  /** Set when a bill's Next Visit Date created this booking. */
+  sourceBillId: string | null;
+  /** When it was marked Done; null = pending. */
+  completedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -60,7 +67,7 @@ function AppointmentForm({ open, onClose, row }: { open: boolean; onClose: () =>
     );
   }, [open, row, reset]);
 
-  const save = useSave({ invalidate: [QUERY_KEY], onSuccess: onClose });
+  const save = useSave({ invalidate: [QUERY_KEY, 'work'], onSuccess: onClose });
   const submit = handleSubmit((v) => {
     save.mutate({ method: row ? 'put' : 'post', url: row ? `${URL}/${row.id}` : URL, body: v }, { onError: (e) => applyApiErrors(e, setError as any) });
   });
@@ -128,25 +135,38 @@ function AppointmentForm({ open, onClose, row }: { open: boolean; onClose: () =>
 
 /* ------------------------------------------------------------------ page -- */
 
+/**
+ * What each quick view is for — also its empty state. PENDING is the default: the screen is a work
+ * queue first, and a Done appointment leaves it the moment it is marked (it stays under Done / All).
+ */
+const EMPTY: Record<AppointmentView, string> = {
+  TODAY: 'No appointments pending today.',
+  UPCOMING: 'No upcoming appointments.',
+  PENDING: 'No appointments pending.',
+  DONE: 'No appointments done yet.',
+  ALL: 'No appointments yet.',
+};
+
 export default function AppointmentsPage() {
-  // No sortBy: the API's own order (latest date, then latest time, then number) is the useful
-  // one for daily work, and it cannot be expressed as a single column.
+  // No sortBy: each view has its own useful order (Pending soonest first, Done latest first) that
+  // a single column cannot express — the API applies it.
   const [state, setState] = useListState();
-  const q = useList<Appointment>(QUERY_KEY, URL, state);
+  const [view, setView] = useState<AppointmentView>('PENDING');
+  const q = useList<Appointment>(QUERY_KEY, URL, state, { view }) as ReturnType<typeof useList<Appointment>> & { data?: { today: string; counts: Record<AppointmentView, number> } };
   const fmt = useDateFormatters();
+  const nav = useNavigate();
   const [edit, setEdit] = useState<Appointment | null | undefined>(undefined);
   const [del, setDel] = useState<Appointment | null>(null);
+  const [paying, setPaying] = useState<ReceivePaymentFor | null>(null);
   const can = useAuthStore((s) => s.can);
-  const remove = useSave({ invalidate: [QUERY_KEY], onSuccess: () => setDel(null) });
+  const remove = useSave({ invalidate: [QUERY_KEY, 'work'], onSuccess: () => setDel(null) });
+  const act = useWorkActions();
 
   const total = q.data?.total ?? 0;
   const canEdit = can(PERMISSION, 'update');
   const canDelete = can(PERMISSION, 'delete');
+  const canReceive = can('operations_receipts', 'create');
   const filtered = !!state.search || state.filters.length > 0;
-
-  /** The "Today" quick filter is an ordinary date filter — the Filter button owns ranges. */
-  const todayFilter: ListFilter = { field: 'appointmentDate', op: 'equals', value: todayISO() };
-  const isToday = state.filters.some((f) => f.field === 'appointmentDate' && f.op === 'equals' && f.value === todayFilter.value);
 
   const filterFields: FilterFieldDef[] = [
     { key: 'appointmentDate', label: 'Appointment Date', type: 'date' },
@@ -167,6 +187,17 @@ export default function AppointmentsPage() {
     { key: 'customerName', header: 'Customer Name' },
     { key: 'mobileNumber', header: 'Mobile No.' },
     { key: 'babyName', header: 'Baby Name', render: (r) => r.babyName || '-' },
+    /** Text first, colour second. A next-visit booking says where it came from. */
+    {
+      key: 'completedAt',
+      header: 'Status',
+      render: (r) => (
+        <span className="flex items-center gap-1.5">
+          <Badge color={r.completedAt ? 'green' : 'amber'}>{r.completedAt ? 'Done' : 'Pending'}</Badge>
+          {r.sourceBillId && <span className="text-[12px] text-gray-500">Next visit</span>}
+        </span>
+      ),
+    },
     /** Hidden by default: it is free text of any length and would dominate the row width. */
     { key: 'remark', header: 'Remark', hidden: true, render: (r) => r.remark || '-' },
     { key: 'updatedAt', header: 'Last Modified', render: (r) => fmt.stamp(r.updatedAt) },
@@ -206,35 +237,64 @@ export default function AppointmentsPage() {
         onRowClick={(r) => canEdit && setEdit(r)}
         toolbar={
           <>
-            <button
-              type="button"
-              className={isToday ? 'btn-outline-primary bg-primary/5' : 'btn-outline'}
-              aria-pressed={isToday}
-              onClick={() => setState({ filters: isToday ? state.filters.filter((f) => f.field !== 'appointmentDate') : [...state.filters.filter((f) => f.field !== 'appointmentDate'), todayFilter] })}
-            >
-              <CalendarCheck className="h-4 w-4" /> Today
-            </button>
+            <div role="group" aria-label="Show" className="flex flex-wrap gap-1">
+              {APPOINTMENT_VIEWS.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={view === v}
+                  onClick={() => {
+                    setView(v);
+                    setState({ page: 1 });
+                  }}
+                  className={cx(
+                    'inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px] transition max-sm:h-9',
+                    view === v ? 'border-primary/40 bg-primary-50 font-medium text-primary-dark' : 'border-line bg-surface text-gray-600 hover:bg-gray-50',
+                  )}
+                >
+                  {APPOINTMENT_VIEW_LABELS[v]}
+                  <span className={cx('tabular-nums', view === v ? 'text-primary-dark' : 'text-gray-400')}>{q.data?.counts?.[v] ?? '·'}</span>
+                </button>
+              ))}
+            </div>
             {filtered && (
               <button type="button" className="btn-ghost text-primary" onClick={() => setState({ search: '', filters: [], page: 1 })}>Clear</button>
             )}
           </>
         }
-        emptyTitle={filtered ? 'No matching appointments' : 'No appointments yet'}
-        emptyDescription={filtered ? 'Try a different search or clear the filters.' : 'Use New Appointment to book the first one.'}
-        rowActions={(r) =>
-          canEdit || canDelete ? (
-            <Dropdown
-              trigger={<button type="button" className="row-action" title="Actions" aria-label={`Actions for appointment ${r.appointmentNumber}`}>…</button>}
-              items={[
-                ...(canEdit ? [{ label: 'Edit', icon: <Pencil className="h-3.5 w-3.5" />, onClick: () => setEdit(r) }] : []),
-                ...(canDelete ? [{ label: 'Delete', icon: <Trash2 className="h-3.5 w-3.5" />, danger: true, onClick: () => setDel(r) }] : []),
-              ]}
-            />
-          ) : null
-        }
+        emptyTitle={filtered ? 'No matching appointments' : EMPTY[view]}
+        emptyDescription={filtered ? 'Try a different search or clear the filters.' : view === 'ALL' ? 'Use New Appointment to book the first one.' : undefined}
+        rowActions={(r) => (
+          <div className="flex items-center justify-end gap-1.5">
+            {/* The routine action is visible and one click — no form, no status dropdown. */}
+            {!r.completedAt && canEdit && (
+              <button
+                type="button"
+                className="btn-outline-primary h-7 px-2 text-[12.5px] max-sm:h-9 max-sm:px-3"
+                aria-label={`Mark appointment ${r.appointmentNumber} done`}
+                disabled={act.isPending}
+                onClick={() => act.mutate({ type: 'appointment-done', id: r.id })}
+              >
+                <CheckCircle2 className="h-4 w-4" strokeWidth={1.75} /> Done
+              </button>
+            )}
+            {(canEdit || canDelete || canReceive) && (
+              <Dropdown
+                trigger={<button type="button" className="row-action max-sm:h-9 max-sm:w-9" title="Actions" aria-label={`Actions for appointment ${r.appointmentNumber}`}>…</button>}
+                items={[
+                  ...(canEdit ? [{ label: 'Edit', icon: <Pencil className="h-3.5 w-3.5" />, onClick: () => setEdit(r) }] : []),
+                  ...(canEdit && r.completedAt ? [{ label: 'Mark as pending', icon: <RotateCcw className="h-3.5 w-3.5" />, onClick: () => act.mutate({ type: 'appointment-reopen', id: r.id }) }] : []),
+                  ...(canReceive ? [{ label: 'Receive payment', icon: <HandCoins className="h-3.5 w-3.5" />, onClick: () => setPaying({ customerKey: normalizeMobile(r.mobileNumber), customerName: r.customerName }) }] : []),
+                  ...(canDelete ? [{ label: 'Delete', icon: <Trash2 className="h-3.5 w-3.5" />, danger: true, onClick: () => setDel(r) }] : []),
+                ]}
+              />
+            )}
+          </div>
+        )}
       />
 
       <AppointmentForm open={edit !== undefined} onClose={() => setEdit(undefined)} row={edit} />
+      <ReceivePaymentDialog open={!!paying} onClose={() => setPaying(null)} payment={paying} />
       <ConfirmDialog
         open={!!del}
         onClose={() => setDel(null)}

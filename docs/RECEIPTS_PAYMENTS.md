@@ -98,13 +98,14 @@ BEGIN
   each allocation: bill exists in the tenant, carries the customer key,
                    receipt date >= bill date, amount <= outstanding
   take the receipt number (document_counters, 'receipt')
-  insert receipt (amount = sum of allocations) and allocations
+  insert receipt (amount >= sum of allocations; the rest is advance) and allocations
 COMMIT            -- any refusal rolls everything back, the number included
 audit receipt_created
 ```
 
-- The payload's `amount` must equal the allocations to the paisa (schema). No advance / on-account
-  money exists in this phase — a later, separate decision.
+- The payload's `amount` may not be below the allocations (schema). Anything above them — or the
+  whole amount, when nothing is allocated — is the customer's **advance**: see `ADVANCE_PAYMENTS.md`
+  (applying, reversing, and why Paid counts only applied advance).
 - Zero or negative receipts or allocations, a bill twice in one receipt, and 3-decimal amounts are
   refused by the schema.
 - **A receipt cannot be dated before any bill it settles** (money cannot be received for a bill
@@ -112,7 +113,7 @@ audit receipt_created
   the form checks it too. Future dates are not restricted.
 - **At most 100 bills per receipt** (`RECEIPT_LIMITS.maxAllocations`). The form never drops bills
   silently: *Pay all in full* fills the oldest 100 and says how many need another receipt, *Auto
-  allocate* stops at 100 and reports the unplaced amount as such (not as an advance), and a save
+  allocate* stops at 100 and says the unplaced amount stays on the receipt as advance, and a save
   with more than 100 rows is refused on screen. The pending list shows at most the oldest 500
   bills and says so when a customer has more.
 - The number comes from `allocateDocumentNumber(tx, tenant, 'receipt')`: one sequence per tenant,
@@ -205,6 +206,6 @@ mobile number and no bank account number is written. Cancelled is never called "
 
 ## Deliberately not in this phase
 
-Customer advances / unallocated money, receipt editing, a receipt PDF or WhatsApp share (the
+Receipt editing, a receipt PDF or WhatsApp share (the
 printable page is the receipt; a PDF would reuse the invoice renderer's infrastructure later),
 refunds, and every accounting posting (journal, ledger, GST payable, place of supply).

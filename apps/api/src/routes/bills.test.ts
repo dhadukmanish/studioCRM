@@ -537,6 +537,9 @@ describe('billSchema (create payload)', () => {
       discountType: 'NONE',
       discountValue: 0,
       items: [{ itemId: ITEM_ID, subItemId: SUB_ITEM_ID, quantity: 1, rate: 100, remark: null }],
+      // Create-only: no money received with it, no idempotency id.
+      advance: null,
+      requestId: null,
     });
   });
 

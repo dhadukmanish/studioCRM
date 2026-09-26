@@ -25,6 +25,8 @@ export interface Column<T> {
   /** cannot be hidden / reordered (first column in reference UI) */
   locked?: boolean;
   className?: string;
+  /** Extra classes for the header cell (e.g. let a long header wrap to two lines). */
+  headerClassName?: string;
 }
 
 export interface ListState {
@@ -51,6 +53,8 @@ interface Props<T> {
   onStateChange?: (p: Partial<ListState>) => void;
   rowKey: (row: T) => string;
   onRowClick?: (row: T) => void;
+  /** Extra classes for one desktop table row (e.g. a rule where a report's next group starts). */
+  rowClassName?: (row: T, index: number) => string | false | undefined;
   selectable?: boolean;
   selected?: string[];
   onSelectedChange?: (ids: string[]) => void;
@@ -69,6 +73,11 @@ interface Props<T> {
   emptyDescription?: ReactNode;
   rowActions?: (row: T) => ReactNode;
   footer?: ReactNode;
+  /**
+   * A totals row under the table, aligned with the visible columns (by column key) — a report's
+   * whole-result totals. Desktop table only; give phones a `footer` strip.
+   */
+  totalsRow?: Record<string, ReactNode>;
   dense?: boolean;
   /** Narrower cell padding (12px instead of 20px) for wide, figure-heavy tables such as reports. */
   compact?: boolean;
@@ -263,7 +272,7 @@ function CustomizeColumns({ open, onClose, columns, layout, onSave }: { open: bo
 /* ============================================================================
  * DataTable
  * ========================================================================== */
-export function DataTable<T>({ columns, rows, total, loading, state, onStateChange, rowKey, onRowClick, selectable, selected = [], onSelectedChange, toolbar, actions, filterFields, storageKey, columnsButton, onRefresh, onImport, onExport, emptyTitle, emptyDescription, rowActions, footer, dense, compact, hideSearch, hidePagination, searchPlaceholder, clientSide, mobileCard }: Props<T>) {
+export function DataTable<T>({ columns, rows, total, loading, state, onStateChange, rowKey, onRowClick, rowClassName, selectable, selected = [], onSelectedChange, toolbar, actions, filterFields, storageKey, columnsButton, onRefresh, onImport, onExport, emptyTitle, emptyDescription, rowActions, footer, totalsRow, dense, compact, hideSearch, hidePagination, searchPlaceholder, clientSide, mobileCard }: Props<T>) {
   const qc = useQueryClient();
   const [showFilters, setShowFilters] = useState(false);
   const [customize, setCustomize] = useState(false);
@@ -347,10 +356,11 @@ export function DataTable<T>({ columns, rows, total, loading, state, onStateChan
             </span>
           )}
           {columnsButton && (
-            <button type="button" onClick={() => setCustomize(true)} className="btn-outline"><Columns3 className="h-4 w-4" /> Columns</button>
+            // Phone cards have no columns to choose; Customize Columns stays in the kebab.
+            <button type="button" onClick={() => setCustomize(true)} className={cx('btn-outline', mobileCard && 'max-sm:hidden')}><Columns3 className="h-4 w-4" /> Columns</button>
           )}
           {actions}
-          <Dropdown items={kebab} trigger={<button type="button" className="icon-btn"><MoreVertical className="h-4 w-4" /></button>} />
+          <Dropdown items={kebab} trigger={<button type="button" className="icon-btn" aria-label="More list options" title="More"><MoreVertical className="h-4 w-4" /></button>} />
         </div>
       </div>
       {showFilters && fields.length > 0 && <FilterBuilder fields={fields} value={activeFilters} storageKey={storageKey} onClose={() => setShowFilters(false)} onApply={(f) => onStateChange?.({ filters: f })} />}
@@ -381,7 +391,7 @@ export function DataTable<T>({ columns, rows, total, loading, state, onStateChan
                 <th className="table-head w-10 !px-4"><Checkbox checked={allChecked} onChange={toggleAll} /></th>
               )}
               {cols.map((c) => (
-                <th key={c.key} style={{ width: c.width }} className={cx('table-head group', compact && '!px-3', c.sortable !== false && 'cursor-pointer select-none hover:text-gray-800', c.align === 'right' && 'text-right', c.align === 'center' && 'text-center')} onClick={() => onSort(c)}>
+                <th key={c.key} style={{ width: c.width }} className={cx('table-head group', compact && '!px-3', c.sortable !== false && 'cursor-pointer select-none hover:text-gray-800', c.align === 'right' && 'text-right', c.align === 'center' && 'text-center', c.headerClassName)} onClick={() => onSort(c)}>
                   <span className="inline-flex items-center gap-1">{c.header}{sortIcon(c)}</span>
                 </th>
               ))}
@@ -399,7 +409,7 @@ export function DataTable<T>({ columns, rows, total, loading, state, onStateChan
               const id = rowKey(r);
               const isSel = selected.includes(id);
               return (
-                <tr key={id} onClick={() => onRowClick?.(r)} className={cx('transition-colors', onRowClick && 'cursor-pointer', isSel ? 'bg-primary-lighter/30' : 'hover:bg-gray-50/70', loading && 'opacity-60')}>
+                <tr key={id} onClick={() => onRowClick?.(r)} className={cx('transition-colors', onRowClick && 'cursor-pointer', isSel ? 'bg-primary-lighter/30' : 'hover:bg-gray-50/70', loading && 'opacity-60', rowClassName?.(r, i))}>
                   {selectable && (
                     <td className="table-cell !px-4" onClick={(e) => e.stopPropagation()}>
                       <Checkbox checked={isSel} onChange={(v) => onSelectedChange?.(v ? [...selected, id] : selected.filter((x) => x !== id))} />
@@ -415,6 +425,17 @@ export function DataTable<T>({ columns, rows, total, loading, state, onStateChan
               );
             })}
           </tbody>
+          {totalsRow && shown.length > 0 && (
+            <tfoot className="border-t-2 border-line bg-head">
+              <tr>
+                {selectable && <td />}
+                {cols.map((c) => (
+                  <td key={c.key} className={cx('table-cell !py-2.5 font-semibold text-gray-900', compact && '!px-3', c.align === 'right' && 'text-right')}>{totalsRow[c.key] ?? null}</td>
+                ))}
+                {rowActions && <td />}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
       {footer}
@@ -427,9 +448,9 @@ export function DataTable<T>({ columns, rows, total, loading, state, onStateChan
           <div className="flex items-center gap-3">
             <span>Showing <b>{from}-{to}</b> of <b>{count}</b></span>
             <div className="flex items-center gap-1">
-              <button className="icon-btn h-7 w-7" disabled={page <= 1} onClick={() => onStateChange?.({ page: page - 1 })}><ChevronLeft className="h-4 w-4" /></button>
+              <button className="icon-btn h-7 w-7" aria-label="Previous page" disabled={page <= 1} onClick={() => onStateChange?.({ page: page - 1 })}><ChevronLeft className="h-4 w-4" /></button>
               {pageNumbers(page, pages).map((n, i) => (typeof n === 'string' ? <span key={`e${i}`} className="px-1">…</span> : <button key={n} onClick={() => onStateChange?.({ page: n })} className={cx('h-7 min-w-7 rounded-lg px-2 text-[13px]', n === page ? 'bg-primary text-white' : 'hover:bg-gray-100')}>{n}</button>))}
-              <button className="icon-btn h-7 w-7" disabled={page >= pages} onClick={() => onStateChange?.({ page: page + 1 })}><ChevronRight className="h-4 w-4" /></button>
+              <button className="icon-btn h-7 w-7" aria-label="Next page" disabled={page >= pages} onClick={() => onStateChange?.({ page: page + 1 })}><ChevronRight className="h-4 w-4" /></button>
             </div>
           </div>
         </div>

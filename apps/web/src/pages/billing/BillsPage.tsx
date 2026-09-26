@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Download, FileText, HandCoins, MessageCircle, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { BILL_DISCOUNT_TYPES, BILL_DISCOUNT_TYPE_LABELS, BILL_PAYMENT_STATUSES, BILL_PAYMENT_STATUS_LABELS, INVOICE_TAX_MODES, INVOICE_TAX_MODE_LABELS, invoiceFileName, type FilterFieldDef } from '@erp/shared';
+import { BILL_DISCOUNT_TYPES, BILL_DISCOUNT_TYPE_LABELS, BILL_PAYMENT_STATUSES, BILL_PAYMENT_STATUS_LABELS, INVOICE_TAX_MODES, INVOICE_TAX_MODE_LABELS, WORK_POSITIONS, WORK_POSITION_LABELS, invoiceFileName, type FilterFieldDef } from '@erp/shared';
 import { Crumb } from '@/components/layout/AppShell';
 import { DataTable, useListState, type Column } from '@/components/data/DataTable';
 import { Badge, ConfirmDialog, Dropdown } from '@/components/ui';
@@ -13,7 +13,7 @@ import { downloadInvoicePdf } from '@/lib/invoice';
 import { ShareInvoiceDialog } from '@/components/invoice/ShareInvoiceDialog';
 import { toast } from '@/lib/toast';
 import { ApiError } from '@/lib/api';
-import { receivePaymentHref } from '@/lib/receipts';
+import { ReceivePaymentDialog, type ReceivePaymentFor } from '@/pages/receipts/ReceivePaymentDialog';
 import { BillPaymentStatusBadge } from '@/pages/receipts/StatusBadges';
 import type { BillListRow as BillRow } from './types';
 
@@ -28,10 +28,12 @@ export default function BillsPage() {
   const q = useList<BillRow>(QUERY_KEY, URL, state);
   const [del, setDel] = useState<BillRow | null>(null);
   const [shareId, setShareId] = useState<string | null>(null);
+  const [paying, setPaying] = useState<ReceivePaymentFor | null>(null);
   const nav = useNavigate();
   const can = useAuthStore((s) => s.can);
-  const remove = useSave({ invalidate: [QUERY_KEY, 'bill-invoice', 'receipts', 'receivables'], onSuccess: () => setDel(null) });
+  const remove = useSave({ invalidate: [QUERY_KEY, 'bill-invoice', 'receipts', 'receivables', 'work', 'delivery-report'], onSuccess: () => setDel(null) });
   const canReceive = can('operations_receipts', 'create');
+  const canSeeWork = can('operations_work');
 
   const total = q.data?.total ?? 0;
   const canEdit = can(PERMISSION, 'update');
@@ -47,6 +49,7 @@ export default function BillsPage() {
     { key: 'mobileNumber', label: 'Mobile No.' },
     { key: 'grandTotal', label: 'Grand Total', type: 'number' },
     { key: 'paymentStatus', label: 'Payment Status', type: 'select', options: BILL_PAYMENT_STATUSES.map((s) => ({ value: s, label: BILL_PAYMENT_STATUS_LABELS[s] })) },
+    ...(canSeeWork ? [{ key: 'workPosition', label: 'Next Work', type: 'select' as const, options: WORK_POSITIONS.map((s) => ({ value: s, label: WORK_POSITION_LABELS[s] })) }] : []),
     { key: 'discountType', label: 'Discount Type', type: 'select', options: BILL_DISCOUNT_TYPES.map((t) => ({ value: t, label: BILL_DISCOUNT_TYPE_LABELS[t] })) },
     { key: 'updatedAt', label: 'Last Modified', type: 'date' },
     { key: 'createdAt', label: 'Created At', type: 'date' },
@@ -58,24 +61,37 @@ export default function BillsPage() {
   const columns: Column<BillRow>[] = [
     { key: '_seq', header: '#', sortable: false, width: 56, locked: true, render: (_r, i) => <span className="text-gray-500">{(state.page - 1) * state.limit + i + 1}</span> },
     /** Capped with an ellipsis (full value on hover): cells never wrap, so one long book number would otherwise push Payment and Actions off-screen. */
-    { key: 'bookNumber', header: 'Book', render: (r) => <span className="block max-w-[120px] truncate" title={r.bookNumber}>{r.bookNumber}</span> },
+    { key: 'bookNumber', header: 'Book', render: (r) => <span className="block max-w-[100px] truncate" title={r.bookNumber}>{r.bookNumber}</span> },
     { key: 'billNumber', header: 'Bill No.', render: (r) => <span className="font-medium text-gray-900">{r.billNumber}</span> },
     { key: 'billDate', header: 'Bill Date', render: (r) => fmt.date(r.billDate) },
-    { key: 'customerName', header: 'Customer Name', render: (r) => <span className="block max-w-[200px] truncate" title={r.customerName}>{r.customerName}</span> },
+    { key: 'customerName', header: 'Customer Name', render: (r) => <span className="block max-w-[160px] truncate" title={r.customerName}>{r.customerName}</span> },
     { key: 'mobileNumber', header: 'Mobile No.', hidden: true },
     /**
      * Mobile No., Delivery Date, Tax Mode, Paid and Last Modified are hidden by default so Outstanding, Payment and
      * Actions fit a 1440px screen (measured: 11 columns needed ~1310px of ~1125). Each is one click away in Columns;
      * mobile stays searchable, and Paid = Grand Total - Outstanding (the bill's payment panel shows all three).
      */
-    { key: 'deliveryDate', header: 'Delivery Date', hidden: true, render: (r) => fmt.date(r.deliveryDate) },
+    { key: 'deliveryDate', header: 'Planned Delivery', hidden: true, render: (r) => fmt.date(r.deliveryDate) },
     /** Text in the badge, never colour alone — the two modes must read the same to everyone. */
     { key: 'taxMode', header: 'Tax Mode', hidden: true, render: (r) => <Badge color={r.taxMode === 'WITH_GST' ? 'blue' : 'gray'}>{INVOICE_TAX_MODE_LABELS[r.taxMode]}</Badge> },
     { key: 'grandTotal', header: 'Grand Total', align: 'right', render: (r) => <span className="font-medium text-gray-900">{fmtMoney(r.grandTotal)}</span> },
     /** Derived by the API from active receipts — the list never adds these up itself. */
     { key: 'paidAmount', header: 'Paid', align: 'right', hidden: true, render: (r) => fmtMoney(r.paidAmount) },
-    { key: 'outstandingAmount', header: 'Outstanding', align: 'right', render: (r) => <span className={r.outstandingAmount > 0 ? 'text-gray-900' : 'text-gray-400'}>{fmtMoney(r.outstandingAmount)}</span> },
+    { key: 'outstandingAmount', header: 'Due', align: 'right', render: (r) => <span className={r.outstandingAmount > 0 ? 'text-gray-900' : 'text-gray-400'}>{fmtMoney(r.outstandingAmount)}</span> },
     { key: 'paymentStatus', header: 'Payment', render: (r) => <BillPaymentStatusBadge status={r.paymentStatus} /> },
+    /**
+     * ONE column for the studio job: the next thing to do, or Done. The doing happens on Today's
+     * Work (or the bill) — the list stays a list. Independent of Payment, which is its own column.
+     */
+    ...(canSeeWork
+      ? [
+          {
+            key: 'workPosition',
+            header: 'Next Work',
+            render: (r: BillRow) => <span className={r.workPosition === 'COMPLETE' ? 'text-gray-400' : 'text-gray-800'}>{WORK_POSITION_LABELS[r.workPosition]}</span>,
+          } satisfies Column<BillRow>,
+        ]
+      : []),
     /** Hidden by default: useful when reconciling, but they would push the row past the viewport. */
     { key: 'subTotal', header: 'Sub Total', align: 'right', hidden: true, render: (r) => fmtMoney(r.subTotal) },
     /** Shows WHAT was given as well as how much — "10%" and "₹1,000" are not the same fact. */
@@ -145,7 +161,7 @@ export default function BillsPage() {
             items={[
               /* Read is enough to open a bill; the form itself is view-only without update. */
               { label: canEdit ? 'Edit' : 'View', icon: <Pencil className="h-3.5 w-3.5" />, onClick: () => nav(`/modules/billing/${r.id}`) },
-              ...(canReceive && r.outstandingAmount > 0 ? [{ label: 'Receive payment', icon: <HandCoins className="h-3.5 w-3.5" />, onClick: () => nav(receivePaymentHref(r.mobileSearch, r.id)) }] : []),
+              ...(canReceive && r.outstandingAmount > 0 ? [{ label: 'Receive payment', icon: <HandCoins className="h-3.5 w-3.5" />, onClick: () => setPaying({ customerKey: r.mobileSearch, customerName: r.customerName, bill: { id: r.id, reference: `${r.bookNumber}/${r.billNumber}`, due: r.outstandingAmount } }) }] : []),
               { label: 'Preview invoice', icon: <FileText className="h-3.5 w-3.5" />, onClick: () => nav(`/modules/billing/${r.id}/invoice`) },
               { label: 'Share on WhatsApp', icon: <MessageCircle className="h-3.5 w-3.5" />, onClick: () => setShareId(r.id) },
               { label: 'Download PDF', icon: <Download className="h-3.5 w-3.5" />, onClick: () => downloadInvoicePdf(r.id, invoiceFileName(r.bookNumber, r.billNumber)).catch((e) => toast.error(e instanceof ApiError ? e.message : 'The PDF could not be generated')) },
@@ -156,6 +172,7 @@ export default function BillsPage() {
       />
 
       <ShareInvoiceDialog billId={shareId} open={!!shareId} onClose={() => setShareId(null)} />
+      <ReceivePaymentDialog open={!!paying} onClose={() => setPaying(null)} payment={paying} />
 
       <ConfirmDialog
         open={!!del}

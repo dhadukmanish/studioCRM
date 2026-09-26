@@ -52,11 +52,17 @@ export const PERMISSIONS: PermissionDef[] = [
   // Operations
   { name: 'operations_appointments', displayName: 'Appointments', module: 'operations' },
   { name: 'operations_billing', displayName: 'Billing', module: 'operations' },
-  // Edit = cancel a receipt. A receipt is never edited or deleted — a wrong one is cancelled.
+  // Create = receive a payment (bills, or an advance) and apply an advance to a bill.
+  // Edit = cancel a receipt or reverse an applied advance. A receipt is never edited or deleted.
   { name: 'operations_receipts', displayName: 'Receipts', module: 'operations', actions: ['read', 'create', 'update'] },
+  // The studio workflow (docs/STUDIO_WORKFLOW.md). View = Today's Work, a bill's progress and the
+  // Delivery report; Edit = complete, skip or reopen Selection / Editing / WhatsApp / Delivery.
+  // Marking an appointment Done is Appointments Edit.
+  { name: 'operations_work', displayName: 'Studio Work', module: 'operations', actions: ['read', 'update'] },
   // Reports — read-only views. View also covers print and CSV export; acting on a report row
   // (Receive payment, opening a bill or a receipt) still needs that module's own permission.
   { name: 'reports_receivables', displayName: 'Receivables Reports', module: 'reports', actions: ['read'] },
+  { name: 'reports_bills', displayName: 'Bill Summary Report', module: 'reports', actions: ['read'] },
   // Administration
   { name: 'admin_companies', displayName: 'Companies', module: 'admin' },
   { name: 'admin_branches', displayName: 'Branches', module: 'admin' },

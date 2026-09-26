@@ -14,6 +14,8 @@ interface Props {
   serverErrors: Record<string, string>;
   onChange: (next: Allocations, touchedBillIds: string[]) => void;
   disabled?: boolean;
+  /** The form's Amount Received (paise), when typed — what "Spread" puts on the oldest bills. */
+  receivedPaise: number | null;
 }
 
 /**
@@ -21,28 +23,23 @@ interface Props {
  * it. On a desktop it is a flat table; below the `sm` breakpoint every bill becomes a compact
  * stacked row, because a six-column money table squeezed into a phone is unusable.
  */
-export function PendingBillsAllocation({ bills, loading, error, allocations, serverErrors, onChange, disabled }: Props) {
+export function PendingBillsAllocation({ bills, loading, error, allocations, serverErrors, onChange, disabled, receivedPaise }: Props) {
   const fmt = useDateFormatters();
-  const [target, setTarget] = useState('');
   const [autoNote, setAutoNote] = useState<string | null>(null);
 
   const set = (id: string, v: string) => onChange({ ...allocations, [id]: v }, [id]);
   const full = (b: PendingBill) => set(b.id, paiseText(toPaise(b.outstandingAmount)));
-  const targetPaise = typedPaise(target);
 
   const runAuto = () => {
-    if (targetPaise === null || targetPaise <= 0) {
-      setAutoNote('Enter the amount received to spread it over the bills.');
-      return;
-    }
-    const r = autoAllocate(bills, targetPaise);
+    if (!receivedPaise || receivedPaise <= 0) return;
+    const r = autoAllocate(bills, receivedPaise);
     onChange(r.allocations, bills.map((b) => b.id));
     const left = fmtMoney(fromPaise(r.leftoverPaise));
     setAutoNote(
       r.capped
-        ? `${left} was not allocated: a receipt can settle at most ${RECEIPT_LIMITS.maxAllocations} bills. Save this one, then record another receipt for the rest.`
+        ? `${left} was not put on a bill: a receipt can settle at most ${RECEIPT_LIMITS.maxAllocations} bills. It is kept as advance — apply it from the other bills.`
         : r.leftoverPaise > 0
-          ? `${left} is more than the customer owes and was not allocated — a receipt cannot carry an advance.`
+          ? `${left} is more than these bills owe — it is kept as advance.`
           : null,
     );
   };
@@ -80,21 +77,10 @@ export function PendingBillsAllocation({ bills, loading, error, allocations, ser
     <div>
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <button type="button" className="btn-outline" onClick={payAll} disabled={disabled}>Pay all in full</button>
+        <button type="button" className="btn-outline-primary" onClick={runAuto} disabled={disabled || !receivedPaise} title="Put the amount received on the oldest bills first">
+          {receivedPaise ? `Spread ${fmtMoney(fromPaise(receivedPaise))} oldest first` : 'Spread amount received'}
+        </button>
         <button type="button" className="btn-ghost" onClick={() => { onChange({}, bills.map((b) => b.id)); setAutoNote(null); }} disabled={disabled}>Clear</button>
-        <div className="flex items-center gap-1.5 sm:ml-auto">
-          <TextInput
-            size="sm"
-            inputMode="decimal"
-            className="w-[120px] text-right tabular-nums"
-            placeholder="Amount received"
-            aria-label="Amount to auto allocate"
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runAuto(); } }}
-            disabled={disabled}
-          />
-          <button type="button" className="btn-outline-primary" onClick={runAuto} disabled={disabled} title="Fill the oldest bills first">Auto allocate</button>
-        </div>
       </div>
       {autoNote && <p className="mb-2 text-[12px] text-amber-700">{autoNote}</p>}
 

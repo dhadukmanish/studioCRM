@@ -78,8 +78,9 @@ export const receipts = pgTable(
 );
 
 /**
- * Receipt Allocation — how much of one receipt went to one bill. A receipt may settle many bills;
- * a bill may be settled by many receipts. Immutable once written.
+ * Receipt Allocation — how much of one receipt went to one bill WHEN THE RECEIPT WAS SAVED. A
+ * receipt may settle many bills; a bill may be settled by many receipts. Immutable once written.
+ * Money put on a bill later, out of the receipt's advance, is an `advance_applications` row.
  */
 export const receiptAllocations = pgTable(
   'receipt_allocations',
@@ -104,5 +105,54 @@ export const receiptAllocations = pgTable(
     /** A bill's Paid, for the bill list, the pending bills and the overpayment check. */
     index('receipt_allocations_tenant_bill_idx').on(t.tenantId, t.billId),
     check('receipt_allocations_amount_positive_check', sql`${t.amount} > 0`),
+  ],
+);
+
+/**
+ * Advance Application — part of a receipt's ADVANCE applied to one bill after the receipt was saved
+ * (docs/ADVANCE_PAYMENTS.md). A receipt's advance is what it received beyond its allocations; it
+ * reduces no bill until an explicit Apply writes a row here.
+ *
+ *   Paid (bill)          = allocations on ACTIVE receipts + ACTIVE applications on ACTIVE receipts
+ *   Available (receipt)  = amount - allocations - ACTIVE applications      (derived, never stored)
+ *
+ * Its own table rather than a late `receipt_allocations` row: an application has its own date (the
+ * day it was applied, which is what an As-of report must use), can be applied to the same bill more
+ * than once, and can be REVERSED on its own — none of which an allocation does.
+ *
+ * Never deleted. A mistaken application is REVERSED: the row stays for audit and stops counting,
+ * and the money is available again. A receipt with an ACTIVE application cannot be cancelled until
+ * that application is reversed (`cancelReceipt`).
+ */
+export const advanceApplications = pgTable(
+  'advance_applications',
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    receiptId: uuid('receipt_id').notNull(),
+    billId: uuid('bill_id').notNull(),
+    amount: numeric('amount', { precision: 16, scale: 2 }).notNull(),
+    /** The business date it was applied — what the receivables As-of date compares. */
+    appliedOn: date('applied_on', { mode: 'string' }).notNull(),
+    /** ACTIVE | REVERSED. Only ACTIVE applications count towards Paid. */
+    status: text('status').notNull().default('ACTIVE'),
+    reversedAt: timestamp('reversed_at', { withTimezone: true }),
+    reversedBy: uuid('reversed_by').references(() => users.id, { onDelete: 'set null' }),
+    reverseReason: text('reverse_reason'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    ...ts,
+  },
+  (t) => [
+    /** CASCADE only matters to a tenant teardown — no workflow deletes a receipt. */
+    foreignKey({ columns: [t.receiptId, t.tenantId], foreignColumns: [receipts.id, receipts.tenantId], name: 'advance_applications_receipt_tenant_fk' }).onDelete('cascade'),
+    /** RESTRICT, like allocations: a bill with payment history cannot be deleted out from under it. */
+    foreignKey({ columns: [t.billId, t.tenantId], foreignColumns: [bills.id, bills.tenantId], name: 'advance_applications_bill_tenant_fk' }).onDelete('restrict'),
+    /** A bill's Paid. */
+    index('advance_applications_tenant_bill_idx').on(t.tenantId, t.billId),
+    /** A receipt's available advance. */
+    index('advance_applications_tenant_receipt_idx').on(t.tenantId, t.receiptId),
+    check('advance_applications_amount_positive_check', sql`${t.amount} > 0`),
+    check('advance_applications_status_check', sql`${t.status} IN ('ACTIVE', 'REVERSED')`),
+    check('advance_applications_reversed_at_check', sql`(${t.status} = 'REVERSED') = (${t.reversedAt} IS NOT NULL)`),
   ],
 );

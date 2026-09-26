@@ -8,6 +8,8 @@ import { useCompanyLogo, useCompanyProfile, useDateFormatters } from '@/lib/sett
  * this — never the app shell, and never the phone card layout (index.css). Like the invoice and the
  * receipt, paper ignores the app theme and draws with `INVOICE_COLORS`. The company name and logo
  * come from the company profile. It prints the WHOLE filtered result the caller fetched.
+ *
+ * `ReportSheet` is the paper itself; the Preview shows exactly that, so what is previewed is what prints.
  */
 export interface ReportPrintData {
   title: string;
@@ -18,21 +20,29 @@ export interface ReportPrintData {
   headers: string[];
   /** Right-aligned (numeric) columns, by index. */
   numeric: number[];
+  /** Columns never wrapped (dates, numbers, mobiles), by index. */
+  nowrap?: number[];
   rows: string[][];
   totals: string[];
+  /** Rows that open a new group (the Detailed tab's bills) get a rule above them. */
+  groupStart?: boolean[];
   landscape?: boolean;
 }
 
-export function ReportPrintSheet({ data }: { data: ReportPrintData }) {
+/** The sheet's printable width — A4 less the 12mm margins — for an on-screen preview of the same page. */
+export const sheetWidth = (landscape?: boolean) => (landscape ? '273mm' : '186mm');
+
+/** The paper — printed by `ReportPrintSheet`, shown as is by the Preview. */
+export function ReportSheet({ data }: { data: ReportPrintData }) {
   const company = useCompanyProfile().data;
   const logo = useCompanyLogo(company?.id, company?.logo?.version).data;
   const fmt = useDateFormatters();
   const c = INVOICE_COLORS;
-  const cell = (i: number): CSSProperties => ({ borderBottom: `0.5pt solid ${c.line}`, padding: '2.5pt 4pt', textAlign: data.numeric.includes(i) ? 'right' : 'left', fontVariantNumeric: 'tabular-nums', verticalAlign: 'top' });
+  const cell = (i: number): CSSProperties => ({ borderBottom: `0.5pt solid ${c.line}`, padding: '2.5pt 4pt', textAlign: data.numeric.includes(i) ? 'right' : 'left', whiteSpace: data.nowrap?.includes(i) ? 'nowrap' : undefined, fontVariantNumeric: 'tabular-nums', verticalAlign: 'top' });
+  const rowCell = (i: number, j: number): CSSProperties => (j > 0 && data.groupStart?.[j] ? { ...cell(i), borderTop: `0.9pt solid ${c.rule}` } : cell(i));
 
-  return createPortal(
-    <div className="print-root" style={{ background: c.paper, color: c.text, fontSize: '8.5pt', lineHeight: 1.35 }}>
-      <style>{`@page { size: A4 ${data.landscape ? 'landscape' : 'portrait'}; margin: 12mm; } .print-root thead { display: table-header-group; } .print-root tr { break-inside: avoid; }`}</style>
+  return (
+    <div style={{ background: c.paper, color: c.text, fontSize: '8.5pt', lineHeight: 1.35 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8pt', borderBottom: `1.2pt solid ${c.rule}`, paddingBottom: '6pt', marginBottom: '6pt' }}>
         {logo && <img src={logo} alt="" style={{ height: '30pt', width: '30pt', objectFit: 'contain' }} />}
         <div style={{ flex: 1 }}>
@@ -62,7 +72,7 @@ export function ReportPrintSheet({ data }: { data: ReportPrintData }) {
           {data.rows.map((r, j) => (
             <tr key={j}>
               {r.map((v, i) => (
-                <td key={i} style={cell(i)}>{v}</td>
+                <td key={i} style={rowCell(i, j)}>{v}</td>
               ))}
             </tr>
           ))}
@@ -73,6 +83,16 @@ export function ReportPrintSheet({ data }: { data: ReportPrintData }) {
           </tr>
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** A report on paper, under <body> as a `.print-root` — the only thing `window.print()` shows. */
+export function ReportPrintSheet({ data }: { data: ReportPrintData }) {
+  return createPortal(
+    <div className="print-root">
+      <style>{`@page { size: A4 ${data.landscape ? 'landscape' : 'portrait'}; margin: 12mm; } .print-root thead { display: table-header-group; } .print-root tr { break-inside: avoid; }`}</style>
+      <ReportSheet data={data} />
     </div>,
     document.body,
   );

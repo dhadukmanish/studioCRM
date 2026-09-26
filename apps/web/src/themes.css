@@ -215,4 +215,5 @@
 [data-theme='dark'] .badge.bg-purple-50 { background: rgb(88 28 135 / 0.3); color: rgb(216 180 254); }
 [data-theme='dark'] .bg-red-50 { background: rgb(153 27 27 / 0.2); }
 [data-theme='dark'] .bg-amber-50 { background: rgb(146 64 14 / 0.2); }
+[data-theme='dark'] .work-check { color: rgb(134 239 172); }
 [data-theme='dark'] input[type='date'], [data-theme='dark'] input[type='time'], [data-theme='dark'] input[type='datetime-local'] { color-scheme: dark; }

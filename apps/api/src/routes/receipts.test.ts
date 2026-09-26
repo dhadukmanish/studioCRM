@@ -25,8 +25,10 @@ describe('receiptSchema', () => {
     expect(receiptSchema.safeParse(multi).success).toBe(true);
   });
 
-  it('refuses money left unallocated, or more allocated than received', () => {
-    expect(receiptSchema.safeParse({ ...valid, amount: 120 }).success).toBe(false);
+  // Phase "studio workflow" changed this rule on purpose: money beyond the allocations is ADVANCE
+  // (docs/ADVANCE_PAYMENTS.md). More allocated than received is still refused, to the paisa.
+  it('keeps money beyond the allocations as advance, but refuses more allocated than received', () => {
+    expect(receiptSchema.safeParse({ ...valid, amount: 120 }).success).toBe(true);
     expect(receiptSchema.safeParse({ ...valid, amount: 99.99 }).success).toBe(false);
   });
 
@@ -42,16 +44,17 @@ describe('receiptSchema', () => {
     expect(receiptSchema.safeParse({ ...valid, amount: 100, allocations: [{ billId: uuid, amount: 100 }, { billId: '00000000-0000-4000-8000-000000000002', amount: 0 }] }).success).toBe(false);
   });
 
-  it('refuses the same bill twice, an empty allocation list, and CREDIT as a payment mode', () => {
+  it('refuses the same bill twice and CREDIT as a payment mode; no allocation at all is a whole-receipt advance', () => {
     expect(receiptSchema.safeParse({ ...valid, amount: 200, allocations: [{ billId: uuid, amount: 100 }, { billId: uuid, amount: 100 }] }).success).toBe(false);
-    expect(receiptSchema.safeParse({ ...valid, allocations: [] }).success).toBe(false);
+    expect(receiptSchema.safeParse({ ...valid, allocations: [] }).success).toBe(true);
     expect(receiptSchema.safeParse({ ...valid, paymentMode: 'CREDIT' }).success).toBe(false);
   });
 
-  it('never takes a receipt number, customer name or outstanding from the client', () => {
-    const parsed = receiptSchema.parse({ ...valid, receiptNumber: 99, customerName: 'X', outstanding: 5 }) as Record<string, unknown>;
+  // The customer name is accepted only for a customer with no bill yet; the server ignores it
+  // otherwise (see "names the customer from their bill" below).
+  it('never takes a receipt number or outstanding from the client', () => {
+    const parsed = receiptSchema.parse({ ...valid, receiptNumber: 99, outstanding: 5 }) as Record<string, unknown>;
     expect(parsed).not.toHaveProperty('receiptNumber');
-    expect(parsed).not.toHaveProperty('customerName');
     expect(parsed).not.toHaveProperty('outstanding');
   });
 });
@@ -328,10 +331,10 @@ describe.skipIf(!TEST_DB)('Receipts API (integration, needs TEST_DATABASE_URL)',
       expect(res.json().error.message).toMatch(/already fully paid/);
     });
 
-    it('a receipt amount that differs from its allocations is refused', async () => {
+    it('a receipt amount below its allocations is refused (above them, the rest is advance — see advance.test.ts)', async () => {
       const mobile = newMobile();
       const b = await bill(A.token, mA, mobile, 12000);
-      const res = await receipt(A.token, mA, mobile, [{ billId: b.id, amount: 10000 }], { amount: 12000 });
+      const res = await receipt(A.token, mA, mobile, [{ billId: b.id, amount: 10000 }], { amount: 9000 });
       expect(res.statusCode).toBe(400);
       expect(res.json().error.details.some((d: { path: string[] }) => d.path[0] === 'amount')).toBe(true);
     });

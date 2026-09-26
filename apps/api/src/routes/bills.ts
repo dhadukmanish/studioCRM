@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { and, count, desc, eq } from 'drizzle-orm';
-import { billSchema, billUpdateSchema } from '@erp/shared';
+import { and, count, desc, eq, type SQL } from 'drizzle-orm';
+import { billSchema, billUpdateSchema, hasPermission } from '@erp/shared';
 import { db, schema } from '../db/client';
 import { parse } from '../lib/validate';
 import { ok } from '../lib/respond';
@@ -10,7 +10,9 @@ import { logActivity } from '../services/activity';
 import { billSearch, createBill, deleteBill, getBill, resolveDefaultBook, shapeBill, updateBill } from '../services/bills';
 import type { NextVisitResult } from '../services/nextVisit';
 import { paidSubquery, paymentColumns } from '../services/billPayments';
-import { getBillPayments } from '../services/receipts';
+import { workPositionSql, workSubquery } from '../services/work';
+import { getBillPayments, getReceipt } from '../services/receipts';
+import { forbidden } from '../lib/errors';
 import { auditRevokedLinks } from '../services/publicInvoiceLinks';
 
 /**
@@ -31,6 +33,12 @@ const LABEL = 'Bill';
 
 const B = schema.bills;
 
+/** The bill's own columns for the list — minus the create request's idempotency bookkeeping (never shown, never filterable). */
+const billColumns = () => {
+  const { createRequestId: _id, createRequestHash: _hash, ...cols } = tableColumns(B);
+  return cols;
+};
+
 export async function billRoutes(app: FastifyInstance) {
   /**
    * List. One left join carries each bill's book number, so the list never runs a query per
@@ -45,21 +53,34 @@ export async function billRoutes(app: FastifyInstance) {
     // query — never stored on the bill, never a query per row — and filter and sort like columns.
     const paid = paidSubquery(req.user.tenantId);
     const payment = paymentColumns(paid);
-    const cols: ColumnMap = { ...tableColumns(B), bookNumber: schema.books.bookNumber, ...payment };
+    // The job's studio-workflow position (Selection / Editing / WhatsApp / Delivery / Completed),
+    // derived from its recorded stages by one grouped subquery — filterable and sortable like a column.
+    // Only for someone who may see Studio Work — the server withholds it, not just the UI.
+    const seesWork = req.user.isSuperAdmin || hasPermission(req.user.grants, 'operations_work', 'read');
+    const work = workSubquery(req.user.tenantId);
+    const workCols: Record<string, SQL> = seesWork ? { workPosition: workPositionSql(work) } : {};
+    const cols: ColumnMap = { ...billColumns(), bookNumber: schema.books.bookNumber, ...payment, ...workCols };
     // Paid / Outstanding are SQL expressions, which `filterWhere` would compare as text (and a
     // non-numeric value would fail the query) — so they sort but do not filter. Payment Status,
     // a text value, filters normally.
     const { paidAmount: _p, outstandingAmount: _o, ...filterCols } = cols;
     const where = and(eq(B.tenantId, req.user.tenantId), billSearch(q.search), filterWhere((req.query as Record<string, unknown>).filters, filterCols));
 
-    const [{ total }] = await db.select({ total: count() }).from(B).innerJoin(schema.books, eq(schema.books.id, B.bookId)).leftJoin(paid, eq(paid.billId, B.id)).where(where);
-    /** Operational default: the latest bill date first, and the bill number as the stable tie-breaker. */
-    const order = q.sortBy && cols[q.sortBy] ? [sortBy(q.sortBy, q.sortOrder, cols, B.billDate), desc(B.billNumber)] : [desc(B.billDate), desc(B.billNumber)];
-    const rows = await db
-      .select({ ...tableColumns(B), bookNumber: schema.books.bookNumber, ...payment })
+    const [{ total }] = await db
+      .select({ total: count() })
       .from(B)
       .innerJoin(schema.books, eq(schema.books.id, B.bookId))
       .leftJoin(paid, eq(paid.billId, B.id))
+      .leftJoin(work, eq(work.billId, B.id))
+      .where(where);
+    /** Operational default: the latest bill date first, and the bill number as the stable tie-breaker. */
+    const order = q.sortBy && cols[q.sortBy] ? [sortBy(q.sortBy, q.sortOrder, cols, B.billDate), desc(B.billNumber)] : [desc(B.billDate), desc(B.billNumber)];
+    const rows = await db
+      .select({ ...billColumns(), bookNumber: schema.books.bookNumber, ...payment, ...workCols })
+      .from(B)
+      .innerJoin(schema.books, eq(schema.books.id, B.bookId))
+      .leftJoin(paid, eq(paid.billId, B.id))
+      .leftJoin(work, eq(work.billId, B.id))
       .where(where)
       .orderBy(...order)
       .limit(q.limit)
@@ -102,9 +123,28 @@ export async function billRoutes(app: FastifyInstance) {
    */
   app.post(BASE, { preHandler: app.requirePermission(PERMISSION, 'create') }, async (req) => {
     const body = parse(billSchema, req.body);
-    const { bill: created, nextVisit } = await createBill(req.user.tenantId, body);
+    // Money received with the bill is a receipt: it needs Receipts Create as well as Billing Create.
+    if (body.advance && !(req.user.isSuperAdmin || hasPermission(req.user.grants, 'operations_receipts', 'create'))) {
+      throw forbidden('You do not have permission to receive payments. Save the bill without an advance.');
+    }
+    const { bill: created, nextVisit, receiptId, replayed } = await createBill(req.user.tenantId, req.user.id, body);
+    // A replayed create (same request id) wrote nothing, so it records nothing either.
+    if (replayed) return ok(created, `${LABEL} No. ${created.billNumber} was already saved`);
     await logActivity(req, 'bill', created.id, 'created', `${LABEL} ${created.bookNumber}/${created.billNumber} for "${created.customerName}" created`, { grandTotal: created.grandTotal });
     await auditNextVisit(req, `${created.bookNumber}/${created.billNumber}`, nextVisit);
+    if (receiptId) {
+      const r = await getReceipt(req.user.tenantId, receiptId);
+      // The same audit a receipt made on the Receipts screen gets — no mobile, no account number.
+      await logActivity(req, 'receipt', r.id, r.availableAmount > 0 ? 'advance_received' : 'receipt_created', `Receipt No. ${r.receiptNumber} for ₹${r.amount.toFixed(2)} received with ${LABEL} ${created.bookNumber}/${created.billNumber}${r.availableAmount > 0 ? ` (advance ₹${r.availableAmount.toFixed(2)})` : ''}`, {
+        receiptNumber: r.receiptNumber,
+        amount: r.amount,
+        advance: r.availableAmount,
+        paymentMode: r.paymentMode,
+        bills: r.allocations.map((a) => ({ billId: a.billId, bill: `${a.bookNumber}/${a.billNumber}`, amount: a.amount })),
+        withBillCreate: true,
+      });
+      return ok(created, `${LABEL} No. ${created.billNumber} created — Receipt No. ${r.receiptNumber} for ₹${r.amount.toFixed(2)} recorded`);
+    }
     return ok(created, `${LABEL} No. ${created.billNumber} created successfully`);
   });
 

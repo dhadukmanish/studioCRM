@@ -58,3 +58,9 @@ export function sortBy(sort: string | undefined, order: 'asc' | 'desc', columns:
   const col = (sort && columns[sort]) || fallback;
   return order === 'asc' ? asc(col as any) : desc(col as any);
 }
+
+/**
+ * An ILIKE "contains" pattern for a user's search text, with LIKE's own wildcards escaped, so
+ * "50%" or "a_b" is searched for literally (backslash is Postgres' default LIKE escape).
+ */
+export const containsPattern = (term: string) => `%${term.replace(/[\\%_]/g, '\\$&')}%`;

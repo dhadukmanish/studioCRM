@@ -60,7 +60,11 @@ form by `sanitizeMobileInput` (digits only, max 10, a pasted `+91`/leading `0` d
 
 ## Payments (derived, never stored)
 
-Paid = sum of allocations on ACTIVE receipts (`services/billPayments.ts`, the only definition).
+Paid = allocations on ACTIVE receipts + ACTIVE advance applications on ACTIVE receipts
+(`services/billPayments.ts`, the only definition). Money beyond a bill is ADVANCE: it reduces
+nothing until an explicit Apply (bill lock → customer receipts lock), is reversed never deleted, and
+blocks cancelling its receipt while applied (`docs/ADVANCE_PAYMENTS.md`). Delivery never means
+paid — the studio workflow is operational only (`docs/STUDIO_WORKFLOW.md`).
 Anything that can move a bill's payment position locks the bill `FOR UPDATE` first. An edit may not
 take Grand Total below Paid, nor change the mobile once any receipt touched the bill. A bill with
 receipt history is never deleted. Receipts are cancelled, never edited or deleted.

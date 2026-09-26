@@ -23,6 +23,7 @@ vi.mock('@/lib/api', async (orig) => ({
     get: vi.fn(async (url: string) => {
       if (url.startsWith('/api/common/lookups/books')) return BOOKS;
       if (url.startsWith('/api/bills/default-book')) return { bookId: 'b-nogst', reason: 'LAST_USED' };
+      if (url.startsWith('/api/receipts/accounts')) return [{ id: 'acc-cash', accountName: 'CASH IN HAND', groupName: 'CASH' }];
       return [];
     }),
     post: vi.fn(),
@@ -123,9 +124,9 @@ describe('New Bill renders for real', () => {
     expect(text()).toContain('Auto-generated');
   });
 
-  it('shows Delivery Date, Baby Name and Next Visit Date directly — no More details, no helper clutter', async () => {
+  it('shows Planned Delivery, Baby Name and Next Visit Date directly — no More details, no helper clutter', async () => {
     await renderNewBill();
-    for (const label of ['Delivery Date', 'Baby Name', 'Next Visit Date', 'Remark', 'Birthdate']) expect(text()).toContain(label);
+    for (const label of ['Planned Delivery', 'Baby Name', 'Next Visit Date', 'Remark', 'Birthdate']) expect(text()).toContain(label);
     expect(text()).toContain('Creates next appointment after saving');
     expect(text()).not.toMatch(/More details/i);
     expect(text()).not.toMatch(/Decides the bill number series/i);
@@ -170,6 +171,33 @@ describe('New Bill renders for real', () => {
     expect(addFirst).toBeDefined();
     await click(addFirst!);
     expect(byLabel('Remove line 1')).not.toBeNull();
+    expect(uncaught).toEqual([]);
+  });
+
+  it('without Receipts Create there is no Advance box — Billing alone never takes money', async () => {
+    await renderNewBill();
+    expect(byLabel('Advance received now')).toBeNull();
+    expect(uncaught).toEqual([]);
+  });
+
+  it('Advance: payment fields appear only once an amount is typed; the only account is preselected; Due never touches Grand Total', async () => {
+    useAuthStore.setState({ user: { ...user, grants: { ...user.grants, operations_receipts: ['read', 'create'] } } });
+    await renderNewBill();
+    const advance = byLabel('Advance received now') as HTMLInputElement;
+    expect(advance).not.toBeNull();
+    expect(document.body.querySelector('[aria-label="Advance received via"]')).toBeNull();
+    await typeInto(advance, '5000');
+    await flush();
+    expect(document.body.querySelector('[aria-label="Advance received via"]')).not.toBeNull();
+    expect(text()).toContain('Received via');
+    const accountSelect = [...document.body.querySelectorAll('select')].find((x) => [...x.options].some((o) => o.value === 'acc-cash'));
+    expect(accountSelect?.value).toBe('acc-cash');
+    // An empty bill: Grand Total stays 0.00, the whole 5,000 is more than the bill.
+    expect(text()).toMatch(/Grand Total₹0\.00/);
+    expect(text()).toContain('more than the bill — kept as advance');
+    await typeInto(advance, '');
+    await flush();
+    expect(document.body.querySelector('[aria-label="Advance received via"]')).toBeNull();
     expect(uncaught).toEqual([]);
   });
 });

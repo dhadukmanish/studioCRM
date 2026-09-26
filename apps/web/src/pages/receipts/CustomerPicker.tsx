@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
-import type { ReceivableCustomer } from '@erp/shared';
+import { BILL_MOBILE_DIGITS, sanitizeMobileInput, type ReceivableCustomer } from '@erp/shared';
 import { Spinner } from '@/components/ui';
 import { cx, fmtMoney } from '@/lib/format';
-import { useReceivableCustomers } from '@/lib/receipts';
+import { useReceivableCustomer, useReceivableCustomers } from '@/lib/receipts';
 
 /** Long enough that typing a name costs one request, short enough to feel immediate. */
 const DEBOUNCE_MS = 300;
@@ -14,16 +14,19 @@ interface Props {
   disabled?: boolean;
   autoFocus?: boolean;
   error?: string;
+  /** Offer a 10-digit mobile nobody owes anything on — the customer paying an advance. */
+  allowNew?: boolean;
 }
 
 /**
- * The receipt's customer, searched on the SERVER by name or mobile — only customers who owe
- * something are offered. (The shared Combobox filters a list it already holds, which cannot
- * express a search across every customer, hence this small listbox.)
+ * The receipt's customer, searched on the SERVER by name or mobile — customers who owe
+ * something are offered; a full 10-digit mobile also finds a customer who owes nothing, or offers a
+ * new one (an advance before any bill). (The shared Combobox filters a list it already holds, which
+ * cannot express a search across every customer, hence this small listbox.)
  *
  * Keyboard: type to search, Up/Down to move, Enter to pick, Escape closes the list only.
  */
-export function CustomerPicker({ value, onChange, disabled, autoFocus, error }: Props) {
+export function CustomerPicker({ value, onChange, disabled, autoFocus, error, allowNew = true }: Props) {
   const [text, setText] = useState('');
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
@@ -45,7 +48,21 @@ export function CustomerPicker({ value, onChange, disabled, autoFocus, error }: 
   }, [open]);
 
   const q = useReceivableCustomers(search, open && !value);
-  const rows = q.data ?? [];
+  // A full 10-digit mobile may be someone who owes nothing (fully paid, or an advance only) or a
+  // brand-new customer paying an advance before any bill: look that exact key up, and offer
+  // "new customer" when it is nobody yet. Money is never received for a fake bill.
+  const typedKey = sanitizeMobileInput(search);
+  const isFullMobile = typedKey.length === BILL_MOBILE_DIGITS;
+  const exact = useReceivableCustomer(allowNew && isFullMobile && open && !value ? typedKey : null);
+  const found = q.data ?? [];
+  const exactRow = exact.data?.[0];
+  const rows: ReceivableCustomer[] = [
+    ...found,
+    ...(exactRow && !found.some((c) => c.customerKey === exactRow.customerKey) ? [exactRow] : []),
+    ...(allowNew && isFullMobile && exact.data && !exactRow && !found.some((c) => c.customerKey === typedKey)
+      ? [{ customerKey: typedKey, customerName: '', mobileNumber: typedKey, billCount: 0, pendingBillCount: 0, totalBilled: 0, totalPaid: 0, totalOutstanding: 0 }]
+      : []),
+  ];
 
   const pick = (c: ReceivableCustomer) => {
     onChange(c);
@@ -111,7 +128,10 @@ export function CustomerPicker({ value, onChange, disabled, autoFocus, error }: 
           {q.isLoading && <li className="flex items-center gap-2 px-3 py-2 text-[13px] text-gray-500"><Spinner className="h-3 w-3" /> Searching…</li>}
           {q.isError && <li className="px-3 py-2 text-[13px] text-red-600">Customers could not be loaded.</li>}
           {!q.isLoading && !q.isError && rows.length === 0 && (
-            <li className="px-3 py-2 text-[13px] text-gray-500">{search ? 'No customer with an outstanding balance matches.' : 'No customer has anything outstanding.'}</li>
+            <li className="px-3 py-2 text-[13px] text-gray-500">
+              {search ? 'No customer with an outstanding balance matches.' : 'No customer has anything outstanding.'}
+              {allowNew && !isFullMobile && ' Type a 10-digit mobile to receive an advance.'}
+            </li>
           )}
           {rows.map((c, i) => (
             <li
@@ -124,12 +144,18 @@ export function CustomerPicker({ value, onChange, disabled, autoFocus, error }: 
               className={cx('flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-[13px]', i === active ? 'bg-primary-lighter/60' : 'hover:bg-gray-50')}
             >
               <span className="min-w-0 truncate">
-                <span className="text-gray-900">{c.customerName}</span>
+                <span className="text-gray-900">{c.customerName || 'New customer'}</span>
                 <span className="ml-2 text-gray-500">{c.mobileNumber}</span>
               </span>
               <span className="shrink-0 text-right tabular-nums text-gray-700">
-                {fmtMoney(c.totalOutstanding)}
-                <span className="ml-1.5 text-[12px] text-gray-500">{c.pendingBillCount} {c.pendingBillCount === 1 ? 'bill' : 'bills'}</span>
+                {c.billCount === 0 ? (
+                  <span className="text-[12px] text-gray-500">No bill yet — advance</span>
+                ) : (
+                  <>
+                    {fmtMoney(c.totalOutstanding)}
+                    <span className="ml-1.5 text-[12px] text-gray-500">{c.pendingBillCount} {c.pendingBillCount === 1 ? 'bill' : 'bills'}</span>
+                  </>
+                )}
               </span>
             </li>
           ))}

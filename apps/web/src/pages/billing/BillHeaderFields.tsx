@@ -127,7 +127,7 @@ export function BillHeaderFields({ bill, bookOptions, booksLoading, taxMode, lin
         <Field label="Baby Name" error={errors.babyName?.message}>
           <TextInput size="sm" placeholder="Enter baby name" maxLength={BILL_LIMITS.babyName} disabled={disabled} {...register('babyName', { setValueAs: trimmed })} />
         </Field>
-        <Field label="Delivery Date" error={errors.deliveryDate?.message}>
+        <Field label="Planned Delivery" error={errors.deliveryDate?.message}>
           <Controller control={control} name="deliveryDate" rules={{ validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" disabled={disabled} />} />
         </Field>
         <Field

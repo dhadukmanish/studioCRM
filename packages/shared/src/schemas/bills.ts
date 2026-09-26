@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BILL_DISCOUNT_TYPES, INVOICE_TAX_MODES, type BillDiscountType } from '../enums.js';
 import { calculateBill } from '../billing.js';
+import { billAdvanceSchema } from '../receipts.js';
 
 /**
  * Bill — the studio's invoice document: a header, its customer snapshot and at least one line.
@@ -298,12 +299,24 @@ const nextVisitRule = (v: { billDate: string; nextVisitDate: string | null }, ct
   }
 };
 
-/** Create: the whole document in one payload, book included. */
-export const billSchema = billBaseSchema.superRefine((v, ctx) => {
-  birthDateRule(v, ctx);
-  discountRule(v, ctx);
-  nextVisitRule(v, ctx);
-});
+/**
+ * Create: the whole document in one payload, book included — plus two things only a NEW bill has:
+ *
+ *  - `advance`: money received with the bill (`billAdvanceSchema`), made into a real receipt in the
+ *    same transaction. Absent / null = none, and then no payment field is required at all.
+ *  - `requestId`: one id per new-bill form. A retried or double-submitted create with the same id
+ *    returns the bill that id already made — never a second bill, number or receipt.
+ */
+export const billSchema = billBaseSchema
+  .extend({
+    advance: billAdvanceSchema.nullish().transform((v) => v ?? null),
+    requestId: z.string().uuid('Invalid request id').nullish().transform((v) => v ?? null),
+  })
+  .superRefine((v, ctx) => {
+    birthDateRule(v, ctx);
+    discountRule(v, ctx);
+    nextVisitRule(v, ctx);
+  });
 export type BillInput = z.infer<typeof billSchema>;
 
 /**

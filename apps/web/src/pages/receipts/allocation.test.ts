@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RECEIPT_LIMITS, type PendingBill } from '@erp/shared';
-import { allocatedCount, allocatedPaise, autoAllocate, payAllInFull } from './allocation';
+import { allocatedCount, allocatedPaise, autoAllocate, payAllInFull, splitPayment } from './allocation';
 
 const bill = (i: number, outstanding: number): PendingBill => ({
   id: `b${i}`,
@@ -41,5 +41,16 @@ describe('the per-receipt bill limit is never applied silently', () => {
     const bills = [bill(1, 10000), bill(2, 5000), bill(3, 8000)];
     expect(autoAllocate(bills, 1200000)).toEqual({ allocations: { b1: '10000.00', b2: '2000.00' }, leftoverPaise: 0, capped: false });
     expect(autoAllocate(bills, 2400000)).toMatchObject({ leftoverPaise: 100000, capped: false });
+  });
+});
+
+describe('splitPayment (quick Receive payment against one bill)', () => {
+  it('up to Due goes on the bill; beyond Due is advance; short of Due leaves the rest due — in paise', () => {
+    expect(splitPayment(500000, 500000)).toEqual({ toBill: 500000, toAdvance: 0, stillDue: 0 });
+    expect(splitPayment(700000, 500000)).toEqual({ toBill: 500000, toAdvance: 200000, stillDue: 0 });
+    expect(splitPayment(200001, 500000)).toEqual({ toBill: 200001, toAdvance: 0, stillDue: 299999 });
+  });
+  it('a bill with nothing due takes nothing — the whole amount is advance', () => {
+    expect(splitPayment(100000, 0)).toEqual({ toBill: 0, toAdvance: 100000, stillDue: 0 });
   });
 });

@@ -67,3 +67,7 @@ export function autoAllocate(bills: PendingBill[], targetPaise: number, max: num
   }
   return { allocations, leftoverPaise: remaining, capped: false };
 }
+
+
+/** One payment against one bill — the shared rule (`@erp/shared`), re-exported for the receipt screens. */
+export { splitPayment } from '@erp/shared';

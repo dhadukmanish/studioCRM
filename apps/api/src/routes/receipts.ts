@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { and, desc, eq } from 'drizzle-orm';
-import { PAYMENT_MODES, receiptCancelSchema, receiptSchema, type PaymentMode } from '@erp/shared';
+import { PAYMENT_MODES, applyAdvanceSchema, receiptCancelSchema, receiptSchema, reverseApplicationSchema, type PaymentMode } from '@erp/shared';
 import { schema } from '../db/client';
 import { parse } from '../lib/validate';
 import { validation } from '../lib/errors';
@@ -9,9 +9,12 @@ import { parseListQuery } from '../lib/list';
 import { filterWhere, sortBy, type ColumnMap } from '../lib/filters';
 import { logActivity } from '../services/activity';
 import {
+  applyAdvance,
   cancelReceipt,
   countReceipts,
   createReceipt,
+  customerAdvance,
+  reverseApplication,
   getReceipt,
   listPaymentAccounts,
   listPendingBills,
@@ -71,6 +74,35 @@ export async function receiptRoutes(app: FastifyInstance) {
     return ok(await listPaymentAccounts(req.user.tenantId, mode as PaymentMode));
   });
 
+  /** A customer's advance still available, oldest receipt first. */
+  app.get(`${BASE}/advance`, { preHandler: app.requirePermission(PERMISSION) }, async (req) => {
+    const { customer } = req.query as { customer?: string };
+    return ok(await customerAdvance(req.user.tenantId, typeof customer === 'string' ? customer : ''));
+  });
+
+  /**
+   * Apply advance to a bill — money movement, so receipts CREATE. The amount is explicit; the
+   * server spends the customer's oldest advance first, under lock (`applyAdvance`).
+   */
+  app.post(`${BASE}/apply-advance`, { preHandler: app.requirePermission(PERMISSION, 'create') }, async (req) => {
+    const body = parse(applyAdvanceSchema, req.body);
+    const r = await applyAdvance(req.user.tenantId, req.user.id, body.billId, body.amount);
+    await logActivity(req, 'bill', body.billId, 'advance_applied', `Advance ₹${r.amount.toFixed(2)} applied to Bill ${r.billLabel}`, {
+      amount: r.amount,
+      receipts: r.used.map((u) => ({ receiptId: u.receiptId, receiptNumber: u.receiptNumber, amount: u.amount })),
+    });
+    return ok(r, `Advance ₹${r.amount.toFixed(2)} applied to Bill ${r.billLabel}`);
+  });
+
+  /** Reverse an applied advance — receipts UPDATE, like cancelling. The row stays, marked REVERSED. */
+  app.post(`${BASE}/applications/:id/reverse`, { preHandler: app.requirePermission(PERMISSION, 'update') }, async (req) => {
+    const { id } = req.params as { id: string };
+    const { reason } = parse(reverseApplicationSchema, req.body ?? {});
+    const r = await reverseApplication(req.user.tenantId, req.user.id, id, reason);
+    await logActivity(req, 'bill', r.billId, 'advance_reversed', `Advance ₹${r.amount.toFixed(2)} from Receipt No. ${r.receiptNumber} reversed on Bill ${r.billLabel}`, { applicationId: id, receiptId: r.receiptId, amount: r.amount, reason });
+    return ok(r, `Advance ₹${r.amount.toFixed(2)} reversed — it is available again`);
+  });
+
   app.get(`${BASE}/:id`, { preHandler: app.requirePermission(PERMISSION) }, async (req) => {
     const { id } = req.params as { id: string };
     return ok(await getReceipt(req.user.tenantId, id));
@@ -81,14 +113,15 @@ export async function receiptRoutes(app: FastifyInstance) {
     const body = parse(receiptSchema, req.body);
     const id = await createReceipt(req.user.tenantId, req.user.id, body);
     const created = await getReceipt(req.user.tenantId, id);
-    // Receipt, amount and what it settled — no mobile, no account number.
-    await logActivity(req, 'receipt', id, 'receipt_created', `${LABEL} No. ${created.receiptNumber} for ₹${created.amount.toFixed(2)} created`, {
+    // Receipt, amount, what it settled and what it kept as advance — no mobile, no account number.
+    await logActivity(req, 'receipt', id, created.availableAmount > 0 ? 'advance_received' : 'receipt_created', `${LABEL} No. ${created.receiptNumber} for ₹${created.amount.toFixed(2)} created${created.availableAmount > 0 ? ` (advance ₹${created.availableAmount.toFixed(2)})` : ''}`, {
       receiptNumber: created.receiptNumber,
       amount: created.amount,
+      advance: created.availableAmount,
       paymentMode: created.paymentMode,
       bills: created.allocations.map((a) => ({ billId: a.billId, bill: `${a.bookNumber}/${a.billNumber}`, amount: a.amount })),
     });
-    return ok(created, `${LABEL} No. ${created.receiptNumber} saved`);
+    return ok(created, `${LABEL} No. ${created.receiptNumber} saved${created.availableAmount > 0 ? ` — ₹${created.availableAmount.toFixed(2)} kept as advance` : ''}`);
   });
 
   /** Cancel — never delete. The receipt and its allocations stay, marked CANCELLED. */

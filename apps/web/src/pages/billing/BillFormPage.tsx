@@ -24,10 +24,13 @@ import { toast } from '@/lib/toast';
 import { ShareInvoiceDialog } from '@/components/invoice/ShareInvoiceDialog';
 import { applyApiErrors, useBooksLookup, useDefaultBillingBook, useItemsLookup, useSave, type AppointmentLookup } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
-import { fmtMoney, todayISO } from '@/lib/format';
+import { cx, fmtMoney, todayISO } from '@/lib/format';
 import { BillHeaderFields } from './BillHeaderFields';
 import { BillLinesGrid } from './BillLinesGrid';
 import { BillPaymentsPanel } from './BillPaymentsPanel';
+import { BillStudioStatus } from './BillStudioStatus';
+import { BillAdvanceEntry, EMPTY_ADVANCE, advancePayload, type AdvanceDraft, type AdvanceErrors } from './BillAdvanceEntry';
+import { useBillPayments, useCustomerAdvance } from '@/lib/receipts';
 import { emptyLine, type BillFormValues, type BillLineFormValues, type BillRecord } from './types';
 
 const PERMISSION = 'operations_billing';
@@ -124,6 +127,27 @@ const toFormLine = (l: BillRecord['items'][number]): BillLineFormValues => ({
 /** Optional text as the API wants it: trimmed, and empty is NULL, never '' and never undefined. */
 const blank = (v?: string | null) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
 
+/** A v4 UUID for the create request — `randomUUID` where the browser has it (secure contexts), else from random bytes. */
+function newRequestId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/** The server's refusals of the advance (`advance.amount`, `advance.accountId` …) back onto the Advance fields. */
+function advanceErrorsOf(e: unknown): AdvanceErrors {
+  if (!(e instanceof ApiError) || !Array.isArray(e.details)) return {};
+  const out: AdvanceErrors = {};
+  for (const d of e.details as { path?: (string | number)[]; message: string }[]) {
+    const [first, field] = d.path ?? [];
+    if (first === 'advance') out[field === 'accountId' || field === 'paymentMode' ? field : 'amount'] = d.message;
+  }
+  return out;
+}
+
 function BillForm({ bill }: { bill?: BillRecord }) {
   const nav = useNavigate();
   const can = useAuthStore((s) => s.can);
@@ -181,6 +205,21 @@ function BillForm({ bill }: { bill?: BillRecord }) {
   const [lineCountError, setLineCountError] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  /** A NEW bill's Advance box (money received now) — becomes a receipt in the bill's own save. */
+  const canAdvance = !bill && can('operations_receipts', 'create');
+  const [advance, setAdvance] = useState<AdvanceDraft>(EMPTY_ADVANCE);
+  const [advanceErrors, setAdvanceErrors] = useState<AdvanceErrors>({});
+  const changeAdvance = useCallback((next: AdvanceDraft) => {
+    setAdvance(next);
+    setAdvanceErrors({});
+  }, []);
+  /** One id per new-bill form: a retried or double-submitted save returns the bill it already made. */
+  const [requestId] = useState(newRequestId);
+  /** Money the customer paid EARLIER (before this bill) — shown, applied only after saving, by hand. */
+  const typedMobile = normalizeMobile(useWatch({ control, name: 'mobileNumber' }) ?? '');
+  const earlier = useCustomerAdvance(!bill && can('operations_receipts') && typedMobile.length === 10 ? typedMobile : null);
+  /** A saved bill's Paid / Due — the server's derived figures, never recomputed here. */
+  const payments = useBillPayments(bill?.id);
 
   /**
    * The preview. Every figure on this screen comes out of `calculateBill` in `@erp/shared` —
@@ -268,10 +307,19 @@ function BillForm({ bill }: { bill?: BillRecord }) {
        */
       items: lines.map((l) => ({ itemId: l.itemId, subItemId: l.subItemId, quantity: l.quantity, rate: l.rate, remark: blank(l.remark) })),
     };
+    // Only a new bill carries money; an existing bill's payments go through receipts.
+    const adv = canAdvance ? advancePayload(advance) : { advance: null, errors: {} };
+    setAdvanceErrors(adv.errors);
+    if (Object.keys(adv.errors).length) return;
     save.mutate(
       // The book and the bill number are fixed at creation, so an update does not carry them.
-      bill ? { method: 'put', url: `${URL}/${bill.id}`, body: header } : { method: 'post', url: URL, body: { ...header, bookId: v.bookId } },
-      { onError: (e) => applyApiErrors(e, setError) },
+      bill ? { method: 'put', url: `${URL}/${bill.id}`, body: header } : { method: 'post', url: URL, body: { ...header, bookId: v.bookId, advance: adv.advance, requestId } },
+      {
+        onError: (e) => {
+          applyApiErrors(e, setError);
+          setAdvanceErrors(advanceErrorsOf(e));
+        },
+      },
     );
   });
 
@@ -393,10 +441,13 @@ function BillForm({ bill }: { bill?: BillRecord }) {
         </div>
 
         <div className="card flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0 flex-1 space-y-3">
+          {/* Beside the totals: the GST detail and — on a saved bill — its Studio Status, side by
+              side where there is room (xl), stacked below that. Neither squeezes the totals. */}
+          <div className={cx('grid min-w-0 flex-1 gap-4', taxMode === 'WITH_GST' && bill && 'min-[1400px]:grid-cols-[minmax(0,1fr)_auto]')}>
             {/* Only where tax is actually charged. A rate-wise table on a bill that charges
                 nothing would read as a claim that those rates were billed. */}
             {taxMode === 'WITH_GST' && <GstDetails rows={preview.gstSummary} gstTotal={preview.totals.gstAmount} taxableTotal={preview.totals.netTaxable} />}
+            {bill && <BillStudioStatus billId={bill.id} plannedDelivery={bill.deliveryDate} dirty={isDirty} className={cx(taxMode === 'WITH_GST' && 'min-[1400px]:border-l min-[1400px]:border-line min-[1400px]:pl-4')} />}
           </div>
 
           <dl className="w-full shrink-0 space-y-1.5 text-[13px] sm:w-[300px]">
@@ -456,11 +507,36 @@ function BillForm({ bill }: { bill?: BillRecord }) {
               <dt className="text-[14px] font-medium text-gray-700">Grand Total</dt>
               <dd className="text-[18px] font-semibold tabular-nums text-gray-900">{fmtMoney(preview.totals.grandTotal)}</dd>
             </div>
+            {/* New bill: money received with it. Saved bill: what has been paid and what is due — the
+                server's derived figures (receipts + applied advance), never recomputed here. */}
+            {canAdvance && (
+              <BillAdvanceEntry
+                draft={advance}
+                onChange={changeAdvance}
+                errors={advanceErrors}
+                grandTotal={preview.totals.grandTotal}
+                earlierAdvance={earlier.data?.availableAdvance ?? 0}
+                disabled={save.isPending}
+              />
+            )}
+            {bill && payments.data && (
+              <>
+                <div className="flex items-baseline justify-between gap-4">
+                  <dt className="text-gray-500">Paid</dt>
+                  <dd className="tabular-nums text-gray-800">{fmtMoney(payments.data.paidAmount)}</dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-4">
+                  <dt className="text-[14px] font-medium text-gray-700">Due</dt>
+                  <dd className="text-[15px] font-semibold tabular-nums text-gray-900">{fmtMoney(payments.data.outstandingAmount)}</dd>
+                </div>
+                {isDirty && <p className="text-right text-[11.5px] text-gray-500">Paid and Due are the saved bill’s.</p>}
+              </>
+            )}
           </dl>
         </div>
 
         {/* A saved bill's money received so far. Its figures are the server's, from active receipts. */}
-        {bill && <BillPaymentsPanel billId={bill.id} customerKey={bill.mobileSearch} dirty={isDirty} />}
+        {bill && <BillPaymentsPanel billId={bill.id} customerKey={bill.mobileSearch} customerName={bill.customerName} reference={`${bill.bookNumber}/${bill.billNumber}`} dirty={isDirty} />}
 
         <div className="sticky bottom-0 z-10 flex items-center justify-end gap-3 border-t border-line bg-page py-3">
           {!allowed && <span className="mr-auto text-[12px] text-gray-500">You don’t have permission to {bill ? 'edit' : 'create'} bills.</span>}

@@ -2,10 +2,8 @@ import { and, asc, count, desc, eq, gt, gte, lte, sql, type SQL } from 'drizzle-
 import {
   AGING_BUCKETS,
   AGING_BUCKET_MAX_DAYS,
-  DEFAULT_TIME_ZONE,
   RECEIVABLES_EXPORT_MAX_ROWS,
   normalizeMobile,
-  todayInTimeZone,
   type AgingAmounts,
   type AgingBucket,
   type BillPaymentStatus,
@@ -46,6 +44,7 @@ const B = schema.bills;
 const BK = schema.books;
 const R = schema.receipts;
 const RA = schema.receiptAllocations;
+const AA = schema.advanceApplications;
 const A = schema.accounts;
 
 
@@ -60,12 +59,7 @@ export interface ReceivablesScope {
 
 /* ------------------------------------------------------------------- dates -- */
 
-/** Today's business date for the tenant: the default company's time zone decides, never the server's or a browser's. */
-export async function businessToday(tenantId: string): Promise<string> {
-  const C = schema.companies;
-  const [company] = await db.select({ timeZone: C.timeZone }).from(C).where(eq(C.tenantId, tenantId)).orderBy(desc(C.isDefault), asc(C.createdAt)).limit(1);
-  return todayInTimeZone(company?.timeZone ?? DEFAULT_TIME_ZONE);
-}
+export { businessToday } from './company';
 
 /* -------------------------------------------------------------- the model -- */
 
@@ -111,7 +105,7 @@ const agingOf = (r: Record<string, unknown>, prefix = ''): AgingAmounts =>
   Object.fromEntries(AGING_BUCKETS.map((b) => [b, num(r[`${prefix}${b}`])])) as AgingAmounts;
 
 /** Refuse — never silently cut — an export or print past the row ceiling. */
-function assertExportable(total: number) {
+export function assertExportable(total: number) {
   if (total > RECEIVABLES_EXPORT_MAX_ROWS) {
     throw new AppError('REPORT_TOO_LARGE', `This report has ${total} rows; export and print carry at most ${RECEIVABLES_EXPORT_MAX_ROWS}. Narrow the filters and try again.`, 422);
   }
@@ -415,10 +409,33 @@ export async function receivableCustomerDetail(scope: ReceivablesScope, customer
     .innerJoin(BK, and(eq(BK.id, B.bookId), eq(BK.tenantId, B.tenantId)))
     .where(and(eq(RA.tenantId, scope.tenantId), m.where, eq(B.mobileSearch, key), lte(R.receiptDate, scope.asOf)))
     .orderBy(asc(R.receiptDate), asc(R.receiptNumber), asc(B.billDate), asc(B.billNumber));
+  // Advance applied to these bills on or before As of. Reversed applications count nowhere, so they
+  // are not listed; applications of a since-cancelled receipt are listed under it, as cancelled.
+  const applied = await db
+    .select({
+      receiptId: R.id,
+      receiptNumber: R.receiptNumber,
+      receiptDate: R.receiptDate,
+      paymentMode: R.paymentMode,
+      accountName: A.accountName,
+      receiptAmount: R.amount,
+      status: R.status,
+      billId: B.id,
+      bookNumber: BK.bookNumber,
+      billNumber: B.billNumber,
+      amount: AA.amount,
+    })
+    .from(AA)
+    .innerJoin(R, and(eq(R.id, AA.receiptId), eq(R.tenantId, AA.tenantId)))
+    .innerJoin(A, and(eq(A.id, R.accountId), eq(A.tenantId, R.tenantId)))
+    .innerJoin(B, and(eq(B.id, AA.billId), eq(B.tenantId, AA.tenantId)))
+    .innerJoin(BK, and(eq(BK.id, B.bookId), eq(BK.tenantId, B.tenantId)))
+    .where(and(eq(AA.tenantId, scope.tenantId), m.where, eq(B.mobileSearch, key), eq(AA.status, 'ACTIVE'), lte(AA.appliedOn, scope.asOf)))
+    .orderBy(asc(AA.appliedOn), asc(R.receiptNumber), asc(B.billDate), asc(B.billNumber));
 
-  // One row per receipt; its allocations to this customer's in-scope bills nested under it.
+  // One row per receipt; its allocations (and applied advance) to this customer's in-scope bills nested under it.
   const byReceipt = new Map<string, ReceivableReceiptRow & { paise: number }>();
-  for (const a of allocated) {
+  for (const a of [...allocated, ...applied]) {
     let r = byReceipt.get(a.receiptId);
     if (!r) {
       r = {
@@ -439,6 +456,8 @@ export async function receivableCustomerDetail(scope: ReceivablesScope, customer
     r.paise += Math.round(num(a.amount) * 100);
     r.allocations.push({ billId: a.billId, bookNumber: a.bookNumber, billNumber: a.billNumber, amount: num(a.amount) });
   }
-  const receipts = [...byReceipt.values()].map(({ paise, ...r }) => ({ ...r, allocatedAmount: paise / 100 }));
+  const receipts = [...byReceipt.values()]
+    .sort((a, b) => a.receiptDate.localeCompare(b.receiptDate) || a.receiptNumber - b.receiptNumber)
+    .map(({ paise, ...r }) => ({ ...r, allocatedAmount: paise / 100 }));
   return { asOf: scope.asOf, customer: rows[0], bills, receipts };
 }
