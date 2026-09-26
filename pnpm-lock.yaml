@@ -154,7 +154,7 @@ importers:
         specifier: ^5.4.10
         version: 5.4.21(@types/node@22.20.4)
       vitest:
-        specifier: 3.2.7
+        specifier: ^3.2.7
         version: 3.2.7(@types/node@22.20.4)(jsdom@26.1.0)
 
   packages/shared:
