@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, ArrowUpDown, Bookmark, ChevronDown, ChevronLeft, ChevronRight, Columns3, Download, Filter, GripVertical, Lock, MoreVertical, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, Upload, X } from 'lucide-react';
 import { FILTER_OPS, OPS_WITHOUT_VALUE, isIsoDate, type FilterFieldDef, type ListFilter, type FilterOp } from '@erp/shared';
@@ -70,11 +70,19 @@ interface Props<T> {
   rowActions?: (row: T) => ReactNode;
   footer?: ReactNode;
   dense?: boolean;
+  /** Narrower cell padding (12px instead of 20px) for wide, figure-heavy tables such as reports. */
+  compact?: boolean;
   hideSearch?: boolean;
   hidePagination?: boolean;
   searchPlaceholder?: string;
   /** sort / filter rows in the browser (for lists the API returns whole) */
   clientSide?: boolean;
+  /**
+   * Phone-width rendering of one row. When given, below the `sm` breakpoint the rows show as
+   * stacked cards instead of a table squeezed into unreadable columns; the toolbar, sorting and
+   * pagination are unchanged.
+   */
+  mobileCard?: (row: T, index: number) => ReactNode;
 }
 
 /* ============================================================================
@@ -255,7 +263,7 @@ function CustomizeColumns({ open, onClose, columns, layout, onSave }: { open: bo
 /* ============================================================================
  * DataTable
  * ========================================================================== */
-export function DataTable<T>({ columns, rows, total, loading, state, onStateChange, rowKey, onRowClick, selectable, selected = [], onSelectedChange, toolbar, actions, filterFields, storageKey, columnsButton, onRefresh, onImport, onExport, emptyTitle, emptyDescription, rowActions, footer, dense, hideSearch, hidePagination, searchPlaceholder, clientSide }: Props<T>) {
+export function DataTable<T>({ columns, rows, total, loading, state, onStateChange, rowKey, onRowClick, selectable, selected = [], onSelectedChange, toolbar, actions, filterFields, storageKey, columnsButton, onRefresh, onImport, onExport, emptyTitle, emptyDescription, rowActions, footer, dense, compact, hideSearch, hidePagination, searchPlaceholder, clientSide, mobileCard }: Props<T>) {
   const qc = useQueryClient();
   const [showFilters, setShowFilters] = useState(false);
   const [customize, setCustomize] = useState(false);
@@ -347,8 +355,25 @@ export function DataTable<T>({ columns, rows, total, loading, state, onStateChan
       </div>
       {showFilters && fields.length > 0 && <FilterBuilder fields={fields} value={activeFilters} storageKey={storageKey} onClose={() => setShowFilters(false)} onApply={(f) => onStateChange?.({ filters: f })} />}
 
+      {mobileCard && (
+        <ul className="divide-y divide-line sm:hidden">
+          {loading && shown.length === 0 && <li className="py-10 text-center text-gray-500"><Spinner className="inline h-5 w-5" /></li>}
+          {!loading && shown.length === 0 && <li><EmptyState title={emptyTitle} description={emptyDescription} /></li>}
+          {shown.map((r, i) => (
+            <li
+              key={rowKey(r)}
+              onClick={() => onRowClick?.(r)}
+              {...(onRowClick ? { role: 'button', tabIndex: 0, onKeyDown: (e: KeyboardEvent) => (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget && (e.preventDefault(), onRowClick(r)) } : {})}
+              className={cx('flex items-start gap-2 px-4 py-3', onRowClick && 'cursor-pointer active:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none', loading && 'opacity-60')}
+            >
+              <div className="min-w-0 flex-1">{mobileCard(r, i)}</div>
+              {rowActions && <div onClick={(e) => e.stopPropagation()}>{rowActions(r)}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
       {/* table */}
-      <div className="overflow-x-auto">
+      <div className={cx('overflow-x-auto', mobileCard && 'hidden sm:block')}>
         <table className="min-w-full">
           <thead className="bg-head border-b border-line">
             <tr>
@@ -356,11 +381,11 @@ export function DataTable<T>({ columns, rows, total, loading, state, onStateChan
                 <th className="table-head w-10 !px-4"><Checkbox checked={allChecked} onChange={toggleAll} /></th>
               )}
               {cols.map((c) => (
-                <th key={c.key} style={{ width: c.width }} className={cx('table-head group', c.sortable !== false && 'cursor-pointer select-none hover:text-gray-800', c.align === 'right' && 'text-right', c.align === 'center' && 'text-center')} onClick={() => onSort(c)}>
+                <th key={c.key} style={{ width: c.width }} className={cx('table-head group', compact && '!px-3', c.sortable !== false && 'cursor-pointer select-none hover:text-gray-800', c.align === 'right' && 'text-right', c.align === 'center' && 'text-center')} onClick={() => onSort(c)}>
                   <span className="inline-flex items-center gap-1">{c.header}{sortIcon(c)}</span>
                 </th>
               ))}
-              {rowActions && <th className="table-head w-16 text-right">Actions</th>}
+              {rowActions && <th className={cx('table-head w-16 text-right', compact && '!px-3')}>Actions</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -381,11 +406,11 @@ export function DataTable<T>({ columns, rows, total, loading, state, onStateChan
                     </td>
                   )}
                   {cols.map((c) => (
-                    <td key={c.key} className={cx('table-cell', dense && '!py-2.5', c.align === 'right' && 'text-right', c.align === 'center' && 'text-center', c.className)}>
+                    <td key={c.key} className={cx('table-cell', dense && '!py-2.5', compact && '!px-3', c.align === 'right' && 'text-right', c.align === 'center' && 'text-center', c.className)}>
                       {c.render ? c.render(r, i) : ((r as any)[c.key] ?? '-') as ReactNode}
                     </td>
                   ))}
-                  {rowActions && <td className={cx('table-cell text-right', dense && '!py-2.5')} onClick={(e) => e.stopPropagation()}>{rowActions(r)}</td>}
+                  {rowActions && <td className={cx('table-cell text-right', dense && '!py-2.5', compact && '!px-3')} onClick={(e) => e.stopPropagation()}>{rowActions(r)}</td>}
                 </tr>
               );
             })}

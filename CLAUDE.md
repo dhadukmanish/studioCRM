@@ -10,8 +10,10 @@ plus invoice templates, the invoice preview, print and server-side PDF (`docs/IN
 WhatsApp invoice sharing is browser click-to-chat carrying a secure public invoice link (`/i/<token>`,
 `docs/WHATSAPP_SHARING.md`) — it never claims a message was sent. Receipts record money received
 against bills — one receipt across many bills, partial and multiple payments, derived Paid /
-Outstanding, cancel-never-delete (`docs/RECEIPTS_PAYMENTS.md`). The ledger / GL, customer advances,
-the CGST/SGST/IGST split and reports are not started.
+Outstanding, cancel-never-delete (`docs/RECEIPTS_PAYMENTS.md`). Receivables reports — customer
+Summary, Outstanding Bills, Aging from bill date, drill-down, CSV, print — read the same derived
+figures (`docs/RECEIVABLES_REPORTS.md`). The ledger / GL, customer advances, a customer master and
+the CGST/SGST/IGST split are not started.
 Billing honours two contracts: `docs/BILL_NUMBERING.md` for identity and `docs/BILLING_CALCULATION.md`
 for money. Current implementation status lives in `.claude/HANDOFF.md`.
 
@@ -103,7 +105,8 @@ Dev servers are often already running from an earlier session — probe
     allocations exactly; it is never edited or deleted, only cancelled. Anything that can change a
     bill's payment position — creating a receipt, editing or deleting a bill — takes the bill's
     `FOR UPDATE` lock first (receipts lock in bill-id order), so Paid can never exceed Grand Total.
-    A bill with any receipt history is never deleted (`docs/RECEIPTS_PAYMENTS.md`).
+    A bill with any receipt history is never deleted (`docs/RECEIPTS_PAYMENTS.md`). Reports aggregate
+    that same definition (`services/receivables.ts`) — never a stored balance or a second formula.
 
 ## Architecture boundaries
 
@@ -149,7 +152,10 @@ imported — fails a test, not a user's page. Cover behavior worth protecting �
 document numbering, permission logic, status transitions, boundary validation — not
 implementation details. Pure schema/service tests always run; suites that need a database are
 gated on `TEST_DATABASE_URL` and skip without it, because the only database configured here is
-a shared hosted one. `pnpm typecheck` plus a real browser/API check remains part of the bar.
+a shared hosted one. A DB suite imports db-touching modules only dynamically, inside `beforeAll`
+(a top-level import connects with the hosted URL from `.env` before the test can switch it), and
+runs with BOTH `DATABASE_URL` and `TEST_DATABASE_URL` set to the throwaway database.
+`pnpm typecheck` plus a real browser/API check remains part of the bar.
 See `.claude/skills/studio-testing`.
 
 ## Agent delegation
@@ -203,5 +209,7 @@ return findings, not file dumps. Saving tokens never justifies guessing at corre
   click-to-chat, number normalisation, message placeholders, audit ("opened", never "sent")
 - `docs/RECEIPTS_PAYMENTS.md` — receipts and allocation, derived Paid/Outstanding/status, the
   customer key, Cash/Bank account rule, credit, locking, cancel, bill edit/delete protection, RBAC
+- `docs/RECEIVABLES_REPORTS.md` — receivables reports: shared scope, As-of semantics and limits,
+  aging anchor (bill date) and buckets, reconciliation, CSV (formula-injection guard), print, RBAC
 - `.claude/HANDOFF.md` — live project state, DB target, gotchas, pending work (`/handoff`)
 - `README.md` — boilerplate feature map and the "add a module" recipe

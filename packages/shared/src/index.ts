@@ -8,4 +8,5 @@ export * from './dates.js';
 export * from './invoice.js';
 export * from './whatsapp.js';
 export * from './receipts.js';
+export * from './receivables.js';
 export * from './schemas/index.js';

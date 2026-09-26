@@ -203,7 +203,7 @@ function BillForm({ bill }: { bill?: BillRecord }) {
     [addLine, fields.length],
   );
 
-  const save = useSave<Record<string, unknown>, BillRecord>({ invalidate: [QUERY_KEY, 'bill-invoice', 'bill-payments', 'receipts'], onSuccess: () => nav('/modules/billing') });
+  const save = useSave<Record<string, unknown>, BillRecord>({ invalidate: [QUERY_KEY, 'bill-invoice', 'bill-payments', 'receipts', 'receivables'], onSuccess: () => nav('/modules/billing') });
 
   const submit = handleSubmit((v) => {
     if (lines.length === 0) {

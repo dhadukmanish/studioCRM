@@ -14,8 +14,8 @@ import { api, qs } from '@/lib/api';
 export const RECEIPTS_KEY = 'receipts';
 export const BILL_PAYMENTS_KEY = 'bill-payments';
 export const RECEIPTS_URL = '/api/receipts';
-/** What a receipt save or cancel changes: receipts, the bills' paid/outstanding, and each bill's history. */
-export const RECEIPT_INVALIDATES = [RECEIPTS_KEY, 'bills', BILL_PAYMENTS_KEY];
+/** What a receipt save or cancel changes: receipts, the bills' paid/outstanding, each bill's history, and the receivables reports. */
+export const RECEIPT_INVALIDATES = [RECEIPTS_KEY, 'bills', BILL_PAYMENTS_KEY, 'receivables'];
 
 /** Customers with something outstanding, matching a name or mobile. The caller debounces. */
 export const useReceivableCustomers = (search: string, enabled = true) =>
@@ -66,5 +66,5 @@ export const useBillPayments = (billId?: string) =>
     enabled: !!billId,
   });
 
-/** Where "Receive payment" on a bill goes: the new-receipt form, customer preselected, that bill prefilled. */
-export const receivePaymentHref = (customerKey: string, billId: string) => `/modules/receipts/new${qs({ customer: customerKey, bill: billId })}`;
+/** Where "Receive payment" goes: the new-receipt form, customer preselected, and that bill prefilled when one is named. */
+export const receivePaymentHref = (customerKey: string, billId?: string) => `/modules/receipts/new${qs({ customer: customerKey, bill: billId })}`;

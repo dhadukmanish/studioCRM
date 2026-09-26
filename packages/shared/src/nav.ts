@@ -30,6 +30,10 @@ export const NAV: NavSection[] = [
     ],
   },
   {
+    title: 'Reports',
+    items: [{ label: 'Receivables', href: '/modules/reports/receivables', icon: 'ChartColumn', permission: 'reports_receivables' }],
+  },
+  {
     title: 'Masters',
     items: [
       { label: 'Item Master', href: '/modules/masters/items', icon: 'Package', permission: 'masters_items' },

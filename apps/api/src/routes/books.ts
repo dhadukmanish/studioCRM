@@ -94,12 +94,14 @@ export async function bookRoutes(app: FastifyInstance) {
    * Lookup for pickers — Billing's book selector next. Active books only, because an inactive
    * book stays readable and reportable but is closed to new bills. Deliberately just the id
    * and the label: the counter is not a value a picker has any business carrying around.
+   * `includeInactive=1` (a report's Book filter) lists closed books too, marked `isActive: false`.
    */
   app.get('/api/common/lookups/books', { preHandler: app.authenticate }, async (req) => {
+    const includeInactive = (req.query as { includeInactive?: string }).includeInactive === '1';
     const rows = await db
-      .select({ id: schema.books.id, bookNumber: schema.books.bookNumber })
+      .select({ id: schema.books.id, bookNumber: schema.books.bookNumber, ...(includeInactive ? { isActive: schema.books.isActive } : {}) })
       .from(schema.books)
-      .where(and(eq(schema.books.tenantId, req.user.tenantId), eq(schema.books.isActive, true)))
+      .where(and(eq(schema.books.tenantId, req.user.tenantId), includeInactive ? undefined : eq(schema.books.isActive, true)))
       .orderBy(asc(schema.books.bookNumber));
     return ok(rows);
   });

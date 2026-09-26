@@ -30,7 +30,7 @@ export default function BillsPage() {
   const [shareId, setShareId] = useState<string | null>(null);
   const nav = useNavigate();
   const can = useAuthStore((s) => s.can);
-  const remove = useSave({ invalidate: [QUERY_KEY, 'bill-invoice', 'receipts'], onSuccess: () => setDel(null) });
+  const remove = useSave({ invalidate: [QUERY_KEY, 'bill-invoice', 'receipts', 'receivables'], onSuccess: () => setDel(null) });
   const canReceive = can('operations_receipts', 'create');
 
   const total = q.data?.total ?? 0;
@@ -121,6 +121,9 @@ export default function BillsPage() {
         storageKey={QUERY_KEY}
         columnsButton
         dense
+        // With real volume (4-digit bill numbers, lakh amounts, a page scrollbar) 20px cell padding pushed Actions
+        // ~15px past a 1440px screen; 12px keeps Outstanding, Payment and Actions in view.
+        compact
         columns={columns}
         rows={q.data?.rows ?? []}
         total={total}

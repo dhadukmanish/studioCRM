@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, ilike, inArray, or, type SQL } from 'drizzle-orm';
 import {
   calculateBill,
   fromPaise,
@@ -53,6 +53,33 @@ type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const B = schema.bills;
 const BI = schema.billItems;
+
+/* ------------------------------------------------------------------ search -- */
+
+/** Below this, a digit string is a document number, not a phone fragment. */
+const MIN_MOBILE_SEARCH_DIGITS = 4;
+/** The `integer` column's ceiling — `bill_number` cannot be compared past it. */
+const INT4_MAX = 2147483647;
+
+/**
+ * The bill search the Bills list and the receivables reports share, over `bills` joined to
+ * `books`. It covers the bill number, the customer, the mobile (in whatever shape it was typed)
+ * and the book. A term made only of digits is read as a bill number, so "25" finds Bill 25
+ * rather than every customer whose phone contains a 2 or a 5; a term with at least four digits
+ * additionally matches the normalized mobile key.
+ */
+export function billSearch(term: string | undefined): SQL | undefined {
+  if (!term) return undefined;
+  const digits = normalizeMobile(term);
+  const isNumber = /^\d+$/.test(term);
+  const asNumber = isNumber && Number(term) <= INT4_MAX ? Number(term) : null;
+  return or(
+    ...(isNumber ? [] : [ilike(B.customerName, `%${term}%`), ilike(B.mobileNumber, `%${term}%`), ilike(B.babyName, `%${term}%`)]),
+    ilike(schema.books.bookNumber, `%${term}%`),
+    ...(digits.length >= MIN_MOBILE_SEARCH_DIGITS ? [ilike(B.mobileSearch, `%${digits}%`)] : []),
+    ...(asNumber !== null ? [eq(B.billNumber, asNumber)] : []),
+  );
+}
 
 /* ----------------------------------------------------------------- shaping -- */
 

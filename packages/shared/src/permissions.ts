@@ -38,6 +38,7 @@ export const PERMISSION_MODULE_LABELS: Record<string, string> = {
   masters: 'Masters',
   admin: 'Administration',
   operations: 'Operations',
+  reports: 'Reports',
   settings: 'Settings',
 };
 
@@ -53,6 +54,9 @@ export const PERMISSIONS: PermissionDef[] = [
   { name: 'operations_billing', displayName: 'Billing', module: 'operations' },
   // Edit = cancel a receipt. A receipt is never edited or deleted — a wrong one is cancelled.
   { name: 'operations_receipts', displayName: 'Receipts', module: 'operations', actions: ['read', 'create', 'update'] },
+  // Reports — read-only views. View also covers print and CSV export; acting on a report row
+  // (Receive payment, opening a bill or a receipt) still needs that module's own permission.
+  { name: 'reports_receivables', displayName: 'Receivables Reports', module: 'reports', actions: ['read'] },
   // Administration
   { name: 'admin_companies', displayName: 'Companies', module: 'admin' },
   { name: 'admin_branches', displayName: 'Branches', module: 'admin' },

@@ -1,13 +1,13 @@
 import type { FastifyInstance } from 'fastify';
-import { and, count, desc, eq, ilike, or } from 'drizzle-orm';
-import { billSchema, billUpdateSchema, normalizeMobile } from '@erp/shared';
+import { and, count, desc, eq } from 'drizzle-orm';
+import { billSchema, billUpdateSchema } from '@erp/shared';
 import { db, schema } from '../db/client';
 import { parse } from '../lib/validate';
 import { ok } from '../lib/respond';
 import { parseListQuery } from '../lib/list';
 import { filterWhere, sortBy, tableColumns, type ColumnMap } from '../lib/filters';
 import { logActivity } from '../services/activity';
-import { createBill, deleteBill, getBill, shapeBill, updateBill } from '../services/bills';
+import { billSearch, createBill, deleteBill, getBill, shapeBill, updateBill } from '../services/bills';
 import { paidSubquery, paymentColumns } from '../services/billPayments';
 import { getBillPayments } from '../services/receipts';
 import { auditRevokedLinks } from '../services/publicInvoiceLinks';
@@ -30,21 +30,13 @@ const LABEL = 'Bill';
 
 const B = schema.bills;
 
-/** Below this, a digit string is a document number, not a phone fragment. */
-const MIN_MOBILE_SEARCH_DIGITS = 4;
-/** The `integer` column's ceiling — `bill_number` cannot be compared past it. */
-const INT4_MAX = 2147483647;
-
 export async function billRoutes(app: FastifyInstance) {
   /**
    * List. One left join carries each bill's book number, so the list never runs a query per
    * row, and the book number is searchable, sortable and filterable like the bill's own
    * columns.
    *
-   * Search covers the bill number, the customer, the mobile (in whatever shape it was typed)
-   * and the book. A term made only of digits is read as a bill number, so "25" finds Bill 25
-   * rather than every customer whose phone contains a 2 or a 5; a term with at least four
-   * digits additionally matches the normalized mobile key.
+   * Search covers the bill number, the customer, the mobile and the book (`billSearch`).
    */
   app.get(BASE, { preHandler: app.requirePermission(PERMISSION) }, async (req) => {
     const q = parseListQuery(req.query as Record<string, unknown>);
@@ -57,19 +49,7 @@ export async function billRoutes(app: FastifyInstance) {
     // non-numeric value would fail the query) — so they sort but do not filter. Payment Status,
     // a text value, filters normally.
     const { paidAmount: _p, outstandingAmount: _o, ...filterCols } = cols;
-    const term = q.search;
-    const digits = term ? normalizeMobile(term) : '';
-    const isNumber = !!term && /^\d+$/.test(term);
-    const asNumber = isNumber && Number(term) <= INT4_MAX ? Number(term) : null;
-    const matches = term
-      ? or(
-          ...(isNumber ? [] : [ilike(B.customerName, `%${term}%`), ilike(B.mobileNumber, `%${term}%`), ilike(B.babyName, `%${term}%`)]),
-          ilike(schema.books.bookNumber, `%${term}%`),
-          ...(digits.length >= MIN_MOBILE_SEARCH_DIGITS ? [ilike(B.mobileSearch, `%${digits}%`)] : []),
-          ...(asNumber !== null ? [eq(B.billNumber, asNumber)] : []),
-        )
-      : undefined;
-    const where = and(eq(B.tenantId, req.user.tenantId), matches, filterWhere((req.query as Record<string, unknown>).filters, filterCols));
+    const where = and(eq(B.tenantId, req.user.tenantId), billSearch(q.search), filterWhere((req.query as Record<string, unknown>).filters, filterCols));
 
     const [{ total }] = await db.select({ total: count() }).from(B).innerJoin(schema.books, eq(schema.books.id, B.bookId)).leftJoin(paid, eq(paid.billId, B.id)).where(where);
     /** Operational default: the latest bill date first, and the bill number as the stable tie-breaker. */

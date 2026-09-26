@@ -30,6 +30,8 @@ const InvoicePreviewPage = lazy(() => import('@/pages/billing/InvoicePreviewPage
 const ReceiptsPage = lazy(() => import('@/pages/receipts/ReceiptsPage'));
 const ReceiptFormPage = lazy(() => import('@/pages/receipts/ReceiptFormPage'));
 const ReceiptDetailPage = lazy(() => import('@/pages/receipts/ReceiptDetailPage'));
+const ReceivablesPage = lazy(() => import('@/pages/reports/ReceivablesPage'));
+const ReceivableCustomerPage = lazy(() => import('@/pages/reports/ReceivableCustomerPage'));
 const InvoiceTemplatesPage = lazy(() => import('@/pages/settings/invoice-templates/InvoiceTemplatesPage'));
 const InvoiceTemplateDesignerPage = lazy(() => import('@/pages/settings/invoice-templates/InvoiceTemplateDesignerPage'));
 
@@ -84,6 +86,9 @@ export default function App() {
               <Route path="/modules/receipts" element={<Guard permission="operations_receipts"><ReceiptsPage /></Guard>} />
               <Route path="/modules/receipts/new" element={<Guard permission="operations_receipts"><ReceiptFormPage /></Guard>} />
               <Route path="/modules/receipts/:id" element={<Guard permission="operations_receipts"><ReceiptDetailPage /></Guard>} />
+              {/* ---- Reports ---- */}
+              <Route path="/modules/reports/receivables" element={<Guard permission="reports_receivables"><ReceivablesPage /></Guard>} />
+              <Route path="/modules/reports/receivables/customers/:key" element={<Guard permission="reports_receivables"><ReceivableCustomerPage /></Guard>} />
               {/* ---- Settings ---- */}
               <Route path="/modules/settings" element={<SettingsHub />} />
               {/* The designer needs the full width, so it sits outside the settings sub-nav. */}

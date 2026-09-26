@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, lte, sql } from 'drizzle-orm';
 import { db, schema } from '../db/client';
 
 /**
@@ -45,13 +45,17 @@ export async function billHasAllocations(exec: Executor, tenantId: string, billI
 /**
  * Paid per bill as a grouped subquery a list can LEFT JOIN — one aggregate for the whole query,
  * never a query per row. Scoped to the tenant inside, so it aggregates only that tenant's rows.
+ *
+ * `asOf` ("YYYY-MM-DD", the receivables reports) counts only receipts dated on or before it. It is
+ * still the same definition — ACTIVE allocations — narrowed by receipt date; a receipt cancelled
+ * since counts nowhere, whatever its date (docs/RECEIVABLES_REPORTS.md, "As of").
  */
-export const paidSubquery = (tenantId: string) =>
+export const paidSubquery = (tenantId: string, asOf?: string) =>
   db
     .select({ billId: RA.billId, paid: sql<string>`sum(${RA.amount})`.as('paid') })
     .from(RA)
     .innerJoin(R, and(eq(R.id, RA.receiptId), eq(R.tenantId, RA.tenantId)))
-    .where(and(eq(RA.tenantId, tenantId), eq(R.status, 'ACTIVE')))
+    .where(and(eq(RA.tenantId, tenantId), eq(R.status, 'ACTIVE'), asOf ? lte(R.receiptDate, asOf) : undefined))
     .groupBy(RA.billId)
     .as('bill_paid');
 

@@ -3,7 +3,7 @@
 Context for picking this project up in a fresh session. No secrets live in this file
 (it is committed to GitHub) — credentials are in `apps/api/.env`, which is gitignored.
 
-Last updated: 2026-09-25.
+Last updated: 2026-09-26.
 
 ## What this project is
 
@@ -310,7 +310,7 @@ login, no attachment, no need to be in the operator's contacts.
 ### Receipts, payments and outstanding — Phase 6
 
 **Full contract: `docs/RECEIPTS_PAYMENTS.md`.** Branch `feature/receipts-payments` (from `515b01a`),
-**uncommitted** at the time of writing.
+committed as `2ef33c3` feat: add receipts payments and outstanding.
 
 - **Model:** `receipts` (number, date, customer snapshot + key, CASH|BANK, account, amount, status
   ACTIVE|CANCELLED, cancelled at/by/reason, created_by) and `receipt_allocations` (receipt × bill ×
@@ -343,6 +343,37 @@ login, no attachment, no need to be in the operator's contacts.
 - **Migration `0017`** (`receipts`, `receipt_allocations`) — additive; **applied to the shared DB on
   2026-09-25** (18 rows), Bill #1 / counters re-checked unchanged afterwards.
 - Not built: advances, receipt edit, receipt PDF / WhatsApp, refunds, any GL posting.
+
+### Receivables / Outstanding & Aging reports — Phase 7
+
+**Full contract: `docs/RECEIVABLES_REPORTS.md`.** Branch `feature/receivables-reports` (from
+`2ef33c3`), **uncommitted** at the time of writing. **No migration** — existing indexes serve it.
+
+- **Read-only, derived, stored nowhere.** `services/receivables.ts` builds ONE bill-level model on
+  Phase 6's `paidSubquery` / `paymentColumns` (now with an optional `asOf` receipt-date cutoff) plus
+  age and bucket; the KPI strip, Summary, Outstanding Bills, Aging and the customer drill-down all
+  aggregate it, so they reconcile to the paisa (tested and browser-verified).
+- **Scope** shared by every view, kept in the URL: `asOf` (default = today in the default company's
+  time zone, server-decided), bill-date `from`/`to`, `bookId`. Search/status/bucket narrow one table.
+- **As of** = bills and ACTIVE receipts dated ≤ As of. A cancelled receipt counts nowhere (void from
+  the start — `cancelled_at` is a timestamp, not a business date), and bill edits are not versioned —
+  documented; not a frozen historical snapshot.
+- **Aging anchor = bill date** (no due date exists; none invented). Buckets 0 / 1–30 / 31–60 / 61–90
+  / 91+ from `AGING_BUCKET_MAX_DAYS`, age = Postgres date arithmetic (no TZ drift).
+- **Customer = normalized mobile** (temporary). Summary aggregates customers first, then pages; a
+  search selects customers but totals all their in-scope bills.
+- **CSV** (`GET /api/reports/receivables/export`) is built server-side by `lib/csv.ts`: whole filtered
+  result, BOM + CRLF, ISO dates, plain numbers, formula-injection guard; 20,000-row ceiling refused,
+  never cut. **Print** = `.print-root` sheet of the whole result (A4 portrait/landscape).
+- **RBAC** `reports_receivables` (View only, module "Reports", nav section "Reports › Receivables").
+  Existing non-Super-Admin roles must be re-saved. Receive payment still needs Receipts Create.
+- **UI:** `/modules/reports/receivables` (tabs Summary / Outstanding Bills / Aging) and
+  `/modules/reports/receivables/customers/:key`. `DataTable` gained `compact` (12px cell padding —
+  now also on the Bills list, whose Actions slipped ~15px off a 1440px screen at real volume) and
+  `mobileCard` (stacked rows below `sm`). The books lookup takes `includeInactive=1`.
+- **Measured** on 2,248 bills / 330 customers / 468 allocations: every report request 9–23 ms,
+  one aggregate per query (`loops=1`), no per-row queries; the drill-down uses
+  `bills_tenant_mobile_idx`. Seq scans on `bills` are the planner's right choice at that size.
 
 ### Bill numbering
 
@@ -508,9 +539,10 @@ exists; future feature branches start from `main` and merge back into it before 
 | `feature/invoice-templates` | branched from `e64a222`; Phase 4 (invoice templates, preview, PDF with Gujarati/Hindi shaping) — `bef9e04` feat: add invoice templates preview and PDF | committed, not pushed, not merged |
 | `feature/whatsapp-invoice-sharing` | branched from `bef9e04`; Phase 5 (WhatsApp invoice sharing) — `cc80226` feat: add WhatsApp invoice sharing | committed, not pushed, not merged |
 | `feature/public-invoice-links` | branched from `cc80226`; Phase 5.1 (secure public invoice link) — `515b01a` feat: add secure public invoice links | committed, not pushed, not merged |
-| `feature/receipts-payments` | branched from `515b01a`; Phase 6 (receipts, allocation, outstanding) | **uncommitted** working tree at the time of writing |
+| `feature/receipts-payments` | branched from `515b01a`; Phase 6 (receipts, allocation, outstanding) — `2ef33c3` feat: add receipts payments and outstanding | committed, not pushed, not merged |
+| `feature/receivables-reports` | branched from `2ef33c3`; Phase 7 (receivables / outstanding / aging reports) | **uncommitted** working tree at the time of writing |
 
-`main` has none of them. Merge in order (settings → invoices → whatsapp → public links → receipts) — never
+`main` has none of them. Merge in order (settings → invoices → whatsapp → public links → receipts → receivables) — never
 start new work from `main` while these are open, or it will lack the settings foundation. None is
 deployed; their migrations (`0012`–`0017`) are already applied to the shared database (additive,
 the live build ignores them).
@@ -665,8 +697,10 @@ upgrade notices (React Router 7), deliberately not acted on.
 Vitest runs in `apps/api` and, since Phase 6, `apps/web` (pinned to v3 — v5 needs Vite 6, this repo
 is on Vite 5). The web suite (jsdom) renders real components — `ShareInvoiceDialog.test.tsx` fails if
 a hook the dialog uses is not imported, and checks the read-only vs update Revoke rule — plus the
-receipt allocation helpers (`allocation.test.ts`): 2 files, 6 tests, always run. API: thirteen files (items, sub-items, account groups, accounts, books, appointments, bills, settings,
-invoices, whatsapp, publicInvoiceLinks, receipts, plus `lib/listen`), 1126 tests. The route suites have two
+receipt allocation helpers (`allocation.test.ts`) and the receivables pages (`ReceivablesPage.test.tsx`:
+KPI/rows as the server sent them, the Aging strip = scope, Receive payment only with Receipts Create):
+3 files, 10 tests, always run. API: fourteen files (items, sub-items, account groups, accounts, books, appointments, bills, settings,
+invoices, whatsapp, publicInvoiceLinks, receipts, receivables, plus `lib/listen`), 1154 tests. The route suites have two
 sections:
 
 - **A — pure validation and calculation** (zod schemas, `normalizeMobile`, the bill money
@@ -677,7 +711,7 @@ sections:
   determinism, nothing drawn off the page, unprintable-character refusal, Gujarati/Hindi shaping,
   extraction and wrapping, public-link tokens/hash/redaction/config/rate limit, malformed-token
   refusal, the receipt schema / derived payment status / Cash-Bank rule / paise). Always runs.
-  **`pnpm test`: API 696 pass, 430 skipped; web 6 pass.**
+  **`pnpm test`: API 704 pass, 450 skipped; web 10 pass.**
 - **B — database-backed** (tenant isolation, RBAC, duplicate guards, lookup field exposure, the
   allocators' sequences and concurrency, the rollback that keeps a failed create from burning a
   number, bill snapshots, the stored discount and its allocation, the atomic line replacement, and
@@ -688,7 +722,7 @@ sections:
 
 Section B creates and deletes tenants, roles and users. `TEST_DATABASE_URL` must point at a
 **throwaway** database — never at the hosted `DATABASE_URL` above. **It ran for the first time on
-2026-09-25: 1080/1080 pass; with Phase 6, 1126/1126** (one latent Phase 5 test bug surfaced and was fixed — it read the
+2026-09-25: 1080/1080 pass; with Phase 6, 1126/1126; with Phase 7, 1154/1154** (one latent Phase 5 test bug surfaced and was fixed — it read the
 bill's first audit row instead of the share row). How to get a throwaway database here, no admin
 rights or passwords needed (use a scratch folder, never the repo):
 
@@ -703,6 +737,13 @@ npx tsx src/db/migrate.ts && npx vitest run      # stop afterwards: pg_ctl -D "$
 
 Set **both** variables: `DATABASE_URL` too, so nothing in the run can fall back to the hosted URL
 in `apps/api/.env` (dotenv never overrides a variable that is already set).
+
+**This bit once (2026-09-26):** a new suite imported a db-touching service at the TOP of the file,
+so `db/client` connected with the hosted URL before `beforeAll` switched `DATABASE_URL`, and a run
+with only `TEST_DATABASE_URL` set wrote 4 test tenants into the shared DB (removed the same day,
+with approval, by tenant id; genuine data untouched). Rules: import db-touching modules only
+dynamically inside `beforeAll`, keep pure helpers in `@erp/shared`, and assert
+`client.DATABASE_URL === TEST_DATABASE_URL` before seeding (as `receivables.test.ts` does).
 
 ## Verified working
 
@@ -895,7 +936,7 @@ assumes one and will throw. Guard the login step when reusing it.
 
 ## Known pending work
 
-- **Phases 3–5.1 are committed, Phase 6 is uncommitted; all unpushed, unmerged and
+- **Phases 3–6 are committed, Phase 7 is uncommitted; all unpushed, unmerged and
   undeployed** — see the branch table under Git. Migrations `0012`–`0017` are already on the shared
   database. **The first deploy containing Phase 4/5/5.1 must be a FULL deploy — never
   `Deploy-StudioCRM.ps1 -Hotfix`**, which uploads only server.js and would leave the host without
@@ -918,10 +959,11 @@ assumes one and will throw. Guard the login step when reusing it.
   nothing on browsers without `showPicker()` (Safari < 16.4 — typing still works); a half-typed
   date in a list FILTER is cleared on blur without a message; custom-field values are still not
   type-checked on the server.
-- **Ledger, Voucher, GL posting and Reports are NOT implemented.** Receipts (Phase 6) record money
-  received and settle bills, but nothing posts an accounting transaction — a later GL phase posts
-  from `receipts` once the account mappings are decided. Customer advances / on-account money,
-  receipt PDF + WhatsApp share and refunds are also not built.
+- **Ledger, Voucher and GL posting are NOT implemented.** Receipts (Phase 6) record money
+  received and settle bills, and Phase 7's receivables reports read them — but nothing posts an
+  accounting transaction; a later GL phase posts from `receipts` once the account mappings are
+  decided. Customer advances / on-account money, receipt PDF + WhatsApp share, refunds, a Customer /
+  Party Master, payment reminders, collection follow-ups and a bill due date are also not built.
 - **Before the first real receipt, the studio needs a CASH and a BANK account** in Account Master
   (group under head group CASH / the group named BANK) — the shared DB has no account groups yet.
 - **Billing beyond Phase 2 is NOT implemented**, deliberately and by instruction: advance; the CGST/SGST/IGST split; the delivery workflow (the `delivery_date` column
@@ -946,7 +988,7 @@ assumes one and will throw. Guard the login step when reusing it.
 - **New permissions need existing roles re-saved.** Role grants are stored JSON, written before
   the newer permissions existed, so roles other than Super Admin (which bypasses everything)
   do not have `masters_items` … `masters_books`, `operations_appointments`, `operations_billing`
-  or the Phase 6 `operations_receipts` ticked — verified: the `viewer@example.com` role gets 403 on every
+  or the Phase 6 `operations_receipts` / Phase 7 `reports_receivables` ticked — verified: the `viewer@example.com` role gets 403 on every
   billing route until its role is re-saved. Per the README, opening a role in
   Settings → Roles and saving it picks up new permissions. A stale `sample_categories` key may
   still sit in that JSON; it is harmless (no route checks it) and clears on the next save.
