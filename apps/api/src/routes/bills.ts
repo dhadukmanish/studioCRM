@@ -3,12 +3,13 @@ import { and, count, desc, eq, ilike, or } from 'drizzle-orm';
 import { billSchema, billUpdateSchema, normalizeMobile } from '@erp/shared';
 import { db, schema } from '../db/client';
 import { parse } from '../lib/validate';
-import { notFound } from '../lib/errors';
 import { ok } from '../lib/respond';
 import { parseListQuery } from '../lib/list';
 import { filterWhere, sortBy, tableColumns, type ColumnMap } from '../lib/filters';
 import { logActivity } from '../services/activity';
-import { createBill, getBill, shapeBill, updateBill } from '../services/bills';
+import { createBill, deleteBill, getBill, shapeBill, updateBill } from '../services/bills';
+import { paidSubquery, paymentColumns } from '../services/billPayments';
+import { getBillPayments } from '../services/receipts';
 import { auditRevokedLinks } from '../services/publicInvoiceLinks';
 
 /**
@@ -47,7 +48,15 @@ export async function billRoutes(app: FastifyInstance) {
    */
   app.get(BASE, { preHandler: app.requirePermission(PERMISSION) }, async (req) => {
     const q = parseListQuery(req.query as Record<string, unknown>);
-    const cols: ColumnMap = { ...tableColumns(B), bookNumber: schema.books.bookNumber };
+    // Paid / Outstanding / Payment Status come from ONE grouped aggregate LEFT JOINed to the page
+    // query — never stored on the bill, never a query per row — and filter and sort like columns.
+    const paid = paidSubquery(req.user.tenantId);
+    const payment = paymentColumns(paid);
+    const cols: ColumnMap = { ...tableColumns(B), bookNumber: schema.books.bookNumber, ...payment };
+    // Paid / Outstanding are SQL expressions, which `filterWhere` would compare as text (and a
+    // non-numeric value would fail the query) — so they sort but do not filter. Payment Status,
+    // a text value, filters normally.
+    const { paidAmount: _p, outstandingAmount: _o, ...filterCols } = cols;
     const term = q.search;
     const digits = term ? normalizeMobile(term) : '';
     const isNumber = !!term && /^\d+$/.test(term);
@@ -60,22 +69,27 @@ export async function billRoutes(app: FastifyInstance) {
           ...(asNumber !== null ? [eq(B.billNumber, asNumber)] : []),
         )
       : undefined;
-    const where = and(eq(B.tenantId, req.user.tenantId), matches, filterWhere((req.query as Record<string, unknown>).filters, cols));
+    const where = and(eq(B.tenantId, req.user.tenantId), matches, filterWhere((req.query as Record<string, unknown>).filters, filterCols));
 
-    const [{ total }] = await db.select({ total: count() }).from(B).innerJoin(schema.books, eq(schema.books.id, B.bookId)).where(where);
+    const [{ total }] = await db.select({ total: count() }).from(B).innerJoin(schema.books, eq(schema.books.id, B.bookId)).leftJoin(paid, eq(paid.billId, B.id)).where(where);
     /** Operational default: the latest bill date first, and the bill number as the stable tie-breaker. */
     const order = q.sortBy && cols[q.sortBy] ? [sortBy(q.sortBy, q.sortOrder, cols, B.billDate), desc(B.billNumber)] : [desc(B.billDate), desc(B.billNumber)];
     const rows = await db
-      .select({ ...tableColumns(B), bookNumber: schema.books.bookNumber })
+      .select({ ...tableColumns(B), bookNumber: schema.books.bookNumber, ...payment })
       .from(B)
       .innerJoin(schema.books, eq(schema.books.id, B.bookId))
+      .leftJoin(paid, eq(paid.billId, B.id))
       .where(where)
       .orderBy(...order)
       .limit(q.limit)
       .offset((q.page - 1) * q.limit);
     // `tableColumns` is an untyped column map, so the row's `numeric` fields arrive as unknown;
     // `shapeBill` is what turns them into numbers, exactly as the detail endpoint does.
-    const shaped = (rows as unknown as { subTotal: unknown; discountValue: unknown; discountAmount: unknown; gstAmount: unknown; grandTotal: unknown }[]).map(shapeBill);
+    const shaped = (rows as unknown as { subTotal: unknown; discountValue: unknown; discountAmount: unknown; gstAmount: unknown; grandTotal: unknown; paidAmount: unknown; outstandingAmount: unknown }[]).map((r) => ({
+      ...shapeBill(r),
+      paidAmount: Number(r.paidAmount),
+      outstandingAmount: Number(r.outstandingAmount),
+    }));
     return ok({ rows: shaped, total: Number(total), page: q.page, pageSize: q.limit }, `${LABEL}s retrieved successfully`);
   });
 
@@ -83,6 +97,15 @@ export async function billRoutes(app: FastifyInstance) {
   app.get(`${BASE}/:id`, { preHandler: app.requirePermission(PERMISSION) }, async (req) => {
     const { id } = req.params as { id: string };
     return ok(await getBill(req.user.tenantId, id));
+  });
+
+  /**
+   * The bill's payment position and history — every receipt that ever settled it, cancelled ones
+   * shown as cancelled. Billing read is enough: what a bill has been paid is part of the bill.
+   */
+  app.get(`${BASE}/:id/payments`, { preHandler: app.requirePermission(PERMISSION) }, async (req) => {
+    const { id } = req.params as { id: string };
+    return ok(await getBillPayments(req.user.tenantId, id));
   });
 
   /**
@@ -123,14 +146,9 @@ export async function billRoutes(app: FastifyInstance) {
    */
   app.delete(`${BASE}/:id`, { preHandler: app.requirePermission(PERMISSION, 'delete') }, async (req) => {
     const { id } = req.params as { id: string };
-    const [existing] = await db
-      .select({ id: B.id, billNumber: B.billNumber, customerName: B.customerName, bookNumber: schema.books.bookNumber })
-      .from(B)
-      .innerJoin(schema.books, eq(schema.books.id, B.bookId))
-      .where(and(eq(B.id, id), eq(B.tenantId, req.user.tenantId)))
-      .limit(1);
-    if (!existing) throw notFound(LABEL);
-    await db.delete(B).where(and(eq(B.id, id), eq(B.tenantId, req.user.tenantId)));
+    // Refused with 409 BILL_HAS_PAYMENTS once any receipt has settled the bill — payment history,
+    // even a cancelled receipt's, is never deleted with it.
+    const existing = await deleteBill(req.user.tenantId, id);
     await logActivity(req, 'bill', id, 'deleted', `${LABEL} ${existing.bookNumber}/${existing.billNumber} for "${existing.customerName}" deleted`);
     return ok(null, `${LABEL} deleted successfully`);
   });

@@ -18,7 +18,7 @@ a data-table kit; the Masters layer, Appointments and Billing on top of it are p
   recipe is still accurate — read it before adding a module.
 - `CLAUDE.md` holds the always-loaded engineering rules — stable rules only; current
   implementation status lives in THIS file. `docs/ARCHITECTURE.md`, `docs/UI_DESIGN_SYSTEM.md`,
-  `docs/DEVELOPMENT.md`, `docs/BILL_NUMBERING.md`, `docs/BILLING_CALCULATION.md`, `docs/SETTINGS.md`, `docs/INVOICE_TEMPLATES.md` and `docs/WHATSAPP_SHARING.md` hold the
+  `docs/DEVELOPMENT.md`, `docs/BILL_NUMBERING.md`, `docs/BILLING_CALCULATION.md`, `docs/SETTINGS.md`, `docs/INVOICE_TEMPLATES.md`, `docs/WHATSAPP_SHARING.md` and `docs/RECEIPTS_PAYMENTS.md` hold the
   detail; `.claude/agents/` has five
   specialists, `.claude/skills/studio-*` the workflows, `.claude/hooks/guard-bash.mjs` blocks
   destructive commands.
@@ -257,7 +257,7 @@ and date format from. Committed as `e64a222` on `feature/settings-branding` (see
 ### Secure public invoice link — Phase 5.1
 
 **Full contract: `docs/WHATSAPP_SHARING.md`.** Branch `feature/public-invoice-links` (from
-`cc80226`), **uncommitted** at the time of writing. The WhatsApp message now carries
+`cc80226`), committed as `515b01a`. The WhatsApp message now carries
 `https://<PUBLIC_APP_URL>/i/<token>`; the customer taps it and the Phase 4 PDF opens inline — no
 login, no attachment, no need to be in the operator's contacts.
 
@@ -306,6 +306,43 @@ login, no attachment, no need to be in the operator's contacts.
   `revokedLinks`. Bill and template services import `revokeActiveLinks` from
   `services/publicInvoiceLinkRevoke.ts` (DB layer only) — keep it that way, or the services form an
   import cycle through `invoice.ts`.
+
+### Receipts, payments and outstanding — Phase 6
+
+**Full contract: `docs/RECEIPTS_PAYMENTS.md`.** Branch `feature/receipts-payments` (from `515b01a`),
+**uncommitted** at the time of writing.
+
+- **Model:** `receipts` (number, date, customer snapshot + key, CASH|BANK, account, amount, status
+  ACTIVE|CANCELLED, cancelled at/by/reason, created_by) and `receipt_allocations` (receipt × bill ×
+  amount, unique per receipt+bill). Composite tenant FKs; allocation→bill is RESTRICT.
+- **Paid / Outstanding / Payment Status are derived, never stored** — `services/billPayments.ts` is
+  the only definition (Paid = allocations on ACTIVE receipts). The bill list LEFT JOINs one grouped
+  aggregate; its Paid / Outstanding / Payment Status filter and sort like columns.
+- **Customer = `bills.mobile_search`** (the normalized mobile), because bills carry their own
+  customer snapshot and nothing links them to a CLIENT account. Every allocated bill must carry the
+  receipt's key. It is a TEMPORARY identity until a customer master exists. Consequence: a bill with
+  ANY receipt history (cancelled included) cannot change its mobile (name can).
+- **A receipt cannot pre-date any bill it settles** (server under lock + form). **At most 100 bills
+  per receipt**, never silently: Pay all / Auto allocate stop at 100 and say so.
+- **Cash account** = group under head group CASH (or named CASH); **Bank** = the BANK group (the one
+  that drives Bank Details) — `paymentModeForGroup`. The shared DB has no account groups yet, so the
+  studio must create a CASH and a BANK account before the first receipt.
+- **Credit is not a receipt**: the bill simply stays UNPAID. No advances: amount = allocations.
+- **Locking:** receipts lock their bills `FOR UPDATE OF bills ORDER BY id` before reading Paid;
+  `updateBill` (Grand Total ≥ Paid) and the new `deleteBill` (any allocation → 409
+  `BILL_HAS_PAYMENTS`) take the same lock. Proven by concurrent tests (racing overpay, 15 receipts
+  over overlapping bills in mixed orders, receipt vs shrinking edit).
+- **Cancel, never delete**; second cancel 409. Receipts never revoke a bill's public invoice link.
+- **Numbers** from `document_counters` type `receipt` (tenant-wide, no reset), taken last in the tx.
+- **RBAC** `operations_receipts` read/create/update (update = cancel). `GET /api/bills/:id/payments`
+  needs only Billing read. Existing non-Super-Admin roles must be re-saved to get the permission.
+- **UI:** Receipts list, full-page New Receipt (customer first, pending bills oldest first, Full /
+  Pay all / Clear / Auto allocate, derived amount, Ctrl+S, stacked rows at phone width), printable
+  detail with cancel, Billing list columns + "Receive payment", bill payment panel + history. The
+  bill list now hides Mobile No., Delivery Date, Tax Mode, Paid and Last Modified by default so Outstanding, Payment and Actions fit 1440px (Columns brings them back); long book numbers / names get an ellipsis.
+- **Migration `0017`** (`receipts`, `receipt_allocations`) — additive; **applied to the shared DB on
+  2026-09-25** (18 rows), Bill #1 / counters re-checked unchanged afterwards.
+- Not built: advances, receipt edit, receipt PDF / WhatsApp, refunds, any GL posting.
 
 ### Bill numbering
 
@@ -470,11 +507,12 @@ exists; future feature branches start from `main` and merge back into it before 
 | `feature/settings-branding` | `e64a222` feat: add global date settings and company branding (Phase 3) | committed, not pushed, not merged |
 | `feature/invoice-templates` | branched from `e64a222`; Phase 4 (invoice templates, preview, PDF with Gujarati/Hindi shaping) — `bef9e04` feat: add invoice templates preview and PDF | committed, not pushed, not merged |
 | `feature/whatsapp-invoice-sharing` | branched from `bef9e04`; Phase 5 (WhatsApp invoice sharing) — `cc80226` feat: add WhatsApp invoice sharing | committed, not pushed, not merged |
-| `feature/public-invoice-links` | branched from `cc80226`; Phase 5.1 (secure public invoice link) | **uncommitted** working tree at the time of writing |
+| `feature/public-invoice-links` | branched from `cc80226`; Phase 5.1 (secure public invoice link) — `515b01a` feat: add secure public invoice links | committed, not pushed, not merged |
+| `feature/receipts-payments` | branched from `515b01a`; Phase 6 (receipts, allocation, outstanding) | **uncommitted** working tree at the time of writing |
 
-`main` has none of them. Merge in order (settings → invoices → whatsapp → public links) — never
+`main` has none of them. Merge in order (settings → invoices → whatsapp → public links → receipts) — never
 start new work from `main` while these are open, or it will lack the settings foundation. None is
-deployed; their migrations (`0012`–`0016`) are already applied to the shared database (additive,
+deployed; their migrations (`0012`–`0017`) are already applied to the shared database (additive,
 the live build ignores them).
 
 The repository is **public** (`private: false` on the GitHub API). No secret is in it —
@@ -556,8 +594,8 @@ this machine. The app points at a **hosted Postgres 18.4** instead:
 - The password contains `@@`, which **must stay percent-encoded** as `%40%40` inside the URL,
   or the connection string parses wrong
 - No SSL parameters needed
-- **27 tables** in `public`; migrations `0000` … `0016` all applied (17 rows in
-  `drizzle.__drizzle_migrations`). `0015` added `invoice_templates_id_tenant_uk` and `0016` added
+- **29 tables** in `public`; migrations `0000` … `0017` all applied (18 rows in
+  `drizzle.__drizzle_migrations`). `0017` added `receipts` + `receipt_allocations` (Phase 6). `0015` added `invoice_templates_id_tenant_uk` and `0016` added
   `public_invoice_links` (Phase 5.1 — split for the generator gotcha below; the whole chain
   `0000`–`0016` was also proven to apply cleanly to an empty database). `0014` added `invoice_templates` (one migration, correctly
   ordered — no new FK target). `0012` added `companies_id_tenant_uk`; `0013` added
@@ -608,11 +646,27 @@ Dev servers are usually already running in the background from an earlier sessio
 4000 and 5173 before starting another `pnpm dev`, or you will get a port conflict.
 `curl -s http://localhost:4000/api/health` is the quickest probe.
 
+**Gotcha — a long-running Vite dev server can serve a STALE module.** On 2026-09-26 the Bills page
+crashed with `useAuthStore is not defined` (`ShareInvoiceDialog.tsx:31`) although the source and
+commit `515b01a` both import it: the :5173 server, up since the morning, still served a transform
+from mid-edit (usage added, import not yet) — the file watcher never picked up the later write. The
+built bundle was never affected. Check with `curl -s localhost:5173/src/<path>` and compare the
+imports; `touch` the file (or restart `pnpm dev`) to make Vite re-read it.
+
+**Normal console noise, not bugs:** a 401 on `/api/settings/company` and
+`/api/common/lookups/companies` when the app opens with an EXPIRED access token (they are the
+shell's first calls) — `lib/api.ts` refreshes the token and retries, both then answer 200
+(reproduced in the browser). A 401 that repeats after a fresh sign-in would be a real problem;
+none was seen. React Router's `v7_startTransition` / `v7_relativeSplatPath` warnings are future
+upgrade notices (React Router 7), deliberately not acted on.
+
 ## Testing
 
-Vitest runs in `apps/api` only (pinned to v3 — v5 needs Vite 6, this repo is on Vite 5).
-Twelve files (items, sub-items, account groups, accounts, books, appointments, bills, settings,
-invoices, whatsapp, publicInvoiceLinks, plus `lib/listen`), 1080 tests. The route suites have two
+Vitest runs in `apps/api` and, since Phase 6, `apps/web` (pinned to v3 — v5 needs Vite 6, this repo
+is on Vite 5). The web suite (jsdom) renders real components — `ShareInvoiceDialog.test.tsx` fails if
+a hook the dialog uses is not imported, and checks the read-only vs update Revoke rule — plus the
+receipt allocation helpers (`allocation.test.ts`): 2 files, 6 tests, always run. API: thirteen files (items, sub-items, account groups, accounts, books, appointments, bills, settings,
+invoices, whatsapp, publicInvoiceLinks, receipts, plus `lib/listen`), 1126 tests. The route suites have two
 sections:
 
 - **A — pure validation and calculation** (zod schemas, `normalizeMobile`, the bill money
@@ -622,16 +676,19 @@ sections:
   model, and real PDFs parsed back with pdf.js — text, pages, images, glyph outlines,
   determinism, nothing drawn off the page, unprintable-character refusal, Gujarati/Hindi shaping,
   extraction and wrapping, public-link tokens/hash/redaction/config/rate limit, malformed-token
-  refusal). Always runs. **`pnpm test`: 686 pass, 394 skipped.**
+  refusal, the receipt schema / derived payment status / Cash-Bank rule / paise). Always runs.
+  **`pnpm test`: API 696 pass, 430 skipped; web 6 pass.**
 - **B — database-backed** (tenant isolation, RBAC, duplicate guards, lookup field exposure, the
   allocators' sequences and concurrency, the rollback that keeps a failed create from burning a
   number, bill snapshots, the stored discount and its allocation, the atomic line replacement, and
-  the whole public-link lifecycle incl. concurrent shares and share-vs-edit races).
+  the whole public-link lifecycle incl. concurrent shares and share-vs-edit races, and every
+  receipt rule incl. concurrent overpayment, deadlock-free multi-bill locking, cancel, the bill
+  edit/delete guards, account validation, 25-way receipt numbering and tenant isolation).
   `describe.skipIf(!TEST_DATABASE_URL)`, so it **skips by default**.
 
 Section B creates and deletes tenants, roles and users. `TEST_DATABASE_URL` must point at a
 **throwaway** database — never at the hosted `DATABASE_URL` above. **It ran for the first time on
-2026-09-25: 1080/1080 pass** (one latent Phase 5 test bug surfaced and was fixed — it read the
+2026-09-25: 1080/1080 pass; with Phase 6, 1126/1126** (one latent Phase 5 test bug surfaced and was fixed — it read the
 bill's first audit row instead of the share row). How to get a throwaway database here, no admin
 rights or passwords needed (use a scratch folder, never the repo):
 
@@ -838,8 +895,8 @@ assumes one and will throw. Guard the login step when reusing it.
 
 ## Known pending work
 
-- **Phases 3, 4 and 5 are committed, Phase 5.1 is uncommitted; all unpushed, unmerged and
-  undeployed** — see the branch table under Git. Migrations `0012`–`0016` are already on the shared
+- **Phases 3–5.1 are committed, Phase 6 is uncommitted; all unpushed, unmerged and
+  undeployed** — see the branch table under Git. Migrations `0012`–`0017` are already on the shared
   database. **The first deploy containing Phase 4/5/5.1 must be a FULL deploy — never
   `Deploy-StudioCRM.ps1 -Hotfix`**, which uploads only server.js and would leave the host without
   `dist/harfbuzz.wasm` and the new fonts.
@@ -861,10 +918,13 @@ assumes one and will throw. Guard the login step when reusing it.
   nothing on browsers without `showPicker()` (Safari < 16.4 — typing still works); a half-typed
   date in a list FILTER is cleared on blur without a message; custom-field values are still not
   type-checked on the server.
-- **Payment, Ledger, Voucher and Reports are NOT implemented.** Nothing posts an accounting
-  transaction anywhere yet — a bill is a document, not a journal entry.
-- **Billing beyond Phase 2 is NOT implemented**, deliberately and by instruction: advance, paid
-  and outstanding; the CGST/SGST/IGST split; the delivery workflow (the `delivery_date` column
+- **Ledger, Voucher, GL posting and Reports are NOT implemented.** Receipts (Phase 6) record money
+  received and settle bills, but nothing posts an accounting transaction — a later GL phase posts
+  from `receipts` once the account mappings are decided. Customer advances / on-account money,
+  receipt PDF + WhatsApp share and refunds are also not built.
+- **Before the first real receipt, the studio needs a CASH and a BANK account** in Account Master
+  (group under head group CASH / the group named BANK) — the shared DB has no account groups yet.
+- **Billing beyond Phase 2 is NOT implemented**, deliberately and by instruction: advance; the CGST/SGST/IGST split; the delivery workflow (the `delivery_date` column
   exists, the statuses do not); a draft/cancelled bill status; a Customer
   Master. (Invoice templates, preview, print and PDF are built — Phase 4.) The data is shaped so each of these
   is an addition, not a rewrite.
@@ -885,8 +945,8 @@ assumes one and will throw. Guard the login step when reusing it.
   the model), and WhatsApp reminders. Each is a real later decision, not an oversight.
 - **New permissions need existing roles re-saved.** Role grants are stored JSON, written before
   the newer permissions existed, so roles other than Super Admin (which bypasses everything)
-  do not have `masters_items` … `masters_books`, `operations_appointments` or the new
-  `operations_billing` ticked — verified: the `viewer@example.com` role gets 403 on every
+  do not have `masters_items` … `masters_books`, `operations_appointments`, `operations_billing`
+  or the Phase 6 `operations_receipts` ticked — verified: the `viewer@example.com` role gets 403 on every
   billing route until its role is re-saved. Per the README, opening a role in
   Settings → Roles and saving it picks up new permissions. A stale `sample_categories` key may
   still sit in that JSON; it is harmless (no route checks it) and clears on the next save.

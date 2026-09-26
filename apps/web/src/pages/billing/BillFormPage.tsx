@@ -26,6 +26,7 @@ import { useAuthStore } from '@/store/auth';
 import { fmtMoney, todayISO } from '@/lib/format';
 import { BillHeaderFields } from './BillHeaderFields';
 import { BillLinesGrid } from './BillLinesGrid';
+import { BillPaymentsPanel } from './BillPaymentsPanel';
 import { emptyLine, type BillFormValues, type BillLineFormValues, type BillRecord } from './types';
 
 const PERMISSION = 'operations_billing';
@@ -202,7 +203,7 @@ function BillForm({ bill }: { bill?: BillRecord }) {
     [addLine, fields.length],
   );
 
-  const save = useSave<Record<string, unknown>, BillRecord>({ invalidate: [QUERY_KEY, 'bill-invoice'], onSuccess: () => nav('/modules/billing') });
+  const save = useSave<Record<string, unknown>, BillRecord>({ invalidate: [QUERY_KEY, 'bill-invoice', 'bill-payments', 'receipts'], onSuccess: () => nav('/modules/billing') });
 
   const submit = handleSubmit((v) => {
     if (lines.length === 0) {
@@ -428,6 +429,9 @@ function BillForm({ bill }: { bill?: BillRecord }) {
             </div>
           </dl>
         </div>
+
+        {/* A saved bill's money received so far. Its figures are the server's, from active receipts. */}
+        {bill && <BillPaymentsPanel billId={bill.id} customerKey={bill.mobileSearch} dirty={isDirty} />}
 
         <div className="sticky bottom-0 z-10 flex items-center justify-end gap-3 border-t border-line bg-page py-3">
           {!allowed && <span className="mr-auto text-[12px] text-gray-500">You don’t have permission to {bill ? 'edit' : 'create'} bills.</span>}

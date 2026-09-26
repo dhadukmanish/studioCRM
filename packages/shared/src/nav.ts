@@ -26,6 +26,7 @@ export const NAV: NavSection[] = [
     items: [
       { label: 'Appointments', href: '/modules/appointments', icon: 'CalendarClock', permission: 'operations_appointments' },
       { label: 'Billing', href: '/modules/billing', icon: 'ReceiptText', permission: 'operations_billing' },
+      { label: 'Receipts', href: '/modules/receipts', icon: 'HandCoins', permission: 'operations_receipts' },
     ],
   },
   {

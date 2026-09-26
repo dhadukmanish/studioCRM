@@ -4,8 +4,8 @@ import { ts, tenantRef } from './core';
 
 /**
  * Tenant-level document counters — the source of every number the SERVER issues for a document
- * that has one sequence per tenant. Today that is the Appointment No.; a later Voucher or
- * Receipt number fits the same row shape without another table.
+ * that has one sequence per tenant: the Appointment No. and the Receipt No. A later Voucher
+ * number fits the same row shape without another table.
  *
  * NOT for bill numbers. A bill's series belongs to a Book row (`books.next_bill_number`), so
  * that two books can each hold a Bill No. 1 — a genuinely different shape, documented in
@@ -20,7 +20,7 @@ export const documentCounters = pgTable(
   'document_counters',
   {
     tenantId: tenantRef(),
-    /** `appointment` today — see `DocumentNumberType` in `services/documentNumbers.ts`. */
+    /** `appointment` or `receipt` — see `DocumentNumberType` in `services/documentNumbers.ts`. */
     documentType: text('document_type').notNull(),
     /** The number the NEXT document of this type will take. Starts at 1 and only ever rises. */
     nextNumber: integer('next_number').notNull().default(1),

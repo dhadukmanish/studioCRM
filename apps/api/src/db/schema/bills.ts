@@ -20,7 +20,8 @@ import { subItems } from './subItems';
  * each line snapshots the item name, product name, HSN code and GST rate it was built from.
  * Editing an Appointment or an Item Master row afterwards must never rewrite an issued bill.
  *
- * What this module deliberately does NOT model: advance, payment, outstanding, any accounting
+ * What this module deliberately does NOT model: payment (it lives in `receipts`, and Paid /
+ * Outstanding are derived from its allocations — never stored here), advance, any accounting
  * posting, a delivery or approval workflow, a draft/cancelled status, and the statutory
  * CGST/SGST/IGST split — which needs a place of supply and an intra/inter-state rule that
  * nothing here establishes. Each is a real later decision, not an oversight.

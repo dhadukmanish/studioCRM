@@ -8,8 +8,10 @@ date format), and the Bill (header, lines, master
 snapshots, book-wise numbering, bill-level discount, rate-wise GST summary and final totals),
 plus invoice templates, the invoice preview, print and server-side PDF (`docs/INVOICE_TEMPLATES.md`).
 WhatsApp invoice sharing is browser click-to-chat carrying a secure public invoice link (`/i/<token>`,
-`docs/WHATSAPP_SHARING.md`) — it never claims a message was sent. Payment, ledger, the CGST/SGST/IGST
-split and reports are not started.
+`docs/WHATSAPP_SHARING.md`) — it never claims a message was sent. Receipts record money received
+against bills — one receipt across many bills, partial and multiple payments, derived Paid /
+Outstanding, cancel-never-delete (`docs/RECEIPTS_PAYMENTS.md`). The ledger / GL, customer advances,
+the CGST/SGST/IGST split and reports are not started.
 Billing honours two contracts: `docs/BILL_NUMBERING.md` for identity and `docs/BILLING_CALCULATION.md`
 for money. Current implementation status lives in `.claude/HANDOFF.md`.
 
@@ -27,7 +29,7 @@ That is intentional for now; renaming the packages is a separate task.
 | Shared | `packages/shared` — zod schemas, permission catalog, nav, filter types, API envelope. Imported by **both** apps. |
 | Validation | zod, at the API boundary only (`lib/validate.ts` → `parse()`) |
 | Lint/format | none installed. `.editorconfig` (2 spaces, LF) + match surrounding style. Do not add ESLint/Prettier unless asked. |
-| Tests | Vitest in `apps/api` only (pinned to v3 — v5 needs Vite 6, this repo is on Vite 5). `pnpm test`. Read `.claude/skills/studio-testing` before adding any. |
+| Tests | Vitest (pinned to v3 — v5 needs Vite 6, this repo is on Vite 5) in `apps/api`, and in `apps/web` for component render tests (jsdom, `// @vitest-environment jsdom`). `pnpm test` runs both. Read `.claude/skills/studio-testing` before adding any. |
 
 ## Repo map
 
@@ -96,6 +98,12 @@ Dev servers are often already running from an earlier session — probe
     origin from `PUBLIC_APP_URL` (never the Host header), never log a full token, and keep at most
     one active link per bill. Any code path that changes a saved bill or an invoice template must
     revoke the affected links in the same transaction (`revokeActiveLinks`).
+11. **A bill's Paid and Outstanding are derived, never stored.** Paid = the sum of its allocations on
+    ACTIVE receipts (`services/billPayments.ts` is the only definition). A receipt's amount equals its
+    allocations exactly; it is never edited or deleted, only cancelled. Anything that can change a
+    bill's payment position — creating a receipt, editing or deleting a bill — takes the bill's
+    `FOR UPDATE` lock first (receipts lock in bill-id order), so Paid can never exceed Grand Total.
+    A bill with any receipt history is never deleted (`docs/RECEIPTS_PAYMENTS.md`).
 
 ## Architecture boundaries
 
@@ -135,7 +143,9 @@ Details: `docs/UI_DESIGN_SYSTEM.md`.
 
 ## Testing expectations
 
-Vitest runs in `apps/api` (`pnpm test`). Cover behavior worth protecting — billing math,
+Vitest runs in `apps/api` and `apps/web` (`pnpm test`). Web tests render real components
+(`ShareInvoiceDialog.test.tsx` is the pattern) so a runtime-only failure — a hook used but not
+imported — fails a test, not a user's page. Cover behavior worth protecting — billing math,
 document numbering, permission logic, status transitions, boundary validation — not
 implementation details. Pure schema/service tests always run; suites that need a database are
 gated on `TEST_DATABASE_URL` and skip without it, because the only database configured here is
@@ -191,5 +201,7 @@ return findings, not file dumps. Saving tokens never justifies guessing at corre
 - `docs/WHATSAPP_SHARING.md` — WhatsApp sharing: the secure public invoice link (token, hash-only
   storage, one-active-link rule, revocation on bill/template edit, `/i/:token`, `PUBLIC_APP_URL`),
   click-to-chat, number normalisation, message placeholders, audit ("opened", never "sent")
+- `docs/RECEIPTS_PAYMENTS.md` — receipts and allocation, derived Paid/Outstanding/status, the
+  customer key, Cash/Bank account rule, credit, locking, cancel, bill edit/delete protection, RBAC
 - `.claude/HANDOFF.md` — live project state, DB target, gotchas, pending work (`/handoff`)
 - `README.md` — boilerplate feature map and the "add a module" recipe

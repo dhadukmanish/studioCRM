@@ -39,8 +39,10 @@
 /* Invoice print: only the invoice copy rendered under <body> prints — never the app shell.
    See InvoicePrintRoot (components/invoice/InvoiceDocument.tsx). */
 .invoice-print-root { display: none; }
+/* Any other printable document (a receipt) uses the same mechanism under `.print-root`. */
+.print-root { display: none; }
 @media print {
-  body > *:not(.invoice-print-root) { display: none !important; }
-  .invoice-print-root { display: block; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body > *:not(.invoice-print-root):not(.print-root) { display: none !important; }
+  .invoice-print-root, .print-root { display: block; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   html, body { background: #fff !important; }
 }

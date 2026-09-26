@@ -1,8 +1,10 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import {
   calculateBill,
+  fromPaise,
   gstSummary,
   normalizeMobile,
+  toPaise,
   type BillDiscountValues,
   type BillInput,
   type BillItemInput,
@@ -11,8 +13,9 @@ import {
   type InvoiceTaxMode,
 } from '@erp/shared';
 import { db, schema } from '../db/client';
-import { notFound, validation } from '../lib/errors';
+import { AppError, notFound, validation } from '../lib/errors';
 import { allocateBillNumber } from './billNumbers';
+import { billHasAllocations, paidPaiseByBill } from './billPayments';
 import { revokeActiveLinks } from './publicInvoiceLinkRevoke';
 
 /**
@@ -38,8 +41,11 @@ import { revokeActiveLinks } from './publicInvoiceLinkRevoke';
  * lines BEFORE tax (see `calculateBill` in `@erp/shared`), and stores both the bill's figure
  * and each line's share of it.
  *
- * Not in this module, deliberately: advance, payment, outstanding, any accounting posting,
- * delivery workflow, draft/cancelled status and the CGST/SGST/IGST split.
+ * Payment lives in Receipts: a bill stores no paid or outstanding figure (they are derived from
+ * receipt allocations — `services/billPayments.ts`), but an edit may not undo money already
+ * received and a bill with payment history is never deleted. Not in this module, deliberately:
+ * advance, any accounting posting, delivery workflow, draft/cancelled status and the
+ * CGST/SGST/IGST split.
  */
 
 /** `db`, or the transaction handle inside `db.transaction(...)` — the same shape the services use. */
@@ -302,6 +308,57 @@ const discountOf = (body: { discountType: BillDiscountValues['type']; discountVa
   value: body.discountValue,
 });
 
+/* ---------------------------------------------------------------- payments -- */
+
+/**
+ * An edit may not undo money already received (docs/RECEIPTS_PAYMENTS.md). Runs under the bill's
+ * `FOR UPDATE` lock — the lock a receipt takes too — so Paid cannot move while this decides.
+ *
+ *  - The new Grand Total may not fall below what ACTIVE receipts have already paid.
+ *  - The customer mobile may not change once ANY receipt — active or cancelled — has settled the
+ *    bill. The normalized mobile is the customer identity every receipt is keyed by (until a real
+ *    customer master exists), so moving a bill with payment history to another number would leave
+ *    receipts naming one customer and settling another's bill. The name may still be corrected.
+ */
+async function assertEditKeepsPayments(exec: Executor, tenantId: string, existing: { id: string; mobileSearch: string }, body: BillUpdateInput, newGrandTotal: number) {
+  if (normalizeMobile(body.mobileNumber) !== existing.mobileSearch && (await billHasAllocations(exec, tenantId, existing.id))) {
+    const message = 'This bill has receipt history, so its customer mobile cannot change';
+    throw validation(message, [{ path: ['mobileNumber'], message }]);
+  }
+  const paid = (await paidPaiseByBill(exec, tenantId, [existing.id])).get(existing.id) ?? 0;
+  if (!paid) return;
+  const received = `₹${fromPaise(paid).toFixed(2)}`;
+  if (toPaise(newGrandTotal) < paid) {
+    throw validation(`${received} has already been received against this bill, so its Grand Total cannot go below ${received}`, [
+      { path: ['items'], message: `Grand Total cannot go below the ${received} already received` },
+    ]);
+  }
+}
+
+/**
+ * Delete a bill — only while no receipt has ever settled it. Payment history, even a cancelled
+ * receipt's, is never deleted with a bill. The bill row is locked first, the same lock a receipt
+ * takes, so a receipt cannot land between the check and the delete; `receipt_allocations_bill_tenant_fk`
+ * (RESTRICT) is the database's own last word.
+ */
+export async function deleteBill(tenantId: string, id: string) {
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ id: B.id, billNumber: B.billNumber, customerName: B.customerName, bookNumber: schema.books.bookNumber })
+      .from(B)
+      .innerJoin(schema.books, eq(schema.books.id, B.bookId))
+      .where(and(eq(B.id, id), eq(B.tenantId, tenantId)))
+      .limit(1)
+      .for('update', { of: B });
+    if (!existing) throw notFound('Bill');
+    if (await billHasAllocations(tx, tenantId, id)) {
+      throw new AppError('BILL_HAS_PAYMENTS', `Bill ${existing.bookNumber}/${existing.billNumber} has payment history and cannot be deleted`, 409);
+    }
+    await tx.delete(B).where(and(eq(B.id, id), eq(B.tenantId, tenantId)));
+    return existing;
+  });
+}
+
 /* --------------------------------------------------------------- public API -- */
 
 /**
@@ -435,6 +492,7 @@ export async function updateBill(tenantId: string, id: string, body: BillUpdateI
     const book = await resolveBook(tx, tenantId, existing.bookId, false);
     const appointment = body.appointmentId ? await resolveAppointment(tx, tenantId, body.appointmentId) : null;
     const { rows, totals } = await resolveLines(tx, tenantId, body.items, body.taxMode, discountOf(body), await existingSnapshots(tx, tenantId, id));
+    await assertEditKeepsPayments(tx, tenantId, existing, body, totals.grandTotal);
 
     const [bill] = await tx
       .update(B)

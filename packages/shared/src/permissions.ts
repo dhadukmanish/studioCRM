@@ -51,6 +51,8 @@ export const PERMISSIONS: PermissionDef[] = [
   // Operations
   { name: 'operations_appointments', displayName: 'Appointments', module: 'operations' },
   { name: 'operations_billing', displayName: 'Billing', module: 'operations' },
+  // Edit = cancel a receipt. A receipt is never edited or deleted — a wrong one is cancelled.
+  { name: 'operations_receipts', displayName: 'Receipts', module: 'operations', actions: ['read', 'create', 'update'] },
   // Administration
   { name: 'admin_companies', displayName: 'Companies', module: 'admin' },
   { name: 'admin_branches', displayName: 'Branches', module: 'admin' },

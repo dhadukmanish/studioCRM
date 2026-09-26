@@ -90,6 +90,7 @@ created_at, expires_at (NULL — unused, reserved), revoked_at, revoke_reason`.
 | Operator clicks **Revoke link** (with a confirm) | revoked (`MANUAL`); nothing new until the next Create |
 | Bill deleted | link rows deleted with it |
 | Company branding or the date format changes | **nothing** — see "Current presentation" |
+| A receipt is recorded or cancelled against the bill | **nothing** — payment never writes the bill row, and the invoice does not print Paid / Outstanding (`docs/RECEIPTS_PAYMENTS.md`). A bill with receipts can no longer be deleted |
 
 Revocation lives in the services, not in React: `updateBill` (`services/bills.ts`) and
 `updateTemplate` / `deleteTemplate` (`services/invoiceTemplates.ts`) call `revokeActiveLinks`

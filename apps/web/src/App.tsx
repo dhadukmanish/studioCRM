@@ -27,6 +27,9 @@ const AppointmentsPage = lazy(() => import('@/pages/appointments/AppointmentsPag
 const BillsPage = lazy(() => import('@/pages/billing/BillsPage'));
 const BillFormPage = lazy(() => import('@/pages/billing/BillFormPage'));
 const InvoicePreviewPage = lazy(() => import('@/pages/billing/InvoicePreviewPage'));
+const ReceiptsPage = lazy(() => import('@/pages/receipts/ReceiptsPage'));
+const ReceiptFormPage = lazy(() => import('@/pages/receipts/ReceiptFormPage'));
+const ReceiptDetailPage = lazy(() => import('@/pages/receipts/ReceiptDetailPage'));
 const InvoiceTemplatesPage = lazy(() => import('@/pages/settings/invoice-templates/InvoiceTemplatesPage'));
 const InvoiceTemplateDesignerPage = lazy(() => import('@/pages/settings/invoice-templates/InvoiceTemplateDesignerPage'));
 
@@ -77,6 +80,10 @@ export default function App() {
               <Route path="/modules/billing/new" element={<Guard permission="operations_billing"><BillFormPage /></Guard>} />
               <Route path="/modules/billing/:id" element={<Guard permission="operations_billing"><BillFormPage /></Guard>} />
               <Route path="/modules/billing/:id/invoice" element={<Guard permission="operations_billing"><InvoicePreviewPage /></Guard>} />
+              {/* Receipts are created and cancelled, never edited — so ':id' is a read-only detail. The form checks create itself. */}
+              <Route path="/modules/receipts" element={<Guard permission="operations_receipts"><ReceiptsPage /></Guard>} />
+              <Route path="/modules/receipts/new" element={<Guard permission="operations_receipts"><ReceiptFormPage /></Guard>} />
+              <Route path="/modules/receipts/:id" element={<Guard permission="operations_receipts"><ReceiptDetailPage /></Guard>} />
               {/* ---- Settings ---- */}
               <Route path="/modules/settings" element={<SettingsHub />} />
               {/* The designer needs the full width, so it sits outside the settings sub-nav. */}

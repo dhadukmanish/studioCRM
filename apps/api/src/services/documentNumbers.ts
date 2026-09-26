@@ -12,12 +12,12 @@ import { db, schema } from '../db/client';
  */
 
 /**
- * The documents that take a tenant-level number. One entry today; a Voucher or Receipt number
- * would be added here and need no new table.
+ * The documents that take a tenant-level number: the Appointment No. and the Receipt No. A Voucher
+ * number would be added here and need no new table.
  *
  * Bill numbers are deliberately NOT in this union — see `docs/BILL_NUMBERING.md`.
  */
-export type DocumentNumberType = 'appointment';
+export type DocumentNumberType = 'appointment' | 'receipt';
 
 /** `db`, or the transaction handle inside `db.transaction(...)` — the same shape the services use. */
 export type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
