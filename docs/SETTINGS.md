@@ -21,6 +21,12 @@ profile. The product name ("StudioCRM") is the application's and comes from the 
 login page shows the product only, because no tenant is known before sign-in. `tenants.name` is
 an internal label and is not rendered anywhere.
 
+**Default Billing Book** (`defaultBillingBookId`, Settings → General → Billing) is an application
+setting: the book a new bill opens with when several are active, or empty for Automatic (last used).
+It is a preference, never validated against history — an inactive or missing book is simply skipped
+(`resolveDefaultBook`, docs/BILL_NUMBERING.md). The UI theme is a per-browser preference (UI store),
+not a tenant setting.
+
 ## Dates: stored canonical, shown per setting
 
 - **Storage never changes with the setting.** A business date (Bill, Delivery, Birth,

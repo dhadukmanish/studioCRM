@@ -129,7 +129,7 @@ describe.skipIf(!TEST_DB)('Receipts API (integration, needs TEST_DATABASE_URL)',
 
   /** Per tenant: a book, a 0% product and the payment/non-payment accounts the tests pick from. */
   async function seedMasters(tenantId: string) {
-    const [book] = await db.insert(schema.books).values({ tenantId, bookNumber: `RB${Math.random().toString(36).slice(2, 7)}`, seriesStartsAt: 1, nextBillNumber: 1 }).returning();
+    const [book] = await db.insert(schema.books).values({ tenantId, bookNumber: `RB${Math.random().toString(36).slice(2, 7)}`, seriesStartsAt: 1, nextBillNumber: 1, seriesType: 'WITHOUT_GST' }).returning();
     const [item] = await db.insert(schema.items).values({ tenantId, itemName: `Item-${Math.random().toString(36).slice(2, 8)}`, hsnCode: '9983', gstRate: '0.00' }).returning();
     const [subItem] = await db.insert(schema.subItems).values({ tenantId, itemId: item.id, productName: `Prod-${Math.random().toString(36).slice(2, 8)}`, rate: '100.00' }).returning();
     const group = async (groupName: string, headGroup: string) => (await db.insert(schema.accountGroups).values({ tenantId, groupName, headGroup }).returning())[0];
@@ -211,6 +211,8 @@ describe.skipIf(!TEST_DB)('Receipts API (integration, needs TEST_DATABASE_URL)',
     process.env.PORT = '0';
     ({ and, eq, inArray, isNull } = await import('drizzle-orm'));
     const client = await import('../db/client');
+    // Fail closed before the first write: the pool must really be on the throwaway database.
+    await (await import('../test-support/dbGuard')).assertTestDatabase(client, TEST_DB);
     db = client.db;
     sqlClient = client.sql;
     schema = client.schema;
@@ -505,8 +507,7 @@ describe.skipIf(!TEST_DB)('Receipts API (integration, needs TEST_DATABASE_URL)',
       const moved = await edit(b.id, newMobile(), 1000);
       expect(moved.statusCode).toBe(400);
       expect(moved.json().error.details[0].path).toEqual(['mobileNumber']);
-      // Same number in another shape is the same customer.
-      expect((await edit(b.id, `+91-${mobile}`, 1000, { customerName: 'Corrected Name' })).statusCode).toBe(200);
+      expect((await edit(b.id, mobile, 1000, { customerName: 'Corrected Name' })).statusCode).toBe(200);
     });
 
     it('with only a cancelled receipt: the total is free again, but the mobile still cannot change', async () => {
@@ -518,6 +519,25 @@ describe.skipIf(!TEST_DB)('Receipts API (integration, needs TEST_DATABASE_URL)',
       const moved = await edit(b.id, newMobile(), 10);
       expect(moved.statusCode).toBe(400);
       expect(moved.json().error.details[0].path).toEqual(['mobileNumber']);
+      expect(moved.json().error.message).toMatch(/receipt history/);
+    });
+
+    /**
+     * A bill saved before the ten-digit rule, with receipt history: its stored mobile fails the new
+     * rule and any ten-digit value is another customer — so the untouched key must stay saveable.
+     */
+    it('a legacy bill with receipts stays editable with its own customer key', async () => {
+      const mobile = newMobile();
+      const b = await bill(A.token, mA, mobile, 1000);
+      await receiptOk(A.token, mA, mobile, [{ billId: b.id, amount: 100 }]);
+      // Formatted as it was typed before the rule — same key.
+      await db.update(schema.bills).set({ mobileNumber: `+91 ${mobile.slice(0, 5)} ${mobile.slice(5)}` }).where(eq(schema.bills.id, b.id));
+      expect((await edit(b.id, mobile, 1000, { customerName: 'Legacy Corrected' })).statusCode).toBe(200);
+      // A short legacy number — its key is itself.
+      await db.update(schema.bills).set({ mobileNumber: '98765-4321', mobileSearch: '987654321' }).where(eq(schema.bills.id, b.id));
+      expect((await edit(b.id, '987654321', 1000)).statusCode).toBe(200);
+      const moved = await edit(b.id, '9876543210', 1000);
+      expect(moved.statusCode).toBe(400);
       expect(moved.json().error.message).toMatch(/receipt history/);
     });
 

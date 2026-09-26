@@ -129,6 +129,66 @@ past the start and the API refuses to change it.
 That lock keys off the counter having moved, and the counter moves only through
 `allocateBillNumber`. No bill-existence check is invented anywhere.
 
+## Series type — the book decides the tax mode
+
+Every Book has a **Series Type**: `WITH_GST` or `WITHOUT_GST` (`books.series_type`,
+`BOOK_SERIES_TYPES`). A business may run one book of either type, or several of each, active at the
+same time — nothing assumes two, and nothing forces a second book.
+
+- A NEW bill's `tax_mode` **is** its book's series type. `createBill` reads the type (after locking
+  the book row, the lock `allocateBillNumber` takes anyway) and stores it; the payload's `taxMode`
+  is optional, and one that contradicts the book is refused on `taxMode` (400). The form shows Tax
+  Mode read-only, following the selected book.
+- An EDIT keeps the bill's own saved `tax_mode` — including a bill issued before series types
+  existed whose mode differs from its book. It cannot be changed by an edit.
+- The type is **frozen** by the same evidence as the series start: once the counter has moved the
+  API refuses a change (field `seriesType`), and the UPDATE itself is conditional
+  (`case when next_bill_number = series_starts_at …`), so a bill racing the edit cannot end up in a
+  series whose type flipped under it. An unused book may change type.
+- Series Type adds **no formula**. WITH_GST and WITHOUT_GST are the two modes
+  `docs/BILLING_CALCULATION.md` has always defined.
+
+**Backfill (migration `0019`):** `0018` added the column with DEFAULT `WITH_GST`; `0019` sets
+`WITHOUT_GST` on every book whose issued bills are ALL Without GST. Books with no bills, only With
+GST bills, or a mix keep With GST. No counter, number or bill was touched. On the shared database at
+the time (one book, `2026-27`, one With GST bill) this meant: `2026-27` = With GST, unchanged.
+
+## The default book for a new bill
+
+`GET /api/bills/default-book` (`resolveDefaultBook`) — a suggestion the form opens with; the
+operator may pick any active book, and asking takes no number:
+
+1. exactly **one** active book → that book (no configuration needed);
+2. several → the configured **Default Billing Book** (`app_settings.defaultBillingBookId`, Settings →
+   General; empty = Automatic) if that book is still active;
+3. else the **last used** active book — the book of the tenant's most recently created bill.
+   Derived from saved bills, so nothing is stored for it and it can never go stale; tenant-wide
+   (bills do not record which user created them);
+4. else a stable fallback: the first active book in book-number order.
+
+An inactive or deleted configured / last-used book is skipped, never an error.
+
+## Next Visit → one linked appointment
+
+A bill's optional **Next Visit Date** (`bills.next_visit_date`, never calculated — the operator
+picks it) creates exactly one Appointment when the bill is saved, in the **same transaction**
+(`services/nextVisit.ts`): customer name, mobile, baby name, the date, no time (none was chosen),
+remark "Next visit from Bill <book>/<no>", numbered by `allocateDocumentNumber`.
+
+- **Link:** `appointments.source_bill_id`, with a unique index on `(tenant_id, source_bill_id)` — a
+  bill can never have two, whatever the number of saves; concurrent edits also queue on the bill's
+  `FOR UPDATE` lock. Not "same mobile + date".
+- **Change the date** → the same appointment moves to the new date — unless that appointment has
+  itself been billed (the visit happened), which is refused on `nextVisitDate`.
+- **Clear the date** → the appointment is **detached** (`source_bill_id` = NULL) and kept; delete it
+  in Appointments if the visit is cancelled. Setting a date again books a new one.
+- **Re-save without changing the date** after the studio deleted the appointment by hand → nothing
+  is re-created.
+- **Delete the bill** → the appointment is detached and kept (`deleteBill`, and the FK is
+  `ON DELETE SET NULL`).
+- A bill cannot name its own next-visit appointment as the booking it came from.
+- A failure anywhere rolls back the bill, its number and the appointment number together.
+
 ## Appointment → Bill
 
 **Their numbering is not this numbering.** An Appointment No. is a tenant-level sequence taken
@@ -150,6 +210,12 @@ appointment afterwards does not touch a bill that was already issued, and cleari
 a bill does not clear the customer values that were typed.
 
 A bill needs no appointment at all — a walk-in customer is billed with `appointment_id` NULL.
+
+**The bill's mobile is exactly 10 digits** (`billMobileSchema`): the server refuses letters, spaces,
+prefixes and any other length. The form keeps digits only, at most ten (`sanitizeMobileInput` — a
+pasted `+91 98765 43210` becomes `9876543210`), and opens a bill saved earlier with a formatted mobile
+as its ten digits — the same normalized customer key, so the receipt mobile-change guard is not
+tripped. Appointment keeps its own, looser mobile rule; the lookup matches on the normalized key.
 
 ## What a line stores, and why
 

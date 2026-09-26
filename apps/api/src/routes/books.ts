@@ -64,6 +64,17 @@ export async function bookRoutes(app: FastifyInstance) {
           { path: ['seriesStartsAt'], message: `This book has already issued bill numbers (next is ${existing.nextBillNumber})` },
         ]);
       }
+
+      /**
+       * The series type is frozen by the same evidence: bills issued under it were taxed by it, and
+       * the next one must not silently switch between With and Without GST. An unused book may
+       * still change type.
+       */
+      if (existing && body.seriesType !== undefined && body.seriesType !== existing.seriesType && existing.nextBillNumber !== existing.seriesStartsAt) {
+        throw validation('Series type cannot be changed once this book has issued bill numbers', [
+          { path: ['seriesType'], message: 'This book has already issued bill numbers — create a new book for the other series type' },
+        ]);
+      }
     },
     /**
      * `bills` references this row with ON DELETE RESTRICT, so the database would refuse
@@ -85,21 +96,52 @@ export async function bookRoutes(app: FastifyInstance) {
      */
     toRow: (body, _req, existing) => {
       if (!existing) return { ...body, nextBillNumber: body.seriesStartsAt };
-      const untouched = existing.nextBillNumber === existing.seriesStartsAt;
-      return body.seriesStartsAt !== undefined && untouched ? { ...body, nextBillNumber: body.seriesStartsAt } : { ...body };
+      const row: Record<string, unknown> = { ...body };
+      /**
+       * The checks above read the row without a lock, so the write itself is conditional, evaluated
+       * under the row lock against the row as it now stands: if a bill took a number in between,
+       * neither the series start (nor the counter with it) nor the series type moves. `afterUpdate`
+       * then reports that refusal instead of a false "updated". (`createBill` locks the book before
+       * reading its type, so the two cannot interleave the other way round.)
+       */
+      const untouched = sql`${schema.books.nextBillNumber} = ${schema.books.seriesStartsAt}`;
+      if (body.seriesStartsAt !== undefined && body.seriesStartsAt !== existing.seriesStartsAt) {
+        row.seriesStartsAt = sql`case when ${untouched} then ${body.seriesStartsAt} else ${schema.books.seriesStartsAt} end`;
+        row.nextBillNumber = sql`case when ${untouched} then ${body.seriesStartsAt} else ${schema.books.nextBillNumber} end`;
+      } else {
+        delete row.seriesStartsAt;
+      }
+      if (body.seriesType !== undefined && body.seriesType !== existing.seriesType) {
+        row.seriesType = sql`case when ${untouched} then ${body.seriesType} else ${schema.books.seriesType} end`;
+      } else {
+        delete row.seriesType;
+      }
+      return row;
+    },
+    /** A change the conditional write above declined (a number was issued mid-edit) is an error, not a success. */
+    afterUpdate: async (updated, req, previous) => {
+      const sent = req.body as { seriesStartsAt?: unknown; seriesType?: unknown };
+      const startRefused = sent.seriesStartsAt !== undefined && Number(sent.seriesStartsAt) !== previous.seriesStartsAt && updated.seriesStartsAt === previous.seriesStartsAt;
+      const typeRefused = sent.seriesType !== undefined && sent.seriesType !== previous.seriesType && updated.seriesType === previous.seriesType;
+      if (startRefused || typeRefused) {
+        const field = typeRefused ? 'seriesType' : 'seriesStartsAt';
+        const message = `${typeRefused ? 'Series type' : 'Series starts at'} cannot be changed once this book has issued bill numbers`;
+        throw validation(message, [{ path: [field], message: 'This book issued a bill number while you were editing it' }]);
+      }
     },
   });
 
   /**
    * Lookup for pickers — Billing's book selector next. Active books only, because an inactive
-   * book stays readable and reportable but is closed to new bills. Deliberately just the id
-   * and the label: the counter is not a value a picker has any business carrying around.
+   * book stays readable and reportable but is closed to new bills. Deliberately just the id,
+   * the label and the series type (it decides the new bill's tax mode): the counter is not a value
+   * a picker has any business carrying around.
    * `includeInactive=1` (a report's Book filter) lists closed books too, marked `isActive: false`.
    */
   app.get('/api/common/lookups/books', { preHandler: app.authenticate }, async (req) => {
     const includeInactive = (req.query as { includeInactive?: string }).includeInactive === '1';
     const rows = await db
-      .select({ id: schema.books.id, bookNumber: schema.books.bookNumber, ...(includeInactive ? { isActive: schema.books.isActive } : {}) })
+      .select({ id: schema.books.id, bookNumber: schema.books.bookNumber, seriesType: schema.books.seriesType, ...(includeInactive ? { isActive: schema.books.isActive } : {}) })
       .from(schema.books)
       .where(and(eq(schema.books.tenantId, req.user.tenantId), includeInactive ? undefined : eq(schema.books.isActive, true)))
       .orderBy(asc(schema.books.bookNumber));

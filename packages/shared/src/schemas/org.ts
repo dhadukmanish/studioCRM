@@ -81,5 +81,11 @@ export const appSettingsSchema = z
         if (unknown.length) ctx.addIssue({ code: 'custom', message: `Unknown placeholder ${unknown.map((u) => `{${u}}`).join(', ')}. Use ${WHATSAPP_MESSAGE_VARIABLES.map((u) => `{${u}}`).join(', ')}` });
       })
       .optional(),
+    /**
+     * The Book a NEW bill opens with when several books are active. null = Automatic (the
+     * last-used active book). A stale id — the book since deactivated or deleted — is ignored by
+     * `resolveDefaultBook`, never an error.
+     */
+    defaultBillingBookId: z.preprocess((v) => (v === '' ? null : v), z.string().uuid('Select a valid book').nullable()).optional(),
   })
   .passthrough();

@@ -36,7 +36,7 @@ function issuesFor(input: unknown, schema: ZodTypeAny = bookSchema) {
 
 describe('bookSchema (create payload)', () => {
   it('accepts a valid book and trims the number', () => {
-    expect(parseBook(makeBook({ bookNumber: '  2026-27  ' }))).toEqual({ bookNumber: '2026-27', seriesStartsAt: 1, isActive: true });
+    expect(parseBook(makeBook({ bookNumber: '  2026-27  ' }))).toEqual({ bookNumber: '2026-27', seriesStartsAt: 1, seriesType: 'WITH_GST', isActive: true });
   });
 
   it('defaults a new book to active when isActive is omitted', () => {
@@ -188,6 +188,7 @@ describe.skipIf(!TEST_DB)('Book Master API (integration, needs TEST_DATABASE_URL
   let sqlClient: typeof import('../db/client').sql;
   let schema: typeof import('../db/client').schema;
   let inArray: typeof import('drizzle-orm').inArray;
+  let eq: typeof import('drizzle-orm').eq;
   let allocateBillNumber: typeof import('../services/billNumbers').allocateBillNumber;
 
   const tenantIds: string[] = [];
@@ -222,8 +223,10 @@ describe.skipIf(!TEST_DB)('Book Master API (integration, needs TEST_DATABASE_URL
   beforeAll(async () => {
     process.env.DATABASE_URL = TEST_DB;
     process.env.PORT = '0'; // server.ts boots a listener on import; keep it off a real port
-    inArray = (await import('drizzle-orm')).inArray;
+    ({ inArray, eq } = await import('drizzle-orm'));
     const client = await import('../db/client');
+    // Fail closed before the first write: the pool must really be on the throwaway database.
+    await (await import('../test-support/dbGuard')).assertTestDatabase(client, TEST_DB);
     db = client.db;
     sqlClient = client.sql;
     schema = client.schema;
@@ -336,6 +339,42 @@ describe.skipIf(!TEST_DB)('Book Master API (integration, needs TEST_DATABASE_URL
       const row = await created(tokenA, { bookNumber: uniqueNumber('SAME START'), seriesStartsAt: 20 });
       await allocateBillNumber(db, tenantAId, row.id);
       expect((await put(tokenA, row.id, { seriesStartsAt: 20 })).statusCode).toBe(200);
+    });
+
+    /* ------------------------------------------------ series type -- */
+
+    it('creates a With GST book by default and a Without GST book on request', async () => {
+      expect(await created(tokenA, { bookNumber: uniqueNumber('TYPE DEFAULT') })).toMatchObject({ seriesType: 'WITH_GST' });
+      expect(await created(tokenA, { bookNumber: uniqueNumber('TYPE NG'), seriesType: 'WITHOUT_GST' })).toMatchObject({ seriesType: 'WITHOUT_GST' });
+    });
+
+    it('refuses an unknown series type', async () => {
+      expect((await post(tokenA, { bookNumber: uniqueNumber('TYPE BAD'), seriesType: 'IGST' })).statusCode).toBe(400);
+    });
+
+    it('lets an unused book change its series type', async () => {
+      const row = await created(tokenA, { bookNumber: uniqueNumber('TYPE FREE') });
+      const res = await put(tokenA, row.id, { seriesType: 'WITHOUT_GST' });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data).toMatchObject({ seriesType: 'WITHOUT_GST', nextBillNumber: 1 });
+    });
+
+    it('refuses to change the series type once the book has issued a number — and keeps the counter', async () => {
+      const row = await created(tokenA, { bookNumber: uniqueNumber('TYPE LOCKED') });
+      await allocateBillNumber(db, tenantAId, row.id);
+      const res = await put(tokenA, row.id, { seriesType: 'WITHOUT_GST' });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.details[0].path).toEqual(['seriesType']);
+      const [stored] = await db.select().from(schema.books).where(eq(schema.books.id, row.id));
+      expect(stored).toMatchObject({ seriesType: 'WITH_GST', nextBillNumber: 2 });
+      // Resubmitting the same type, or renaming, is still fine.
+      expect((await put(tokenA, row.id, { seriesType: 'WITH_GST', bookNumber: uniqueNumber('TYPE LOCKED 2') })).statusCode).toBe(200);
+    });
+
+    it('the Billing lookup carries each active book with its series type', async () => {
+      const ng = await created(tokenA, { bookNumber: uniqueNumber('LOOKUP NG'), seriesType: 'WITHOUT_GST' });
+      const rows = (await app.inject({ method: 'GET', url: '/api/common/lookups/books', headers: auth(tokenA) })).json().data as { id: string; seriesType: string }[];
+      expect(rows.find((r) => r.id === ng.id)).toMatchObject({ seriesType: 'WITHOUT_GST' });
     });
   });
 
@@ -514,10 +553,10 @@ describe.skipIf(!TEST_DB)('Book Master API (integration, needs TEST_DATABASE_URL
     });
 
     /** The counter is not a value a generic picker has any business carrying around. */
-    it('never exposes the counter through the lookup', async () => {
+    it('never exposes the counter through the lookup — only id, label and series type', async () => {
       await post(tokenA, { bookNumber: uniqueNumber('LOOKUP SHAPE') });
       const rows = (await app.inject({ method: 'GET', url: '/api/common/lookups/books', headers: auth(tokenA) })).json().data as Record<string, unknown>[];
-      expect(Object.keys(rows[0]).sort()).toEqual(['bookNumber', 'id']);
+      expect(Object.keys(rows[0]).sort()).toEqual(['bookNumber', 'id', 'seriesType']);
     });
   });
 

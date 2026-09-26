@@ -102,6 +102,9 @@ duplicate surface as the mapped 409. `SELECT max(number) + 1` is never acceptabl
 
 ## 8. Safety
 
+Test-DB selection, the fail-closed connection guard and the production migration review are
+owned by the `studio-db-safety` skill — load it before running a migration or a DB suite.
+
 - Do not delete or truncate data to make a migration apply. Do not reseed a database that
   holds real rows (`pnpm db:seed` is for a fresh environment).
 - Before anything irreversible: stop and ask, and state what would be lost.

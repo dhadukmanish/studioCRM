@@ -7,11 +7,12 @@ import {
   BILL_DISCOUNT_TYPES,
   BILL_DISCOUNT_TYPE_SHORT,
   BILL_LIMITS,
-  INVOICE_TAX_MODE_LABELS,
+  BOOK_SERIES_TYPE_LABELS,
   billDiscountError,
   calculateBill,
   formatGst,
   invoiceFileName,
+  normalizeMobile,
   type BillDiscountType,
   type GstSummaryRow,
 } from '@erp/shared';
@@ -21,7 +22,7 @@ import { api, ApiError } from '@/lib/api';
 import { downloadInvoicePdf } from '@/lib/invoice';
 import { toast } from '@/lib/toast';
 import { ShareInvoiceDialog } from '@/components/invoice/ShareInvoiceDialog';
-import { applyApiErrors, useBooksLookup, useItemsLookup, useSave, type AppointmentLookup } from '@/lib/queries';
+import { applyApiErrors, useBooksLookup, useDefaultBillingBook, useItemsLookup, useSave, type AppointmentLookup } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
 import { fmtMoney, todayISO } from '@/lib/format';
 import { BillHeaderFields } from './BillHeaderFields';
@@ -86,11 +87,15 @@ const toForm = (bill?: BillRecord): BillFormValues => ({
   billDate: bill?.billDate ?? todayISO(),
   deliveryDate: bill?.deliveryDate ?? '',
   customerName: bill?.customerName ?? '',
-  mobileNumber: bill?.mobileNumber ?? '',
+  // A bill saved before the 10-digit rule may hold "+91 98765 43210": shown as its customer KEY (the
+  // normalized digits, last ten), so re-saving it is not a mobile change — see `legacyMobileKey`.
+  mobileNumber: bill ? normalizeMobile(bill.mobileNumber) : '',
   babyName: bill?.babyName ?? '',
   hasBirthDate: bill?.hasBirthDate ?? false,
   birthDate: bill?.birthDate ?? '',
   remark: bill?.remark ?? '',
+  nextVisitDate: bill?.nextVisitDate ?? '',
+  // A new bill's mode follows the selected book (set below); a saved bill keeps its own.
   taxMode: bill?.taxMode ?? 'WITH_GST',
   discountType: bill?.discountType ?? 'NONE',
   // NONE stores 0; showing it as an empty box keeps the control quiet until it is used.
@@ -126,11 +131,31 @@ function BillForm({ bill }: { bill?: BillRecord }) {
 
   const form = useForm<BillFormValues>({ defaultValues: toForm(bill) });
   const { control, handleSubmit, register, setValue, setError, formState: { errors, isDirty } } = form;
-  const { fields, append, remove } = useFieldArray({ control, name: 'items' });
+  const { fields, insert, remove } = useFieldArray({ control, name: 'items' });
 
   const books = useBooksLookup();
   const items = useItemsLookup();
-  const bookOptions: Option[] = useMemo(() => (books.data ?? []).map((b) => ({ value: b.id, label: b.bookNumber })), [books.data]);
+  const bookOptions: Option[] = useMemo(() => (books.data ?? []).map((b) => ({ value: b.id, label: b.bookNumber, sub: BOOK_SERIES_TYPE_LABELS[b.seriesType] })), [books.data]);
+
+  /**
+   * A NEW bill opens on the server's default book (the only active one, the configured default,
+   * the last used, or a stable first) — a suggestion the operator can change, and it takes no
+   * number. Applied once, and never over a book the operator already picked.
+   */
+  const defaultBook = useDefaultBillingBook(!bill);
+  const bookId = useWatch({ control, name: 'bookId' });
+  useEffect(() => {
+    const suggested = defaultBook.data?.bookId;
+    if (bill || !suggested || form.getValues('bookId')) return;
+    setValue('bookId', suggested);
+  }, [bill, defaultBook.data, form, setValue]);
+
+  /** The book decides the tax mode of a new bill; the preview follows it as the book changes. */
+  useEffect(() => {
+    if (bill) return;
+    const book = books.data?.find((b) => b.id === bookId);
+    if (book) setValue('taxMode', book.seriesType);
+  }, [bill, bookId, books.data, setValue]);
   const itemOptions: Option[] = useMemo(() => (items.data ?? []).map((i) => ({ value: i.id, label: i.itemName })), [items.data]);
 
   /**
@@ -190,12 +215,20 @@ function BillForm({ bill }: { bill?: BillRecord }) {
     if (type === 'NONE') setValue('discountValue', '', { shouldDirty: true });
   };
 
-  const addLine = useCallback(() => {
-    if (fields.length >= BILL_LIMITS.maxLines) return;
-    append(emptyLine());
-    setLineCountError(null);
-    setFocusIndex(fields.length);
-  }, [append, fields.length]);
+  /**
+   * A new blank line right AFTER `after` (a row's + button), or at the end when `after` is omitted
+   * (Enter on the last line, the empty-state button), and the caret goes to its Item cell.
+   */
+  const addLine = useCallback(
+    (after?: number) => {
+      if (fields.length >= BILL_LIMITS.maxLines) return;
+      const at = after === undefined ? fields.length : after + 1;
+      insert(at, emptyLine(), { shouldFocus: false });
+      setLineCountError(null);
+      setFocusIndex(at);
+    },
+    [insert, fields.length],
+  );
 
   /** Enter at the end of a line: on to the next one, or a new one when this was the last. */
   const nextLine = useCallback(
@@ -203,7 +236,8 @@ function BillForm({ bill }: { bill?: BillRecord }) {
     [addLine, fields.length],
   );
 
-  const save = useSave<Record<string, unknown>, BillRecord>({ invalidate: [QUERY_KEY, 'bill-invoice', 'bill-payments', 'receipts', 'receivables'], onSuccess: () => nav('/modules/billing') });
+  // 'appointments': a next visit creates or moves an appointment in the same save.
+  const save = useSave<Record<string, unknown>, BillRecord>({ invalidate: [QUERY_KEY, 'bill-invoice', 'bill-payments', 'receipts', 'receivables', 'appointments'], onSuccess: () => nav('/modules/billing') });
 
   const submit = handleSubmit((v) => {
     if (lines.length === 0) {
@@ -221,7 +255,8 @@ function BillForm({ bill }: { bill?: BillRecord }) {
       hasBirthDate: v.hasBirthDate,
       birthDate: v.hasBirthDate ? blank(v.birthDate) : null,
       remark: blank(v.remark),
-      taxMode: v.taxMode,
+      nextVisitDate: blank(v.nextVisitDate),
+      // No taxMode: the book decides it (new) or the saved bill keeps it (edit) — the server's call.
       // The pair the operator chose. What it is worth in money is the server's answer, and
       // so is each line's share of it — neither is in this payload.
       discountType: v.discountType,
@@ -325,6 +360,7 @@ function BillForm({ bill }: { bill?: BillRecord }) {
           canSeeAppointments={can('operations_appointments')}
           bookOptions={bookOptions}
           booksLoading={books.isLoading}
+          taxMode={taxMode}
           linkedAppointmentNo={appointmentId ? linkedNo : null}
           onPickAppointment={pickAppointment}
           onClearAppointment={clearAppointment}
@@ -358,13 +394,6 @@ function BillForm({ bill }: { bill?: BillRecord }) {
 
         <div className="card flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0 flex-1 space-y-3">
-            <p className="text-[12px] text-gray-500">
-              {taxMode === 'WITH_GST'
-                ? 'The rate is GST-exclusive: a discount comes off the taxable value first, then GST is charged per line at the item’s own rate.'
-                : `This bill is ${INVOICE_TAX_MODE_LABELS.WITHOUT_GST.toLowerCase()} — no tax is charged, though each line keeps the GST % it came from.`}
-              <br />
-              Totals are recalculated and stored by the server when you save.
-            </p>
             {/* Only where tax is actually charged. A rate-wise table on a bill that charges
                 nothing would read as a claim that those rates were billed. */}
             {taxMode === 'WITH_GST' && <GstDetails rows={preview.gstSummary} gstTotal={preview.totals.gstAmount} taxableTotal={preview.totals.netTaxable} />}

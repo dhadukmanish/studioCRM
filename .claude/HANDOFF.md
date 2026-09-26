@@ -347,7 +347,7 @@ committed as `2ef33c3` feat: add receipts payments and outstanding.
 ### Receivables / Outstanding & Aging reports — Phase 7
 
 **Full contract: `docs/RECEIVABLES_REPORTS.md`.** Branch `feature/receivables-reports` (from
-`2ef33c3`), **uncommitted** at the time of writing. **No migration** — existing indexes serve it.
+`2ef33c3`), committed as `edf8928`. **No migration** — existing indexes serve it.
 
 - **Read-only, derived, stored nowhere.** `services/receivables.ts` builds ONE bill-level model on
   Phase 6's `paidSubquery` / `paymentColumns` (now with an optional `asOf` receipt-date cutoff) plus
@@ -374,6 +374,34 @@ committed as `2ef33c3` feat: add receipts payments and outstanding.
 - **Measured** on 2,248 bills / 330 customers / 468 allocations: every report request 9–23 ms,
   one aggregate per query (`loops=1`), no per-row queries; the drill-down uses
   `bills_tenant_mobile_idx`. Seq scans on `bills` are the planner's right choice at that size.
+
+### Billing book series, Next Visit and themes — Phase 8
+
+**Contract: `docs/BILL_NUMBERING.md`** (series type, default book, Next Visit, mobile). Branch
+`feature/billing-book-ux-enhancements` (from `edf8928`). Migrations **`0018`** (additive:
+`books.series_type` DEFAULT `WITH_GST` + check, `bills.next_visit_date`, `appointments.source_bill_id`
+FK → `bills.id` ON DELETE SET NULL + unique `(tenant_id, source_bill_id)`) and **`0019`** (hand-written
+backfill: a book whose bills are ALL Without GST becomes Without GST; nothing else changes).
+
+- **Book → tax mode.** A new bill's tax mode is its book's series type (server-derived, contradicting
+  payload refused); an edit keeps the saved mode. Series type frozen once the counter moved (API check
+  + conditional UPDATE); `createBill` locks the book row before reading the type. The allocator is
+  untouched. One book of either type is enough; any number of either may be active.
+- **Default book** `GET /api/bills/default-book`: only active → configured `defaultBillingBookId`
+  (Settings → General → Billing) → last used (book of the most recent bill, derived, tenant-wide) →
+  first by book number. Stale choices skipped.
+- **Mobile** exactly 10 digits on the server; the form keeps digits only (max 10, paste sanitized).
+- **Next Visit Date** → one appointment in the bill's transaction (`services/nextVisit.ts`); date
+  change moves it (refused once that appointment has been billed); clear / bill delete detaches and
+  keeps it; an unrelated re-save never re-creates a deleted one.
+- **UI:** More details removed (fields shown directly), Tax Mode read-only, row + before Delete (Add
+  line removed, empty-state "Add item"), helper texts and the GST-exclusive note removed, Book Master
+  Series Type (form, column, filter), Default Billing Book setting, themes Sky / Slate / Teal / Soft
+  Lavender added to Light / Dark / Olive.
+- **Test DB guard** in every DB suite: `assertTestDatabase` (`src/test-support/dbGuard.ts`) checks the
+  client URL AND the database/port actually reached before any write.
+- **Skills** added: `studio-billing-domain`, `studio-db-safety`, `studio-ui-verification`,
+  `studio-release`; `studio-testing` / `studio-database` point at `studio-db-safety`.
 
 ### Bill numbering
 
@@ -540,7 +568,8 @@ exists; future feature branches start from `main` and merge back into it before 
 | `feature/whatsapp-invoice-sharing` | branched from `bef9e04`; Phase 5 (WhatsApp invoice sharing) — `cc80226` feat: add WhatsApp invoice sharing | committed, not pushed, not merged |
 | `feature/public-invoice-links` | branched from `cc80226`; Phase 5.1 (secure public invoice link) — `515b01a` feat: add secure public invoice links | committed, not pushed, not merged |
 | `feature/receipts-payments` | branched from `515b01a`; Phase 6 (receipts, allocation, outstanding) — `2ef33c3` feat: add receipts payments and outstanding | committed, not pushed, not merged |
-| `feature/receivables-reports` | branched from `2ef33c3`; Phase 7 (receivables / outstanding / aging reports) | **uncommitted** working tree at the time of writing |
+| `feature/receivables-reports` | branched from `2ef33c3`; Phase 7 (receivables / outstanding / aging reports) — `edf8928` feat: add receivables outstanding and aging reports | committed, not pushed, not merged |
+| `feature/billing-book-ux-enhancements` | branched from `edf8928`; Phase 8 (book series type, default/last-used book, 10-digit mobile, Next Visit appointment, billing UX, themes) | see git log |
 
 `main` has none of them. Merge in order (settings → invoices → whatsapp → public links → receipts → receivables) — never
 start new work from `main` while these are open, or it will lack the settings foundation. None is
@@ -700,7 +729,7 @@ a hook the dialog uses is not imported, and checks the read-only vs update Revok
 receipt allocation helpers (`allocation.test.ts`) and the receivables pages (`ReceivablesPage.test.tsx`:
 KPI/rows as the server sent them, the Aging strip = scope, Receive payment only with Receipts Create):
 3 files, 10 tests, always run. API: fourteen files (items, sub-items, account groups, accounts, books, appointments, bills, settings,
-invoices, whatsapp, publicInvoiceLinks, receipts, receivables, plus `lib/listen`), 1154 tests. The route suites have two
+invoices, whatsapp, publicInvoiceLinks, receipts, receivables, plus `lib/listen` and `test-support/dbGuard`), 1201 tests. The route suites have two
 sections:
 
 - **A — pure validation and calculation** (zod schemas, `normalizeMobile`, the bill money
@@ -711,7 +740,7 @@ sections:
   determinism, nothing drawn off the page, unprintable-character refusal, Gujarati/Hindi shaping,
   extraction and wrapping, public-link tokens/hash/redaction/config/rate limit, malformed-token
   refusal, the receipt schema / derived payment status / Cash-Bank rule / paise). Always runs.
-  **`pnpm test`: API 704 pass, 450 skipped; web 10 pass.**
+  **`pnpm test`: API 721 pass, 480 skipped; web 29 pass.**
 - **B — database-backed** (tenant isolation, RBAC, duplicate guards, lookup field exposure, the
   allocators' sequences and concurrency, the rollback that keeps a failed create from burning a
   number, bill snapshots, the stored discount and its allocation, the atomic line replacement, and
@@ -722,7 +751,7 @@ sections:
 
 Section B creates and deletes tenants, roles and users. `TEST_DATABASE_URL` must point at a
 **throwaway** database — never at the hosted `DATABASE_URL` above. **It ran for the first time on
-2026-09-25: 1080/1080 pass; with Phase 6, 1126/1126; with Phase 7, 1154/1154** (one latent Phase 5 test bug surfaced and was fixed — it read the
+2026-09-25: 1080/1080 pass; with Phase 6, 1126/1126; with Phase 7, 1154/1154; with Phase 8, 1201/1201** (one latent Phase 5 test bug surfaced and was fixed — it read the
 bill's first audit row instead of the share row). How to get a throwaway database here, no admin
 rights or passwords needed (use a scratch folder, never the repo):
 
@@ -936,9 +965,10 @@ assumes one and will throw. Guard the login step when reusing it.
 
 ## Known pending work
 
-- **Phases 3–6 are committed, Phase 7 is uncommitted; all unpushed, unmerged and
+- **Phases 3–8 are committed on the stacked feature branches; all unpushed, unmerged and
   undeployed** — see the branch table under Git. Migrations `0012`–`0017` are already on the shared
-  database. **The first deploy containing Phase 4/5/5.1 must be a FULL deploy — never
+  database; **`0018`–`0019` (Phase 8) are NOT** — they must be applied (reviewed, approved) before
+  the Phase 8 code serves traffic. **The first deploy containing Phase 4/5/5.1 must be a FULL deploy — never
   `Deploy-StudioCRM.ps1 -Hotfix`**, which uploads only server.js and would leave the host without
   `dist/harfbuzz.wasm` and the new fonts.
 - **Before that deploy, add `PUBLIC_APP_URL=https://studio.kriviinfotech.com` and a fresh

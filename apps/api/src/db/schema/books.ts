@@ -26,6 +26,12 @@ export const books = pgTable(
     seriesStartsAt: integer('series_starts_at').notNull().default(1),
     /** The number the NEXT bill will take. Never edited through the master form. */
     nextBillNumber: integer('next_bill_number').notNull().default(1),
+    /**
+     * WITH_GST | WITHOUT_GST — the tax mode every NEW bill in this series takes (`createBill`
+     * derives it; a contradicting payload is refused). Frozen once the counter has moved, like
+     * `seriesStartsAt`. Existing books were backfilled by migration 0019 (docs/BILL_NUMBERING.md).
+     */
+    seriesType: text('series_type').notNull().default('WITH_GST'),
     /** Active means selectable for NEW bills. Inactive keeps the book and all of its history. */
     isActive: boolean('is_active').notNull().default(true),
     ...ts,
@@ -45,6 +51,7 @@ export const books = pgTable(
      */
     unique('books_id_tenant_uk').on(t.id, t.tenantId),
     check('books_book_number_not_blank_check', sql`length(btrim(${t.bookNumber})) > 0`),
+    check('books_series_type_check', sql`${t.seriesType} in ('WITH_GST', 'WITHOUT_GST')`),
     check('books_series_starts_at_positive_check', sql`${t.seriesStartsAt} >= 1`),
     /**
      * The database's own guard on the counter: the next number can never fall behind the

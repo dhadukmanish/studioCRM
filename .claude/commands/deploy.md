@@ -42,7 +42,11 @@ Two things about this host decide almost every failure, so know them before star
    `-Push` is how the script is told it may.
 5. **Stop on the first failure.** A failed typecheck, test, build, clone, build-in-container or
    health check ends the run. Never "try again without the tests".
-6. **Do not guess a hosting value.** If `appUrl` is `TODO`, or the branch in the panel and in
+6. **Full deployment, not `-Hotfix`,** whenever the release changes the web bundle, API routes,
+   migrations, fonts/WASM or dependencies. `-Hotfix` uploads server.js only — it is for a server-only
+   emergency fix on a tree that was already fully deployed. The surrounding lifecycle (gates, commit
+   hygiene, migration review, env preservation, smoke test) is the `studio-release` skill.
+7. **Do not guess a hosting value.** If `appUrl` is `TODO`, or the branch in the panel and in
    `deploy.config.json` disagree, stop and say exactly which panel value is needed and where it is.
 
 ## Steps

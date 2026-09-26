@@ -220,6 +220,8 @@ describe.skipIf(!TEST_DB)('Public invoice links (integration, needs TEST_DATABAS
     process.env.PUBLIC_LINK_SECRET = SECRET;
     ({ inArray, eq, and, isNull } = await import('drizzle-orm'));
     const client = await import('../db/client');
+    // Fail closed before the first write: the pool must really be on the throwaway database.
+    await (await import('../test-support/dbGuard')).assertTestDatabase(client, TEST_DB);
     ({ db, sql: sqlClient, schema } = client);
     app = await (await import('../server')).buildApp();
     await app.ready();
@@ -314,7 +316,7 @@ describe.skipIf(!TEST_DB)('Public invoice links (integration, needs TEST_DATABAS
       ['quantity', 'qty'],
       ['rate', 'rate'],
       ['discount', { discountType: 'AMOUNT', discountValue: 100 }],
-      ['tax mode', { taxMode: 'WITHOUT_GST' }],
+      ['next visit date', { nextVisitDate: '2099-12-31' }],
       ['nothing (an identical re-save)', {}],
     ] as const)('a saved edit of the %s revokes the link at once, and makes no new one', async (_label, change) => {
       const billId = await A.bill();

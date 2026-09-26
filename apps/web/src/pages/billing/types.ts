@@ -25,6 +25,8 @@ export interface BillRow {
   hasBirthDate: boolean;
   birthDate: string | null;
   remark: string | null;
+  /** The customer's next visit; saving creates / moves its one linked appointment. */
+  nextVisitDate: string | null;
   taxMode: InvoiceTaxMode;
   /** The bill-level discount as the operator chose it. The money it came to is the server's. */
   discountType: BillDiscountType;
@@ -72,6 +74,9 @@ export interface BillItemRow {
 /** `GET /api/bills/:id` — the bill, its book, its booking's number and its lines in print order. */
 export interface BillRecord extends BillRow {
   appointmentNumber: number | null;
+  /** The appointment this bill's next visit created, while it is still linked. */
+  nextAppointmentId: string | null;
+  nextAppointmentNumber: number | null;
   items: BillItemRow[];
   /** Rate-wise GST, grouped by the API off these very lines. Never regrouped on this side. */
   gstSummary: GstSummaryRow[];
@@ -116,6 +121,8 @@ export interface BillFormValues {
   hasBirthDate: boolean;
   birthDate: string;
   remark: string;
+  nextVisitDate: string;
+  /** Display and preview only — the book decides it and the server derives it; never posted. */
   taxMode: InvoiceTaxMode;
   /**
    * The discount pair. Kept as a string while the operator types, for the same reason a rate

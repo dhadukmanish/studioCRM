@@ -65,6 +65,12 @@ export const bills = pgTable(
     hasBirthDate: boolean('has_birth_date').notNull().default(false),
     birthDate: date('birth_date', { mode: 'string' }),
     remark: text('remark'),
+    /**
+     * The customer's next visit, as the operator chose it. The appointment it creates points back
+     * here through `appointments.source_bill_id` (one per bill, enforced there) — see
+     * `services/nextVisit.ts`. NULL = no next visit planned.
+     */
+    nextVisitDate: date('next_visit_date', { mode: 'string' }),
     /** WITH_GST | WITHOUT_GST — how this bill charges tax. See `INVOICE_TAX_MODES`. */
     taxMode: text('tax_mode').notNull().default('WITH_GST'),
     /**
@@ -126,6 +132,8 @@ export const bills = pgTable(
     index('bills_tenant_mobile_idx').on(t.tenantId, t.mobileSearch),
     /** The list's "Last Modified" sort. */
     index('bills_tenant_updated_idx').on(t.tenantId, t.updatedAt),
+    /** The new-bill form's "last used book" (`resolveDefaultBook`): the tenant's most recently created bill. */
+    index('bills_tenant_created_idx').on(t.tenantId, t.createdAt),
     check('bills_bill_number_positive_check', sql`${t.billNumber} >= 1`),
     check('bills_customer_name_not_blank_check', sql`length(btrim(${t.customerName})) > 0`),
     check('bills_mobile_number_not_blank_check', sql`length(btrim(${t.mobileNumber})) > 0`),

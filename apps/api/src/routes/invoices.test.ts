@@ -745,11 +745,13 @@ describe.skipIf(!TEST_DB)('Invoice templates and invoices API (integration, need
       return app.jwt.sign({ sub: u.id, tenantId: tenant.id });
     };
     const [book] = await db.insert(schema.books).values({ tenantId: tenant.id, bookNumber: '2026-27', seriesStartsAt: 1, nextBillNumber: 1 }).returning();
+    // The book decides the tax mode, so a Without GST bill needs a Without GST series.
+    const [noGstBook] = await db.insert(schema.books).values({ tenantId: tenant.id, bookNumber: 'NG-2026-27', seriesStartsAt: 1, nextBillNumber: 1, seriesType: 'WITHOUT_GST' }).returning();
     const [item] = await db.insert(schema.items).values({ tenantId: tenant.id, itemName: 'Photography', hsnCode: '9983', gstRate: '12.00' }).returning();
     const [sub] = await db.insert(schema.subItems).values({ tenantId: tenant.id, itemId: item.id, productName: 'Newborn Shoot', rate: '10000.00' }).returning();
     const admin = await user(FULL);
     const bill = async (taxMode: 'WITH_GST' | 'WITHOUT_GST') =>
-      (await req(admin, 'POST', '/api/bills', { bookId: book.id, billDate: '2026-09-25', customerName: 'Invoice Customer', mobileNumber: '9876543210', taxMode, discountType: 'PERCENT', discountValue: 10, items: [{ itemId: item.id, subItemId: sub.id, quantity: 1, rate: 10000 }] })).json().data.id as string;
+      (await req(admin, 'POST', '/api/bills', { bookId: taxMode === 'WITH_GST' ? book.id : noGstBook.id, billDate: '2026-09-25', customerName: 'Invoice Customer', mobileNumber: '9876543210', taxMode, discountType: 'PERCENT', discountValue: 10, items: [{ itemId: item.id, subItemId: sub.id, quantity: 1, rate: 10000 }] })).json().data.id as string;
     return { tenantId: tenant.id, admin, user, bookId: book.id, itemId: item.id, bill };
   }
 
@@ -758,6 +760,8 @@ describe.skipIf(!TEST_DB)('Invoice templates and invoices API (integration, need
     process.env.PORT = '0';
     ({ inArray, eq } = await import('drizzle-orm'));
     const client = await import('../db/client');
+    // Fail closed before the first write: the pool must really be on the throwaway database.
+    await (await import('../test-support/dbGuard')).assertTestDatabase(client, TEST_DB);
     ({ db, sql: sqlClient, schema } = client);
     app = await (await import('../server')).buildApp();
     await app.ready();

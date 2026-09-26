@@ -1,8 +1,10 @@
-import { and, asc, eq, ilike, inArray, or, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, or, type SQL } from 'drizzle-orm';
 import {
   calculateBill,
   fromPaise,
   gstSummary,
+  INVOICE_TAX_MODE_LABELS,
+  billMobileSchema,
   normalizeMobile,
   toPaise,
   type BillDiscountValues,
@@ -17,6 +19,8 @@ import { AppError, notFound, validation } from '../lib/errors';
 import { allocateBillNumber } from './billNumbers';
 import { billHasAllocations, paidPaiseByBill } from './billPayments';
 import { revokeActiveLinks } from './publicInvoiceLinkRevoke';
+import { getSettings } from './settings';
+import { detachNextVisit, linkedAppointment, syncNextVisit, type NextVisitResult } from './nextVisit';
 
 /**
  * Bill business rules. The route validates the payload and authorizes; this owns everything
@@ -144,11 +148,17 @@ export const shapeBillItem = <
  * that into a message the form can attach to the right field.
  */
 async function resolveBook(exec: Executor, tenantId: string, bookId: string, requireActive: boolean) {
-  const [book] = await exec
-    .select({ id: schema.books.id, bookNumber: schema.books.bookNumber, isActive: schema.books.isActive })
+  const q = exec
+    .select({ id: schema.books.id, bookNumber: schema.books.bookNumber, isActive: schema.books.isActive, seriesType: schema.books.seriesType })
     .from(schema.books)
     .where(and(eq(schema.books.id, bookId), eq(schema.books.tenantId, tenantId)))
     .limit(1);
+  /**
+   * A NEW bill locks its book row now rather than at `allocateBillNumber` (which takes the same
+   * row lock a moment later in this transaction anyway): the series type read here must be the
+   * one the number is issued under, so a concurrent Book edit cannot flip the type in between.
+   */
+  const [book] = await (requireActive ? q.for('update') : q);
   if (!book) throw validation('Select a valid book', [{ path: ['bookId'], message: 'This book does not exist' }]);
   if (requireActive && !book.isActive) {
     throw validation(`Book "${book.bookNumber}" is inactive and cannot be used for a new bill`, [{ path: ['bookId'], message: 'This book is inactive' }]);
@@ -166,7 +176,10 @@ async function resolveAppointment(exec: Executor, tenantId: string, appointmentI
     .select({ id: schema.appointments.id, appointmentNumber: schema.appointments.appointmentNumber })
     .from(schema.appointments)
     .where(and(eq(schema.appointments.id, appointmentId), eq(schema.appointments.tenantId, tenantId)))
-    .limit(1);
+    .limit(1)
+    // FOR SHARE: a next-visit move of this appointment (FOR UPDATE in `syncNextVisit`) waits for this
+    // bill to commit, then sees it as billed — a booking is never moved while it is being billed.
+    .for('share');
   if (!appointment) throw validation('Select a valid appointment', [{ path: ['appointmentId'], message: 'This appointment does not exist' }]);
   return appointment;
 }
@@ -309,7 +322,7 @@ async function existingSnapshots(exec: Executor, tenantId: string, billId: strin
  * derived from what the operator typed by the shared `normalizeMobile`, never accepted from a
  * client, so Billing and Appointments always agree on what a number matches.
  */
-function headerRow(body: Omit<BillUpdateInput, 'items'>): Record<string, unknown> {
+function headerRow(body: Omit<BillUpdateInput, 'items'>, taxMode: InvoiceTaxMode): Record<string, unknown> {
   return {
     appointmentId: body.appointmentId,
     billDate: body.billDate,
@@ -322,11 +335,26 @@ function headerRow(body: Omit<BillUpdateInput, 'items'>): Record<string, unknown
     // The schema already nulls this when the checkbox is off; the column's check is the backstop.
     birthDate: body.hasBirthDate ? body.birthDate : null,
     remark: body.remark,
-    taxMode: body.taxMode,
+    nextVisitDate: body.nextVisitDate,
+    // Decided by the book (create) or the saved bill (edit) — see `billTaxMode`.
+    taxMode,
     // What the operator CHOSE. What it is worth is set beside it from the calculation.
     discountType: body.discountType,
     discountValue: body.discountValue.toFixed(2),
   };
+}
+
+/**
+ * The tax mode a save uses. A new bill takes its BOOK's series type; an edit keeps the bill's own
+ * saved tax mode (a bill made before books had a series type keeps what it was issued with). A
+ * payload may omit `taxMode`; one that names a different mode is refused, never silently obeyed.
+ */
+function billTaxMode(decided: InvoiceTaxMode, sent: InvoiceTaxMode | undefined, why: string): InvoiceTaxMode {
+  if (sent !== undefined && sent !== decided) {
+    const message = `${why} is ${INVOICE_TAX_MODE_LABELS[decided]}, so this bill cannot be ${INVOICE_TAX_MODE_LABELS[sent]}`;
+    throw validation(message, [{ path: ['taxMode'], message }]);
+  }
+  return decided;
 }
 
 /** The discount as the calculation wants it — the two fields the client is allowed to send. */
@@ -363,6 +391,21 @@ async function assertEditKeepsPayments(exec: Executor, tenantId: string, existin
 }
 
 /**
+ * An edit's mobile must be exactly ten digits — with one exception: a bill saved before that rule
+ * (its stored mobile is not ten plain digits) may be re-saved with the SAME customer key, however it
+ * is shaped. Without it a legacy bill with receipts could never be edited again: its old value fails
+ * the new rule, and any ten-digit value is a different customer to the receipt guard.
+ */
+function assertEditMobile(existing: { mobileNumber: string; mobileSearch: string }, mobileNumber: string) {
+  const strict = billMobileSchema.safeParse(mobileNumber);
+  if (strict.success) return;
+  const legacyBill = !billMobileSchema.safeParse(existing.mobileNumber).success;
+  if (legacyBill && normalizeMobile(mobileNumber) === existing.mobileSearch) return;
+  const message = strict.error.issues[0]?.message ?? 'Enter a valid mobile no.';
+  throw validation(message, [{ path: ['mobileNumber'], message }]);
+}
+
+/**
  * Delete a bill — only while no receipt has ever settled it. Payment history, even a cancelled
  * receipt's, is never deleted with a bill. The bill row is locked first, the same lock a receipt
  * takes, so a receipt cannot land between the check and the delete; `receipt_allocations_bill_tenant_fk`
@@ -381,9 +424,53 @@ export async function deleteBill(tenantId: string, id: string) {
     if (await billHasAllocations(tx, tenantId, id)) {
       throw new AppError('BILL_HAS_PAYMENTS', `Bill ${existing.bookNumber}/${existing.billNumber} has payment history and cannot be deleted`, 409);
     }
+    // Its next-visit appointment is a booking in its own right: it stays, only the link goes.
+    await detachNextVisit(tx, tenantId, id);
     await tx.delete(B).where(and(eq(B.id, id), eq(B.tenantId, tenantId)));
     return existing;
   });
+}
+
+/* ------------------------------------------------------------ default book -- */
+
+export type DefaultBookReason = 'ONLY_ACTIVE' | 'CONFIGURED' | 'LAST_USED' | 'FIRST_ACTIVE' | 'NONE';
+
+/**
+ * The Book a NEW bill opens with. Only ever a suggestion — the operator may pick any active book,
+ * and opening the form takes no number.
+ *
+ *  1. exactly one active book → that book (no configuration needed);
+ *  2. several → the configured `defaultBillingBookId` setting, if that book is still active;
+ *  3. else the LAST-USED active book: the book of the tenant's most recently created bill;
+ *  4. else a stable fallback: the first active book in book-number order (the picker's order).
+ *
+ * A configured or last-used book that has since been deactivated or deleted is simply skipped.
+ * "Last used" is tenant-wide and derived from saved bills — nothing is stored for it, so it can
+ * never go stale or point at another tenant's book.
+ */
+export async function resolveDefaultBook(tenantId: string): Promise<{ bookId: string | null; reason: DefaultBookReason }> {
+  const active = await db
+    .select({ id: schema.books.id })
+    .from(schema.books)
+    .where(and(eq(schema.books.tenantId, tenantId), eq(schema.books.isActive, true)))
+    .orderBy(asc(schema.books.bookNumber), asc(schema.books.id));
+  if (active.length === 0) return { bookId: null, reason: 'NONE' };
+  if (active.length === 1) return { bookId: active[0].id, reason: 'ONLY_ACTIVE' };
+
+  const isActive = (id: unknown) => typeof id === 'string' && active.some((b) => b.id === id);
+  const configured = (await getSettings(tenantId)).defaultBillingBookId;
+  if (isActive(configured)) return { bookId: configured as string, reason: 'CONFIGURED' };
+
+  const [last] = await db
+    .select({ bookId: B.bookId })
+    .from(B)
+    .innerJoin(schema.books, and(eq(schema.books.id, B.bookId), eq(schema.books.tenantId, B.tenantId)))
+    .where(and(eq(B.tenantId, tenantId), eq(schema.books.isActive, true)))
+    .orderBy(desc(B.createdAt), desc(B.id))
+    .limit(1);
+  if (last) return { bookId: last.bookId, reason: 'LAST_USED' };
+
+  return { bookId: active[0].id, reason: 'FIRST_ACTIVE' };
 }
 
 /* --------------------------------------------------------------- public API -- */
@@ -417,6 +504,9 @@ export interface BillRecord extends BillShaped {
   bookNumber: string;
   /** The booking this bill came from, for display only. Null for a walk-in customer. */
   appointmentNumber: number | null;
+  /** The appointment this bill's Next Visit Date created, while it is still linked. */
+  nextAppointmentId: string | null;
+  nextAppointmentNumber: number | null;
   items: BillItemShaped[];
   /**
    * The rate-wise GST summary, grouped off THESE lines' own stored amounts by the shared
@@ -445,8 +535,11 @@ export async function getBill(tenantId: string, id: string): Promise<BillRecord>
   // than by insertion time — the invoice's order is data, not a side effect.
   const lines = await db.select().from(BI).where(and(eq(BI.tenantId, tenantId), eq(BI.billId, id))).orderBy(asc(BI.lineNumber));
   const items = lines.map(shapeBillItem);
-  return { ...shapeBill(row.bill), bookNumber: row.bookNumber, appointmentNumber: row.appointmentNumber ?? null, items, gstSummary: summaryOf(items) };
+  const next = await linkedAppointment(db, tenantId, id);
+  return { ...shapeBill(row.bill), bookNumber: row.bookNumber, appointmentNumber: row.appointmentNumber ?? null, ...nextOf(next), items, gstSummary: summaryOf(items) };
 }
+
+const nextOf = (a: { id: string; appointmentNumber: number } | null) => ({ nextAppointmentId: a?.id ?? null, nextAppointmentNumber: a?.appointmentNumber ?? null });
 
 /**
  * Create a bill, take its number and write its lines — all in ONE transaction.
@@ -456,18 +549,19 @@ export async function getBill(tenantId: string, id: string): Promise<BillRecord>
  * transaction rolls back and `books.next_bill_number` goes back with it — the number is not
  * burned. Nothing else in this file ever calls the allocator.
  */
-export async function createBill(tenantId: string, body: BillInput): Promise<BillRecord> {
+export async function createBill(tenantId: string, body: BillInput): Promise<{ bill: BillRecord; nextVisit: NextVisitResult }> {
   return db.transaction(async (tx) => {
     const book = await resolveBook(tx, tenantId, body.bookId, true);
+    const taxMode = billTaxMode(book.seriesType as InvoiceTaxMode, body.taxMode, `Book "${book.bookNumber}"`);
     const appointment = body.appointmentId ? await resolveAppointment(tx, tenantId, body.appointmentId) : null;
-    const { rows, totals } = await resolveLines(tx, tenantId, body.items, body.taxMode, discountOf(body), new Map());
+    const { rows, totals } = await resolveLines(tx, tenantId, body.items, taxMode, discountOf(body), new Map());
 
     const billNumber = await allocateBillNumber(tx, tenantId, book.id);
 
     const [bill] = await tx
       .insert(B)
       .values({
-        ...(headerRow(body) as typeof B.$inferInsert),
+        ...(headerRow(body, taxMode) as typeof B.$inferInsert),
         tenantId,
         bookId: book.id,
         billNumber,
@@ -483,8 +577,14 @@ export async function createBill(tenantId: string, body: BillInput): Promise<Bil
       .values(rows.map((r) => ({ ...r, tenantId, billId: bill.id })))
       .returning();
 
+    // Same transaction: a failed appointment takes the bill (and both numbers) back with it.
+    const nextVisit = await syncNextVisit(tx, tenantId, { ...bill, bookNumber: book.bookNumber });
+
     const items = lines.map(shapeBillItem);
-    return { ...shapeBill(bill), bookNumber: book.bookNumber, appointmentNumber: appointment?.appointmentNumber ?? null, items, gstSummary: summaryOf(items) };
+    return {
+      bill: { ...shapeBill(bill), bookNumber: book.bookNumber, appointmentNumber: appointment?.appointmentNumber ?? null, ...nextOf(nextVisit.action === 'detached' ? null : nextVisit.appointment), items, gstSummary: summaryOf(items) },
+      nextVisit,
+    };
   });
 }
 
@@ -504,7 +604,7 @@ export async function createBill(tenantId: string, body: BillInput): Promise<Bil
  * updated bill and a still-working old URL can never both be committed, and a save that rolls
  * back keeps the link. No replacement link is made — the next Share makes one.
  */
-export async function updateBill(tenantId: string, id: string, body: BillUpdateInput): Promise<{ bill: BillRecord; revokedLinkIds: string[] }> {
+export async function updateBill(tenantId: string, id: string, body: BillUpdateInput): Promise<{ bill: BillRecord; revokedLinkIds: string[]; nextVisit: NextVisitResult }> {
   return db.transaction(async (tx) => {
     /**
      * Lock the bill for the transaction. The lines are replaced as a set, so two operators
@@ -517,14 +617,16 @@ export async function updateBill(tenantId: string, id: string, body: BillUpdateI
 
     // Not re-checked for active: this bill is already numbered under this book.
     const book = await resolveBook(tx, tenantId, existing.bookId, false);
+    const taxMode = billTaxMode(existing.taxMode as InvoiceTaxMode, body.taxMode, 'This bill');
     const appointment = body.appointmentId ? await resolveAppointment(tx, tenantId, body.appointmentId) : null;
-    const { rows, totals } = await resolveLines(tx, tenantId, body.items, body.taxMode, discountOf(body), await existingSnapshots(tx, tenantId, id));
+    const { rows, totals } = await resolveLines(tx, tenantId, body.items, taxMode, discountOf(body), await existingSnapshots(tx, tenantId, id));
+    assertEditMobile(existing, body.mobileNumber);
     await assertEditKeepsPayments(tx, tenantId, existing, body, totals.grandTotal);
 
     const [bill] = await tx
       .update(B)
       .set({
-        ...headerRow(body),
+        ...headerRow(body, taxMode),
         subTotal: totals.subTotal.toFixed(2),
         discountAmount: totals.discountAmount.toFixed(2),
         gstAmount: totals.gstAmount.toFixed(2),
@@ -541,11 +643,13 @@ export async function updateBill(tenantId: string, id: string, body: BillUpdateI
       .returning();
 
     const revokedLinkIds = (await revokeActiveLinks(tx, tenantId, { billId: id }, 'BILL_UPDATED')).map((r) => r.id);
+    const nextVisit = await syncNextVisit(tx, tenantId, { ...bill, bookNumber: book.bookNumber }, existing.nextVisitDate);
 
     const items = lines.map(shapeBillItem);
     return {
-      bill: { ...shapeBill(bill), bookNumber: book.bookNumber, appointmentNumber: appointment?.appointmentNumber ?? null, items, gstSummary: summaryOf(items) },
+      bill: { ...shapeBill(bill), bookNumber: book.bookNumber, appointmentNumber: appointment?.appointmentNumber ?? null, ...nextOf(nextVisit.action === 'detached' ? null : nextVisit.appointment), items, gstSummary: summaryOf(items) },
       revokedLinkIds,
+      nextVisit,
     };
   });
 }

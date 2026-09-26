@@ -89,6 +89,44 @@ const optionalDate = (label: string) =>
     z.string().regex(DATE_RE, `Enter a valid ${label.toLowerCase()}`).refine(isRealDate, `Enter a valid ${label.toLowerCase()}`).nullable(),
   );
 
+/* ------------------------------------------------------------------- mobile -- */
+
+/** A bill's customer mobile is exactly this many digits — nothing else. */
+export const BILL_MOBILE_DIGITS = 10;
+
+/**
+ * What the mobile input keeps while the operator types or pastes: digits only, at most ten.
+ * A pasted number carrying the Indian country code (`+91 98765 43210`, 12 digits) or a trunk
+ * zero (`098765 43210`, 11 digits) loses that prefix instead of its last digit; anything else
+ * keeps its first ten digits, so a letter or an extra keystroke can never stay in the field.
+ * The server does not rely on this — `billMobileSchema` refuses anything but exactly ten digits.
+ */
+export function sanitizeMobileInput(raw: string): string {
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+  return digits.slice(0, BILL_MOBILE_DIGITS);
+}
+
+/**
+ * The server's rule: exactly ten digits, no spaces, prefixes or letters. Stored as text (a
+ * leading digit pattern is data, not a number). Surrounding whitespace is trimmed first.
+ */
+/** The pre-ten-digit rule, kept only for re-saving a legacy bill (see `billUpdateSchema`). */
+export const legacyBillMobileSchema = z
+  .string({ required_error: 'Mobile no. is required', invalid_type_error: 'Mobile no. is required' })
+  .trim()
+  .min(1, 'Mobile no. is required')
+  .max(BILL_LIMITS.mobileNumber, `Mobile no. cannot exceed ${BILL_LIMITS.mobileNumber} characters`)
+  .refine((v) => /\d/.test(v), 'Enter a valid mobile no.');
+
+export const billMobileSchema = z
+  .string({ required_error: 'Mobile no. is required', invalid_type_error: 'Mobile no. is required' })
+  .trim()
+  .min(1, 'Mobile no. is required')
+  .regex(/^\d+$/, 'Mobile no. can contain digits only')
+  .length(BILL_MOBILE_DIGITS, `Mobile no. must be exactly ${BILL_MOBILE_DIGITS} digits`);
+
 /* ------------------------------------------------------------------ numbers -- */
 
 /**
@@ -153,19 +191,25 @@ const billBaseSchema = z.object({
     .trim()
     .min(1, 'Customer name is required')
     .max(BILL_LIMITS.customerName, `Customer name cannot exceed ${BILL_LIMITS.customerName} characters`),
-  /** Text, never numeric: leading zeros, a country prefix and the operator's spacing all matter. */
-  mobileNumber: z
-    .string({ required_error: 'Mobile no. is required', invalid_type_error: 'Mobile no. is required' })
-    .trim()
-    .min(1, 'Mobile no. is required')
-    .max(BILL_LIMITS.mobileNumber, `Mobile no. cannot exceed ${BILL_LIMITS.mobileNumber} characters`)
-    .refine((v) => /\d/.test(v), 'Enter a valid mobile no.'),
+  mobileNumber: billMobileSchema,
   babyName: optionalText('Baby name', BILL_LIMITS.babyName),
   /** The legacy form's Birthdate checkbox: the date input only exists while this is ticked. */
   hasBirthDate: z.boolean().default(false),
   birthDate: optionalDate('Birth date'),
   remark: optionalText('Remark', BILL_LIMITS.remark),
-  taxMode: z.enum(INVOICE_TAX_MODES, { errorMap: () => ({ message: 'Select a valid tax mode' }) }).default('WITH_GST'),
+  /**
+   * The customer's next visit, chosen by the operator (never calculated). When set, saving the
+   * bill creates — or moves — exactly one linked appointment for that date, in the same
+   * transaction (`services/nextVisit.ts`). Optional.
+   */
+  nextVisitDate: optionalDate('Next visit date'),
+  /**
+   * DECIDED BY THE BOOK, not by the client. A new bill's tax mode is its book's series type and an
+   * edit keeps the bill's saved one, so this field is optional: when a client does send it, the
+   * server refuses a value that contradicts the book (or, on edit, the saved bill). Nothing ever
+   * picks a tax mode from here.
+   */
+  taxMode: z.enum(INVOICE_TAX_MODES, { errorMap: () => ({ message: 'Select a valid tax mode' }) }).optional(),
   /**
    * The bill-level discount, as the pair the operator actually chose. NONE / AMOUNT / PERCENT
    * rather than one overloaded number, so "100" can never be read as 100% on one screen and
@@ -244,10 +288,21 @@ export function billDiscountError(discount: { type: BillDiscountType; value: num
   return discount.value > subTotal ? `Discount cannot be more than the sub total (${subTotal.toFixed(2)})` : null;
 }
 
+/**
+ * A next visit is a FUTURE booking relative to the bill: a date before the bill date is a typo,
+ * refused on the field rather than turned into an appointment in the past.
+ */
+const nextVisitRule = (v: { billDate: string; nextVisitDate: string | null }, ctx: z.RefinementCtx) => {
+  if (v.nextVisitDate && v.billDate && v.nextVisitDate < v.billDate) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['nextVisitDate'], message: 'Next visit date cannot be before the bill date' });
+  }
+};
+
 /** Create: the whole document in one payload, book included. */
 export const billSchema = billBaseSchema.superRefine((v, ctx) => {
   birthDateRule(v, ctx);
   discountRule(v, ctx);
+  nextVisitRule(v, ctx);
 });
 export type BillInput = z.infer<typeof billSchema>;
 
@@ -260,8 +315,18 @@ export type BillInput = z.infer<typeof billSchema>;
  * inside one transaction, which is what keeps line numbering deterministic and the stored
  * totals honest. No update ever allocates a bill number.
  */
-export const billUpdateSchema = billBaseSchema.omit({ bookId: true }).superRefine((v, ctx) => {
+export const billUpdateSchema = billBaseSchema
+  .omit({ bookId: true })
+  /**
+   * An edit may carry a bill's LEGACY mobile — one saved before the ten-digit rule, as typed
+   * ("+91 98765 43210", a 9-digit number). The shape is checked loosely here; `updateBill` then
+   * insists on exactly ten digits unless the bill keeps its own customer key unchanged, so a legacy
+   * bill (even one with receipts) stays editable while any real change of mobile is ten digits.
+   */
+  .extend({ mobileNumber: legacyBillMobileSchema })
+  .superRefine((v, ctx) => {
   birthDateRule(v, ctx);
   discountRule(v, ctx);
+  nextVisitRule(v, ctx);
 });
 export type BillUpdateInput = z.infer<typeof billUpdateSchema>;

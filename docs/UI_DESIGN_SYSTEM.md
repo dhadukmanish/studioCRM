@@ -21,8 +21,11 @@ keyboard over mouse.
 ## Tokens
 
 All color comes from CSS variables in `apps/web/src/themes.css`, exposed as Tailwind tokens in
-`tailwind.config.js`. Three themes ship: **light**, **dark**, **olive**, switched by
-`data-theme` on `<html>`. A hard-coded hex in a component is a defect — it will be wrong in at
+`tailwind.config.js`. Seven themes ship — **Light**, **Dark**, **Olive**, and the quieter **Sky**, **Slate**, **Teal**
+and **Soft Lavender** (white-dominant, one muted accent each) — switched by `data-theme` on `<html>`,
+listed in `lib/theme.ts` (`THEMES`) and persisted per browser by the UI store. Every theme defines the
+full token set, and white text on its `--primary` meets 4.5:1 (`lib/theme.test.ts` checks both).
+Add one by copying a block in themes.css and registering it — never a Theme Master. A hard-coded hex in a component is a defect — it will be wrong in at
 least one theme.
 
 | Token | Role |

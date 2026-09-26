@@ -20,6 +20,8 @@ export const DEFAULT_SETTINGS = {
   requireCompanyOnUsers: true,
   /** The WhatsApp invoice message, with {placeholders} (packages/shared/src/whatsapp.ts). */
   whatsappInvoiceMessage: DEFAULT_WHATSAPP_INVOICE_MESSAGE,
+  /** The Book a new bill opens with when several are active; null = Automatic (last used). See resolveDefaultBook. */
+  defaultBillingBookId: null as string | null,
 };
 export type AppSettings = typeof DEFAULT_SETTINGS & Record<string, any>;
 

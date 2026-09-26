@@ -5,10 +5,10 @@ description: StudioCRM testing workflow — choosing the right test level, setti
 
 # StudioCRM testing
 
-**Vitest is installed in `apps/api` only** (pinned to v3: Vitest 5 requires Vite 6 and this repo
-is on Vite 5 — do not "upgrade" it without moving the whole monorepo). Run `pnpm test`, or
-`pnpm --filter @erp/api test` for just that package. Keep it to one runner in one package until
-there is a real reason for a second.
+**Vitest runs in `apps/api` and `apps/web`** (pinned to v3: Vitest 5 requires Vite 6 and this repo
+is on Vite 5 — do not "upgrade" it without moving the whole monorepo). Web tests are jsdom render
+tests of real components (`// @vitest-environment jsdom`; `ShareInvoiceDialog.test.tsx` is the
+pattern). Run `pnpm test`, or `pnpm --filter @erp/api test` for one package.
 
 ## Choosing the level
 
@@ -27,11 +27,10 @@ tested through HTTP, that is usually a sign it is stuck in a route handler.
 `"test": "pnpm -r test"`. No config file, no coverage threshold, no RTL, no Playwright, no CI
 wiring — add none of those speculatively. Tests live next to the code as `<name>.test.ts`.
 
-Integration tests need a **separate** database. Never point a test suite at the shared hosted
-database — a seeded run would wipe real rows. Gate DB suites on `TEST_DATABASE_URL`
-(`describe.skipIf(!process.env.TEST_DATABASE_URL)`) and import every db-touching module
-dynamically inside `beforeAll`, after the env var is overridden. `apps/api/src/routes/items.test.ts`
-is the working example of both halves.
+Integration tests need a **separate, throwaway** database. **Load the `studio-db-safety` skill
+before writing or running one** — it owns the setup, the both-env-vars rule, the dynamic-import
+rule and the fail-closed connection guard (learned from a real incident).
+`apps/api/src/routes/receivables.test.ts` is the working example.
 
 Known wart: `buildApp()` lives in `server.ts`, which also calls `listen()` at import time, so
 DB-backed suites set `PORT=0`. Moving `buildApp` into its own module would remove that.

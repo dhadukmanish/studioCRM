@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { and, count, desc, eq } from 'drizzle-orm';
 import { billSchema, billUpdateSchema } from '@erp/shared';
 import { db, schema } from '../db/client';
@@ -7,7 +7,8 @@ import { ok } from '../lib/respond';
 import { parseListQuery } from '../lib/list';
 import { filterWhere, sortBy, tableColumns, type ColumnMap } from '../lib/filters';
 import { logActivity } from '../services/activity';
-import { billSearch, createBill, deleteBill, getBill, shapeBill, updateBill } from '../services/bills';
+import { billSearch, createBill, deleteBill, getBill, resolveDefaultBook, shapeBill, updateBill } from '../services/bills';
+import type { NextVisitResult } from '../services/nextVisit';
 import { paidSubquery, paymentColumns } from '../services/billPayments';
 import { getBillPayments } from '../services/receipts';
 import { auditRevokedLinks } from '../services/publicInvoiceLinks';
@@ -73,6 +74,12 @@ export async function billRoutes(app: FastifyInstance) {
     return ok({ rows: shaped, total: Number(total), page: q.page, pageSize: q.limit }, `${LABEL}s retrieved successfully`);
   });
 
+  /**
+   * The Book a new bill opens with (`resolveDefaultBook`): the only active book, else the configured
+   * default, else the last-used one, else a stable first. A suggestion only — it takes no number.
+   */
+  app.get(`${BASE}/default-book`, { preHandler: app.requirePermission(PERMISSION) }, async (req) => ok(await resolveDefaultBook(req.user.tenantId)));
+
   /** One bill with its book number, its booking's number and its lines in print order. */
   app.get(`${BASE}/:id`, { preHandler: app.requirePermission(PERMISSION) }, async (req) => {
     const { id } = req.params as { id: string };
@@ -95,8 +102,9 @@ export async function billRoutes(app: FastifyInstance) {
    */
   app.post(BASE, { preHandler: app.requirePermission(PERMISSION, 'create') }, async (req) => {
     const body = parse(billSchema, req.body);
-    const created = await createBill(req.user.tenantId, body);
+    const { bill: created, nextVisit } = await createBill(req.user.tenantId, body);
     await logActivity(req, 'bill', created.id, 'created', `${LABEL} ${created.bookNumber}/${created.billNumber} for "${created.customerName}" created`, { grandTotal: created.grandTotal });
+    await auditNextVisit(req, `${created.bookNumber}/${created.billNumber}`, nextVisit);
     return ok(created, `${LABEL} No. ${created.billNumber} created successfully`);
   });
 
@@ -110,9 +118,10 @@ export async function billRoutes(app: FastifyInstance) {
   app.put(`${BASE}/:id`, { preHandler: app.requirePermission(PERMISSION, 'update') }, async (req) => {
     const { id } = req.params as { id: string };
     const body = parse(billUpdateSchema, req.body);
-    const { bill: updated, revokedLinkIds } = await updateBill(req.user.tenantId, id, body);
+    const { bill: updated, revokedLinkIds, nextVisit } = await updateBill(req.user.tenantId, id, body);
     await logActivity(req, 'bill', updated.id, 'updated', `${LABEL} ${updated.bookNumber}/${updated.billNumber} for "${updated.customerName}" updated`, { grandTotal: updated.grandTotal });
     await auditRevokedLinks(req, updated.id, `${updated.bookNumber}/${updated.billNumber}`, revokedLinkIds, 'BILL_UPDATED');
+    await auditNextVisit(req, `${updated.bookNumber}/${updated.billNumber}`, nextVisit);
     return ok(updated, `${LABEL} updated successfully`);
   });
 
@@ -132,4 +141,11 @@ export async function billRoutes(app: FastifyInstance) {
     await logActivity(req, 'bill', id, 'deleted', `${LABEL} ${existing.bookNumber}/${existing.billNumber} for "${existing.customerName}" deleted`);
     return ok(null, `${LABEL} deleted successfully`);
   });
+}
+
+/** The next-visit appointment a bill save created, moved or detached — on the appointment's own trail. */
+async function auditNextVisit(req: FastifyRequest, billLabel: string, r: NextVisitResult) {
+  if (!r.action || !r.appointment) return;
+  const what = { created: 'created from', moved: 'moved by', detached: 'detached from' }[r.action];
+  await logActivity(req, 'appointment', r.appointment.id, r.action === 'created' ? 'created' : 'updated', `Appointment #${r.appointment.appointmentNumber} ${what} Bill ${billLabel} (next visit)`);
 }

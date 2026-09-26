@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { ZodTypeAny } from 'zod';
 import {
   BILL_LIMITS,
+  BILL_MOBILE_DIGITS,
   BILL_QUANTITY_MAX,
   BILL_RATE_MAX,
   billItemSchema,
@@ -12,6 +13,7 @@ import {
   gstSummary,
   lineAmounts,
   normalizeMobile,
+  sanitizeMobileInput,
 } from '@erp/shared';
 
 /**
@@ -531,7 +533,7 @@ describe('billSchema (create payload)', () => {
       hasBirthDate: false,
       birthDate: null,
       remark: null,
-      taxMode: 'WITH_GST',
+      nextVisitDate: null,
       discountType: 'NONE',
       discountValue: 0,
       items: [{ itemId: ITEM_ID, subItemId: SUB_ITEM_ID, quantity: 1, rate: 100, remark: null }],
@@ -727,20 +729,51 @@ describe('billSchema (create payload)', () => {
       expect(issuesFor(body)).toContainEqual({ path: 'mobileNumber', message: 'Mobile no. is required' });
     });
 
-    it('rejects a number with no digit in it at all', () => {
-      expect(issuesFor(makeBill({ mobileNumber: 'call the studio' }))).toContainEqual({ path: 'mobileNumber', message: 'Enter a valid mobile no.' });
+    /** Billing's rule: exactly ten digits, nothing else (Appointment keeps its own looser rule). */
+    it.each(['9876543210', '0123456789', ' 9876543210 '])('accepts %p as ten digits', (m) => {
+      expect(parseBill(makeBill({ mobileNumber: m }))).toMatchObject({ mobileNumber: m.trim() });
     });
 
-    /** The same latitude Appointment gives: a prefix, a landline or the operator spacing are real. */
-    it.each(['9876543210', '+91 98765 43210', '98765-43210', '0281 2451234'])('accepts %p exactly as typed', (m) => {
-      expect(parseBill(makeBill({ mobileNumber: m }))).toMatchObject({ mobileNumber: m });
+    it('rejects nine digits', () => {
+      expect(issuesFor(makeBill({ mobileNumber: '987654321' }))).toContainEqual({ path: 'mobileNumber', message: `Mobile no. must be exactly ${BILL_MOBILE_DIGITS} digits` });
     });
 
-    it('rejects a number longer than the limit', () => {
-      expect(issuesFor(makeBill({ mobileNumber: '9'.repeat(BILL_LIMITS.mobileNumber + 1) }))).toContainEqual({
-        path: 'mobileNumber',
-        message: `Mobile no. cannot exceed ${BILL_LIMITS.mobileNumber} characters`,
-      });
+    it('rejects eleven digits', () => {
+      expect(issuesFor(makeBill({ mobileNumber: '98765432101' }))).toContainEqual({ path: 'mobileNumber', message: `Mobile no. must be exactly ${BILL_MOBILE_DIGITS} digits` });
+    });
+
+    it.each(['98765abc10', '98765 4321', '+919876543', '98765-4321', 'call studio'])('rejects %p — letters, spaces or symbols', (m) => {
+      expect(issuesFor(makeBill({ mobileNumber: m }))).toContainEqual({ path: 'mobileNumber', message: 'Mobile no. can contain digits only' });
+    });
+  });
+
+  describe('update payload mobile (legacy bills)', () => {
+    /** The shape check is loose on edit; `updateBill` then insists on ten digits unless the key is unchanged. */
+    it.each(['+91 98765 43210', '98765-4321', '9876543210'])('the update schema lets %p through to the server rule', (m) => {
+      const { bookId: _b, ...body } = makeBill({ mobileNumber: m });
+      expect(billUpdateSchema.safeParse(body).success).toBe(true);
+      expect(billSchema.safeParse(makeBill({ mobileNumber: m })).success).toBe(m === '9876543210');
+    });
+
+    it('still refuses a mobile with no digit at all on edit', () => {
+      const { bookId: _b, ...body } = makeBill({ mobileNumber: 'call the studio' });
+      expect(billUpdateSchema.safeParse(body).success).toBe(false);
+    });
+  });
+
+  describe('sanitizeMobileInput (what the form keeps while typing or pasting)', () => {
+    it.each([
+      ['9876543210', '9876543210'],
+      ['98765432101', '9876543210'],
+      ['98765abc43210', '9876543210'],
+      ['+91 98765 43210', '9876543210'],
+      ['098765 43210', '9876543210'],
+      ['98765-43210', '9876543210'],
+      ['abc', ''],
+      ['', ''],
+      ['987', '987'],
+    ])('%p -> %p', (raw, kept) => {
+      expect(sanitizeMobileInput(raw)).toBe(kept);
     });
   });
 
@@ -755,8 +788,8 @@ describe('billSchema (create payload)', () => {
   });
 
   describe('taxMode', () => {
-    it('defaults to WITH_GST', () => {
-      expect(parseBill(makeBill())).toMatchObject({ taxMode: 'WITH_GST' });
+    it('is optional — the book decides it, the server derives it', () => {
+      expect(parseBill(makeBill()).taxMode).toBeUndefined();
     });
 
     it.each(['WITH_GST', 'WITHOUT_GST'])('accepts %p', (m) => {
@@ -1131,11 +1164,11 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
     return app.jwt.sign({ sub: user.id, tenantId });
   }
 
-  async function seedBook(tenantId: string, overrides: { bookNumber?: string; seriesStartsAt?: number; isActive?: boolean } = {}) {
+  async function seedBook(tenantId: string, overrides: { bookNumber?: string; seriesStartsAt?: number; isActive?: boolean; seriesType?: 'WITH_GST' | 'WITHOUT_GST' } = {}) {
     const seriesStartsAt = overrides.seriesStartsAt ?? 1;
     const [book] = await db
       .insert(schema.books)
-      .values({ tenantId, bookNumber: overrides.bookNumber ?? uniqueWord('BK'), seriesStartsAt, nextBillNumber: seriesStartsAt, isActive: overrides.isActive ?? true })
+      .values({ tenantId, bookNumber: overrides.bookNumber ?? uniqueWord('BK'), seriesStartsAt, nextBillNumber: seriesStartsAt, isActive: overrides.isActive ?? true, seriesType: overrides.seriesType ?? 'WITH_GST' })
       .returning();
     return book;
   }
@@ -1227,6 +1260,8 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
     process.env.PORT = '0'; // server.ts boots a listener on import; keep it off a real port
     ({ and, asc, eq, inArray } = await import('drizzle-orm'));
     const client = await import('../db/client');
+    // Fail closed before the first write: the pool must really be on the throwaway database.
+    await (await import('../test-support/dbGuard')).assertTestDatabase(client, TEST_DB);
     db = client.db;
     sqlClient = client.sql;
     schema = client.schema;
@@ -1249,6 +1284,8 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
     if (tenantIds.length) {
       // Lines first, then the documents, then the masters they reference (those FKs are
       // RESTRICT on purpose), then the tenant's own rows.
+      // A next-visit appointment points at its bill; detach before the bills go (deleteBill does the same).
+      await db.update(schema.appointments).set({ sourceBillId: null }).where(inArray(schema.appointments.tenantId, tenantIds));
       await db.delete(schema.billItems).where(inArray(schema.billItems.tenantId, tenantIds));
       await db.delete(schema.bills).where(inArray(schema.bills.tenantId, tenantIds));
       await db.delete(schema.appointments).where(inArray(schema.appointments.tenantId, tenantIds));
@@ -1435,17 +1472,17 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
         appointment = await seedAppointment(tenantAId, { customerName: 'Booking Name', mobileNumber: '9800000001' });
         bill = await created(
           tokenA,
-          billOf(bookA.id, [lineOf(productA, 1, 100)], { appointmentId: appointment.id, customerName: 'Bill Name', mobileNumber: '+91 98111 11111', babyName: 'Aarav' }),
+          billOf(bookA.id, [lineOf(productA, 1, 100)], { appointmentId: appointment.id, customerName: 'Bill Name', mobileNumber: '9811111111', babyName: 'Aarav' }),
         );
       });
 
       it('stores what the operator confirmed on the bill, not what the booking says', async () => {
-        expect(bill).toMatchObject({ customerName: 'Bill Name', mobileNumber: '+91 98111 11111', babyName: 'Aarav' });
+        expect(bill).toMatchObject({ customerName: 'Bill Name', mobileNumber: '9811111111', babyName: 'Aarav' });
       });
 
       it('leaves the saved bill untouched when the booking is edited afterwards', async () => {
         await db.update(schema.appointments).set({ customerName: 'Renamed Later', mobileNumber: '9999999999' }).where(eq(schema.appointments.id, appointment.id));
-        expect(await detail(tokenA, bill.id)).toMatchObject({ customerName: 'Bill Name', mobileNumber: '+91 98111 11111' });
+        expect(await detail(tokenA, bill.id)).toMatchObject({ customerName: 'Bill Name', mobileNumber: '9811111111' });
       });
     });
   });
@@ -1695,7 +1732,8 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
 
     /** WITHOUT_GST charges nothing, but the line keeps the Item Master rate it was built from. */
     it('charges a WITHOUT_GST bill no tax while keeping the GST snapshot on its lines', async () => {
-      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 2, 100)], { taxMode: 'WITHOUT_GST' }));
+      // The book decides the tax mode: a Without GST series issues Without GST bills.
+      const bill = await created(tokenA, billOf((await seedBook(tenantAId, { seriesType: 'WITHOUT_GST' })).id, [lineOf(productA, 2, 100)]));
       expect(bill.items[0]).toMatchObject({ gstRateSnapshot: 18, taxableAmount: 200, gstAmount: 0, lineTotal: 200 });
       expect(bill).toMatchObject({ taxMode: 'WITHOUT_GST', subTotal: 200, gstAmount: 0, grandTotal: 200 });
     });
@@ -1772,7 +1810,7 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
     });
 
     it('discounts a WITHOUT_GST bill while still charging no tax', async () => {
-      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 1000)], { taxMode: 'WITHOUT_GST', discountType: 'AMOUNT', discountValue: 100 }));
+      const bill = await created(tokenA, billOf((await seedBook(tenantAId, { seriesType: 'WITHOUT_GST' })).id, [lineOf(productA, 1, 1000)], { discountType: 'AMOUNT', discountValue: 100 }));
       expect(bill).toMatchObject({ subTotal: 1000, discountAmount: 100, netTaxable: 900, gstAmount: 0, grandTotal: 900 });
       // The snapshot survives: it records the item, not a tax that was charged.
       expect(bill.items[0]).toMatchObject({ gstRateSnapshot: 18, gstAmount: 0, lineTotal: 900 });
@@ -1915,7 +1953,7 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
       customer = uniqueWord('Customer');
       first = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { billDate: '2030-03-15', customerName: uniqueWord('First') }));
       byName = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { billDate: '2030-04-20', customerName: customer }));
-      byMobile = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { billDate: '2030-05-25', customerName: uniqueWord('Mobile'), mobileNumber: '+91 98765 43277' }));
+      byMobile = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { billDate: '2030-05-25', customerName: uniqueWord('Mobile'), mobileNumber: '9876543277' }));
       second = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { billDate: '2030-05-25', customerName: uniqueWord('Same') }));
     });
 
@@ -1927,7 +1965,7 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
       expect(numbersOf(await get(token, `?search=${customer}`))).toEqual([byName.billNumber]);
     });
 
-    /** However the number was typed, and however it is searched for. */
+    /** However the number is searched for. */
     it.each(['9876543277', '+91 98765 43277', '98765-43277'])('finds a bill searching its mobile as %p', async (term) => {
       expect(numbersOf(await get(token, `?search=${encodeURIComponent(term)}`))).toContain(byMobile.billNumber);
     });
@@ -2040,6 +2078,360 @@ describe.skipIf(!TEST_DB)('Bills API (integration, needs TEST_DATABASE_URL)', ()
       const book = await seedBook(tenantAId);
       await post(tokenAReadOnly, billOf(book.id, [lineOf(productA, 1, 100)]));
       expect(await nextNumberOf(book.id)).toBe(1);
+    });
+  });
+
+  /* ============================================ Book series → tax mode -- */
+
+  describe('the book decides the tax mode', () => {
+    it('a With GST book issues a With GST bill without being told', async () => {
+      const book = await seedBook(tenantAId, { seriesType: 'WITH_GST' });
+      const bill = await created(tokenA, billOf(book.id, [lineOf(productA, 1, 1000)]));
+      expect(bill).toMatchObject({ taxMode: 'WITH_GST', subTotal: 1000, gstAmount: 180, grandTotal: 1180 });
+    });
+
+    it('a Without GST book issues a Without GST bill — same formula, no tax', async () => {
+      const book = await seedBook(tenantAId, { seriesType: 'WITHOUT_GST' });
+      const bill = await created(tokenA, billOf(book.id, [lineOf(productA, 1, 1000)], { discountType: 'PERCENT', discountValue: 10 }));
+      expect(bill).toMatchObject({ taxMode: 'WITHOUT_GST', subTotal: 1000, discountAmount: 100, netTaxable: 900, gstAmount: 0, grandTotal: 900 });
+      expect(bill.items[0]).toMatchObject({ gstRateSnapshot: 18, gstAmount: 0 });
+    });
+
+    it('refuses a payload whose tax mode contradicts the book, and takes no number', async () => {
+      const book = await seedBook(tenantAId, { seriesType: 'WITH_GST' });
+      const res = await post(tokenA, billOf(book.id, [lineOf(productA, 1, 100)], { taxMode: 'WITHOUT_GST' }));
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.details[0].path).toEqual(['taxMode']);
+      expect(await nextNumberOf(book.id)).toBe(1);
+    });
+
+    it('accepts a payload that names the same tax mode as the book', async () => {
+      const book = await seedBook(tenantAId, { seriesType: 'WITHOUT_GST' });
+      expect((await post(tokenA, billOf(book.id, [lineOf(productA, 1, 100)], { taxMode: 'WITHOUT_GST' }))).statusCode).toBe(200);
+    });
+
+    it('an edit keeps the saved tax mode and refuses another one', async () => {
+      const book = await seedBook(tenantAId, { seriesType: 'WITH_GST' });
+      const bill = await created(tokenA, billOf(book.id, [lineOf(productA, 1, 100)]));
+      expect((await put(tokenA, bill.id, updateOf([lineOf(productA, 1, 100)], { taxMode: 'WITHOUT_GST' }))).statusCode).toBe(400);
+      const kept = (await put(tokenA, bill.id, updateOf([lineOf(productA, 2, 100)]))).json().data as Bill;
+      expect(kept).toMatchObject({ taxMode: 'WITH_GST', grandTotal: 236 });
+    });
+
+    it('a historical bill whose tax mode differs from its book keeps its own on re-save', async () => {
+      const book = await seedBook(tenantAId, { seriesType: 'WITH_GST' });
+      const bill = await created(tokenA, billOf(book.id, [lineOf(productA, 1, 100)]));
+      // A bill issued before books had a series type.
+      await db.update(schema.bills).set({ taxMode: 'WITHOUT_GST' }).where(eq(schema.bills.id, bill.id));
+      const res = await put(tokenA, bill.id, updateOf([lineOf(productA, 1, 100)]));
+      expect(res.statusCode).toBe(200);
+      expect(res.json().data).toMatchObject({ taxMode: 'WITHOUT_GST', gstAmount: 0, grandTotal: 100 });
+    });
+
+    it('a With GST and a Without GST book number independently: each runs 1, 2, 3', async () => {
+      const gst = await seedBook(tenantAId, { seriesType: 'WITH_GST' });
+      const noGst = await seedBook(tenantAId, { seriesType: 'WITHOUT_GST' });
+      const numbers: [number, number][] = [];
+      for (let i = 0; i < 3; i++) {
+        const a = await created(tokenA, billOf(gst.id, [lineOf(productA, 1, 100)]));
+        const b = await created(tokenA, billOf(noGst.id, [lineOf(productA, 1, 100)]));
+        numbers.push([a.billNumber, b.billNumber]);
+      }
+      expect(numbers).toEqual([[1, 1], [2, 2], [3, 3]]);
+    });
+
+    it('concurrent bills on two books: each book hands out 1..10 exactly once', async () => {
+      const gst = await seedBook(tenantAId, { seriesType: 'WITH_GST' });
+      const noGst = await seedBook(tenantAId, { seriesType: 'WITHOUT_GST' });
+      const results = await Promise.all(Array.from({ length: 20 }, (_, i) => post(tokenA, billOf(i % 2 ? noGst.id : gst.id, [lineOf(productA, 1, 100)]))));
+      expect(results.every((r) => r.statusCode === 200)).toBe(true);
+      const byBook = (id: string) =>
+        results
+          .map((r) => r.json().data as Bill)
+          .filter((b) => b.bookId === id)
+          .map((b) => b.billNumber)
+          .sort((x, y) => x - y);
+      const oneToTen = Array.from({ length: 10 }, (_, i) => i + 1);
+      expect(byBook(gst.id)).toEqual(oneToTen);
+      expect(byBook(noGst.id)).toEqual(oneToTen);
+      expect(await nextNumberOf(gst.id)).toBe(11);
+      expect(await nextNumberOf(noGst.id)).toBe(11);
+    });
+  });
+
+  /* ====================================================== legacy mobile -- */
+
+  /**
+   * Bills saved before the ten-digit rule keep their mobile as typed. They stay editable with their
+   * own customer key; any real change of mobile must be ten digits.
+   */
+  describe('a legacy mobile on edit', () => {
+    const legacy = async (mobileNumber: string) => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100)]));
+      await db.update(schema.bills).set({ mobileNumber, mobileSearch: normalizeMobile(mobileNumber) }).where(eq(schema.bills.id, bill.id));
+      return bill;
+    };
+
+    it('a formatted legacy mobile re-saves as its ten-digit key, same customer', async () => {
+      const bill = await legacy('+91 98765 43299');
+      const res = await put(tokenA, bill.id, updateOf([lineOf(productA, 1, 100)], { mobileNumber: '9876543299' }));
+      expect(res.statusCode).toBe(200);
+      expect(await storedBill(bill.id)).toMatchObject({ mobileNumber: '9876543299', mobileSearch: '9876543299' });
+    });
+
+    it('a nine-digit legacy mobile may be saved back unchanged, but not changed to another non-ten-digit value', async () => {
+      const bill = await legacy('98765-4321');
+      expect((await put(tokenA, bill.id, updateOf([lineOf(productA, 1, 100)], { mobileNumber: '987654321' }))).statusCode).toBe(200);
+      const changed = await put(tokenA, bill.id, updateOf([lineOf(productA, 1, 100)], { mobileNumber: '98765432' }));
+      expect(changed.statusCode).toBe(400);
+      expect(changed.json().error.details[0].path).toEqual(['mobileNumber']);
+      expect((await put(tokenA, bill.id, updateOf([lineOf(productA, 1, 100)], { mobileNumber: '9876543219' }))).statusCode).toBe(200);
+    });
+
+    it('a ten-digit bill cannot be edited to a formatted or short mobile', async () => {
+      const bill = await created(tokenA, billOf(bookA.id, [lineOf(productA, 1, 100)], { mobileNumber: '9876543288' }));
+      expect((await put(tokenA, bill.id, updateOf([lineOf(productA, 1, 100)], { mobileNumber: '98765 43288' }))).statusCode).toBe(400);
+      expect((await put(tokenA, bill.id, updateOf([lineOf(productA, 1, 100)], { mobileNumber: '987654328' }))).statusCode).toBe(400);
+    });
+  });
+
+  /* ============================================== default book for new -- */
+
+  describe('the default book for a new bill', () => {
+    const defaultBook = async (token: string) => (await get(token, '/default-book')).json().data as { bookId: string | null; reason: string };
+    const WITH_SETTINGS = { ...FULL, settings_general: ['read', 'update'] };
+    const setDefault = (token: string, bookId: string | null) => app.inject({ method: 'PUT', url: '/api/settings', headers: auth(token), payload: { defaultBillingBookId: bookId } });
+
+    it('no active book → none; exactly one active book → that book, with no configuration', async () => {
+      const { tenantId, token } = await seedTenant('bill-default-one', WITH_SETTINGS);
+      expect(await defaultBook(token)).toEqual({ bookId: null, reason: 'NONE' });
+      await seedBook(tenantId, { isActive: false });
+      const only = await seedBook(tenantId, { seriesType: 'WITHOUT_GST' });
+      expect(await defaultBook(token)).toEqual({ bookId: only.id, reason: 'ONLY_ACTIVE' });
+    });
+
+    it('several active books: stable first → last used → configured; stale choices are ignored', async () => {
+      const { tenantId, token } = await seedTenant('bill-default-many', WITH_SETTINGS);
+      const product = await seedProduct(tenantId);
+      const a = await seedBook(tenantId, { bookNumber: 'AAA-GST', seriesType: 'WITH_GST' });
+      const b = await seedBook(tenantId, { bookNumber: 'BBB-NOGST', seriesType: 'WITHOUT_GST' });
+      const c = await seedBook(tenantId, { bookNumber: 'CCC-GST', seriesType: 'WITH_GST' });
+
+      // Nothing used yet: deterministic, and the same on every call.
+      expect(await defaultBook(token)).toEqual({ bookId: a.id, reason: 'FIRST_ACTIVE' });
+      expect(await defaultBook(token)).toEqual({ bookId: a.id, reason: 'FIRST_ACTIVE' });
+
+      // Saving a bill makes its book the last used.
+      await created(token, billOf(c.id, [lineOf(product, 1, 100)]));
+      expect(await defaultBook(token)).toEqual({ bookId: c.id, reason: 'LAST_USED' });
+      await created(token, billOf(b.id, [lineOf(product, 1, 100)]));
+      expect(await defaultBook(token)).toEqual({ bookId: b.id, reason: 'LAST_USED' });
+
+      // The last used book goes inactive → skipped, back to the most recent ACTIVE one.
+      await db.update(schema.books).set({ isActive: false }).where(eq(schema.books.id, b.id));
+      expect(await defaultBook(token)).toEqual({ bookId: c.id, reason: 'LAST_USED' });
+
+      // An explicit default wins over last used while it is active…
+      expect((await setDefault(token, a.id)).statusCode).toBe(200);
+      expect(await defaultBook(token)).toEqual({ bookId: a.id, reason: 'CONFIGURED' });
+      // …and Automatic (null) goes back to last used.
+      expect((await setDefault(token, null)).statusCode).toBe(200);
+      expect(await defaultBook(token)).toEqual({ bookId: c.id, reason: 'LAST_USED' });
+      // A configured book that goes inactive is ignored — here only c is left active.
+      await setDefault(token, a.id);
+      await db.update(schema.books).set({ isActive: false }).where(eq(schema.books.id, a.id));
+      expect(await defaultBook(token)).toEqual({ bookId: c.id, reason: 'ONLY_ACTIVE' });
+    });
+
+    it('never offers another tenant’s book, even if configured', async () => {
+      const { tenantId, token } = await seedTenant('bill-default-iso', WITH_SETTINGS);
+      await seedBook(tenantId);
+      await seedBook(tenantId);
+      await setDefault(token, bookB.id);
+      expect((await defaultBook(token)).bookId).not.toBe(bookB.id);
+    });
+
+    it('reading the default takes no number from any book', async () => {
+      const { tenantId, token } = await seedTenant('bill-default-nonum');
+      const book = await seedBook(tenantId);
+      await defaultBook(token);
+      await defaultBook(token);
+      expect(await nextNumberOf(book.id)).toBe(1);
+    });
+  });
+
+  /* ======================================================= next visit -- */
+
+  describe('next visit → one linked appointment', () => {
+    const linked = async (billId: string) => db.select().from(schema.appointments).where(eq(schema.appointments.sourceBillId, billId));
+    const appointmentCounter = async (tenantId: string) =>
+      (await db.select().from(schema.documentCounters).where(and(eq(schema.documentCounters.tenantId, tenantId), eq(schema.documentCounters.documentType, 'appointment'))))[0]?.nextNumber ?? 1;
+    const countAppointments = async (tenantId: string) => (await db.select({ id: schema.appointments.id }).from(schema.appointments).where(eq(schema.appointments.tenantId, tenantId))).length;
+    const countBills = async (tenantId: string) => (await db.select({ id: schema.bills.id }).from(schema.bills).where(eq(schema.bills.tenantId, tenantId))).length;
+    const lookup = async (token: string, mobile: string) =>
+      (await app.inject({ method: 'GET', url: `/api/common/lookups/appointments?mobile=${mobile}`, headers: auth(token) })).json().data as { id: string }[] | undefined;
+
+    let tenantId = '';
+    let token = '';
+    let book: Awaited<ReturnType<typeof seedBook>>;
+    let product: Product;
+    beforeAll(async () => {
+      ({ tenantId, token } = await seedTenant('bill-next-visit', { ...FULL, operations_appointments: ['read'] }));
+      book = await seedBook(tenantId);
+      product = await seedProduct(tenantId);
+    });
+
+    it('no next visit date → no appointment, no appointment number used', async () => {
+      const before = await appointmentCounter(tenantId);
+      const bill = await created(token, billOf(book.id, [lineOf(product, 1, 100)]));
+      expect(await linked(bill.id)).toHaveLength(0);
+      expect(await appointmentCounter(tenantId)).toBe(before);
+      expect(await detail(token, bill.id)).toMatchObject({ nextVisitDate: null, nextAppointmentNumber: null });
+    });
+
+    it('a next visit date creates exactly one appointment with the customer, baby and date — no time', async () => {
+      const before = await appointmentCounter(tenantId);
+      const bill = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { customerName: 'Visit Customer', mobileNumber: '9812345678', babyName: 'Aarav', nextVisitDate: '2026-10-23' }));
+      const rows = await linked(bill.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        tenantId,
+        appointmentNumber: before,
+        appointmentDate: '2026-10-23',
+        appointmentTime: null,
+        customerName: 'Visit Customer',
+        mobileNumber: '9812345678',
+        mobileSearch: '9812345678',
+        babyName: 'Aarav',
+      });
+      expect(await appointmentCounter(tenantId)).toBe(before + 1);
+      expect(bill).toMatchObject({ nextVisitDate: '2026-10-23', nextAppointmentNumber: before, nextAppointmentId: rows[0].id });
+      expect(await detail(token, bill.id)).toMatchObject({ nextAppointmentNumber: before });
+      // Billing's mobile lookup finds it like any other booking.
+      expect((await lookup(token, '9812345678'))?.map((a) => a.id)).toContain(rows[0].id);
+    });
+
+    it('repeated saves never create a second appointment', async () => {
+      const bill = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { nextVisitDate: '2026-11-01' }));
+      const counter = await appointmentCounter(tenantId);
+      for (let i = 0; i < 3; i++) expect((await put(token, bill.id, updateOf([lineOf(product, 1, 100 + i)], { nextVisitDate: '2026-11-01' }))).statusCode).toBe(200);
+      expect(await linked(bill.id)).toHaveLength(1);
+      expect(await appointmentCounter(tenantId)).toBe(counter);
+    });
+
+    it('concurrent saves of one bill still leave exactly one appointment', async () => {
+      const bill = await created(token, billOf(book.id, [lineOf(product, 1, 100)]));
+      const results = await Promise.all(Array.from({ length: 8 }, () => put(token, bill.id, updateOf([lineOf(product, 1, 100)], { nextVisitDate: '2026-12-05' }))));
+      expect(results.every((r) => r.statusCode === 200)).toBe(true);
+      expect(await linked(bill.id)).toHaveLength(1);
+    });
+
+    it('changing the date moves the same appointment; clearing it detaches — and keeps — the appointment', async () => {
+      const bill = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { nextVisitDate: '2026-10-10' }));
+      const [first] = await linked(bill.id);
+      const moved = (await put(token, bill.id, updateOf([lineOf(product, 1, 100)], { nextVisitDate: '2026-10-20' }))).json().data;
+      const [after] = await linked(bill.id);
+      expect(after).toMatchObject({ id: first.id, appointmentNumber: first.appointmentNumber, appointmentDate: '2026-10-20' });
+      expect(moved.nextAppointmentNumber).toBe(first.appointmentNumber);
+
+      const cleared = (await put(token, bill.id, updateOf([lineOf(product, 1, 100)], { nextVisitDate: null }))).json().data;
+      expect(cleared).toMatchObject({ nextVisitDate: null, nextAppointmentNumber: null });
+      expect(await linked(bill.id)).toHaveLength(0);
+      const [kept] = await db.select().from(schema.appointments).where(eq(schema.appointments.id, first.id));
+      expect(kept).toMatchObject({ sourceBillId: null, appointmentDate: '2026-10-20' });
+    });
+
+    it('an unrelated re-save does not resurrect an appointment the studio deleted', async () => {
+      const bill = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { nextVisitDate: '2026-10-15' }));
+      const [appt] = await linked(bill.id);
+      await db.delete(schema.appointments).where(eq(schema.appointments.id, appt.id));
+      expect((await put(token, bill.id, updateOf([lineOf(product, 2, 100)], { nextVisitDate: '2026-10-15' }))).statusCode).toBe(200);
+      expect(await linked(bill.id)).toHaveLength(0);
+      // Choosing a different date is a new decision, and books a new visit.
+      expect((await put(token, bill.id, updateOf([lineOf(product, 2, 100)], { nextVisitDate: '2026-10-16' }))).statusCode).toBe(200);
+      expect(await linked(bill.id)).toHaveLength(1);
+    });
+
+    it('an appointment that has itself been billed is never moved', async () => {
+      const bill = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { nextVisitDate: '2026-10-12' }));
+      const [appt] = await linked(bill.id);
+      expect((await post(token, billOf(book.id, [lineOf(product, 1, 100)], { appointmentId: appt.id, billDate: '2026-10-12' }))).statusCode).toBe(200);
+      const res = await put(token, bill.id, updateOf([lineOf(product, 1, 100)], { nextVisitDate: '2026-10-30' }));
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.details[0].path).toEqual(['nextVisitDate']);
+      expect((await linked(bill.id))[0].appointmentDate).toBe('2026-10-12');
+    });
+
+    it('an unrelated re-save never undoes a reschedule made in Appointments — even once that visit is billed', async () => {
+      const bill = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { nextVisitDate: '2026-10-10' }));
+      const [appt] = await linked(bill.id);
+      // The studio moves the booking by hand; nothing writes that back to the bill.
+      await db.update(schema.appointments).set({ appointmentDate: '2026-10-15' }).where(eq(schema.appointments.id, appt.id));
+      expect((await put(token, bill.id, updateOf([lineOf(product, 1, 100)], { nextVisitDate: '2026-10-10', remark: 'typo fixed' }))).statusCode).toBe(200);
+      expect((await linked(bill.id))[0].appointmentDate).toBe('2026-10-15');
+      // The rescheduled visit happens and is billed; the original bill must still be editable.
+      expect((await post(token, billOf(book.id, [lineOf(product, 1, 100)], { appointmentId: appt.id, billDate: '2026-10-15' }))).statusCode).toBe(200);
+      expect((await put(token, bill.id, updateOf([lineOf(product, 2, 100)], { nextVisitDate: '2026-10-10' }))).statusCode).toBe(200);
+    });
+
+    it('a bill cannot name its own next-visit appointment as the booking it came from', async () => {
+      const bill = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { nextVisitDate: '2026-10-19' }));
+      const [appt] = await linked(bill.id);
+      const res = await put(token, bill.id, updateOf([lineOf(product, 1, 100)], { nextVisitDate: '2026-10-19', appointmentId: appt.id }));
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.details[0].path).toEqual(['appointmentId']);
+    });
+
+    it('deleting the bill keeps its next-visit appointment', async () => {
+      const bill = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { nextVisitDate: '2026-10-18' }));
+      const [appt] = await linked(bill.id);
+      expect((await del(token, bill.id)).statusCode).toBe(200);
+      const [kept] = await db.select().from(schema.appointments).where(eq(schema.appointments.id, appt.id));
+      expect(kept).toMatchObject({ sourceBillId: null, appointmentDate: '2026-10-18' });
+    });
+
+    it('a next visit before the bill date is refused on the field', async () => {
+      const res = await post(token, billOf(book.id, [lineOf(product, 1, 100)], { billDate: '2026-09-23', nextVisitDate: '2026-09-22' }));
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.details[0].path).toEqual(['nextVisitDate']);
+    });
+
+    it('a refused bill creates no appointment and uses no number', async () => {
+      const [bills, appts, counter, next] = [await countBills(tenantId), await countAppointments(tenantId), await appointmentCounter(tenantId), await nextNumberOf(book.id)];
+      const res = await post(token, billOf(book.id, [lineOf(product, 0, 100)], { nextVisitDate: '2026-10-25' }));
+      expect(res.statusCode).toBe(400);
+      expect(await countBills(tenantId)).toBe(bills);
+      expect(await countAppointments(tenantId)).toBe(appts);
+      expect(await appointmentCounter(tenantId)).toBe(counter);
+      expect(await nextNumberOf(book.id)).toBe(next);
+    });
+
+    /**
+     * An appointment that cannot be written takes the whole bill back with it. A temporary check
+     * constraint on the THROWAWAY database (the suite's guard proved which one) makes the
+     * appointment insert fail for one baby name.
+     */
+    it('a failed appointment rolls back the bill, its number and the appointment number', async () => {
+      const [bills, appts, counter, next] = [await countBills(tenantId), await countAppointments(tenantId), await appointmentCounter(tenantId), await nextNumberOf(book.id)];
+      await sqlClient`alter table appointments add constraint zz_test_block_next_visit check (baby_name is distinct from 'FAIL-NEXT-VISIT')`;
+      try {
+        const res = await post(token, billOf(book.id, [lineOf(product, 1, 100)], { babyName: 'FAIL-NEXT-VISIT', nextVisitDate: '2026-10-25' }));
+        expect(res.statusCode).toBeGreaterThanOrEqual(400);
+      } finally {
+        await sqlClient`alter table appointments drop constraint zz_test_block_next_visit`;
+      }
+      expect(await countBills(tenantId)).toBe(bills);
+      expect(await countAppointments(tenantId)).toBe(appts);
+      expect(await appointmentCounter(tenantId)).toBe(counter);
+      expect(await nextNumberOf(book.id)).toBe(next);
+    });
+
+    it('stays inside the tenant: another tenant never sees the appointment', async () => {
+      const bill = await created(token, billOf(book.id, [lineOf(product, 1, 100)], { mobileNumber: '9870001111', nextVisitDate: '2026-10-28' }));
+      const [appt] = await linked(bill.id);
+      expect(appt.tenantId).toBe(tenantId);
+      const tokenBAppointments = await seedUser(tenantBId, 'bill-tenant-b-appts', { operations_appointments: ['read'] });
+      expect((await lookup(tokenBAppointments, '9870001111'))?.map((a) => a.id) ?? []).not.toContain(appt.id);
     });
   });
 });

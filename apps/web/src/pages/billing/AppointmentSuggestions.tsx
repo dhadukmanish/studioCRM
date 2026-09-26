@@ -17,6 +17,8 @@ interface Props {
   linked: number | null;
   onPick: (a: AppointmentLookup) => void;
   onClear: () => void;
+  /** This bill's own next-visit appointment — the visit AFTER this bill, never the booking it came from. */
+  excludeId?: string | null;
 }
 
 /**
@@ -32,7 +34,7 @@ interface Props {
  * removes only the LINK — the customer values already typed into the bill stay, because they
  * are the bill's own snapshot from the moment they land in the form.
  */
-export function AppointmentSuggestions({ mobile, linked, onPick, onClear }: Props) {
+export function AppointmentSuggestions({ mobile, linked, onPick, onClear, excludeId }: Props) {
   const [digits, setDigits] = useState(() => normalizeMobile(mobile));
   useEffect(() => {
     const t = setTimeout(() => setDigits(normalizeMobile(mobile)), DEBOUNCE_MS);
@@ -43,7 +45,7 @@ export function AppointmentSuggestions({ mobile, linked, onPick, onClear }: Prop
   // A linked bill asks nothing: the question "which booking is this?" is already answered.
   const q = useAppointmentsLookup(!linked && enough ? digits : '');
   const fmt = useDateFormatters();
-  const rows = q.data ?? [];
+  const rows = (q.data ?? []).filter((a) => a.id !== excludeId);
 
   if (linked !== null) {
     return (

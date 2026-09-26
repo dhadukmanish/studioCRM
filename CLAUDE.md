@@ -12,7 +12,10 @@ WhatsApp invoice sharing is browser click-to-chat carrying a secure public invoi
 against bills — one receipt across many bills, partial and multiple payments, derived Paid /
 Outstanding, cancel-never-delete (`docs/RECEIPTS_PAYMENTS.md`). Receivables reports — customer
 Summary, Outstanding Bills, Aging from bill date, drill-down, CSV, print — read the same derived
-figures (`docs/RECEIVABLES_REPORTS.md`). The ledger / GL, customer advances, a customer master and
+figures (`docs/RECEIVABLES_REPORTS.md`). Each Book is a With GST or Without GST series that decides a new bill's tax mode;
+a new bill opens on the only / configured / last-used active book; the bill mobile is exactly 10
+digits; a Next Visit Date creates one linked appointment in the bill's transaction
+(`docs/BILL_NUMBERING.md`). The ledger / GL, customer advances, a customer master and
 the CGST/SGST/IGST split are not started.
 Billing honours two contracts: `docs/BILL_NUMBERING.md` for identity and `docs/BILLING_CALCULATION.md`
 for money. Current implementation status lives in `.claude/HANDOFF.md`.
@@ -154,9 +157,11 @@ implementation details. Pure schema/service tests always run; suites that need a
 gated on `TEST_DATABASE_URL` and skip without it, because the only database configured here is
 a shared hosted one. A DB suite imports db-touching modules only dynamically, inside `beforeAll`
 (a top-level import connects with the hosted URL from `.env` before the test can switch it), and
-runs with BOTH `DATABASE_URL` and `TEST_DATABASE_URL` set to the throwaway database.
-`pnpm typecheck` plus a real browser/API check remains part of the bar.
-See `.claude/skills/studio-testing`.
+runs with BOTH `DATABASE_URL` and `TEST_DATABASE_URL` set to the throwaway database, and calls
+`assertTestDatabase` (`src/test-support/dbGuard.ts`) before its first write — it fails closed unless the
+pool really reached that database. `pnpm typecheck` plus a real browser/API check remains part of the bar.
+Skills: `studio-testing`, `studio-db-safety` (test DB, migrations), `studio-ui-verification` (browser),
+`studio-billing-domain` (billing rules), `studio-release` (commit → deploy → smoke).
 
 ## Agent delegation
 
@@ -196,7 +201,8 @@ return findings, not file dumps. Saving tokens never justifies guessing at corre
 - `docs/ARCHITECTURE.md` — module boundaries, request lifecycle, permission model
 - `docs/UI_DESIGN_SYSTEM.md` — visual tokens, list/form patterns, interaction rules
 - `docs/DEVELOPMENT.md` — setup, environment, workflows, troubleshooting
-- `docs/BILL_NUMBERING.md` — the bill number series contract Billing must honour
+- `docs/BILL_NUMBERING.md` — the bill number series contract Billing must honour, the Book series type →
+  tax mode rule, the default/last-used book, and the Next Visit appointment link
 - `docs/BILLING_CALCULATION.md` — the money contract: GST-exclusive rate, discount and its
   allocation, rounding, the rate-wise GST summary, and the snapshot rules an edit follows
 - `docs/SETTINGS.md` — company profile vs application settings, date storage vs display,

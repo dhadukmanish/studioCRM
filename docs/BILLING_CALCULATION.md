@@ -100,6 +100,9 @@ exact range at the ceilings in `schemas/bills.ts` are done in `bigint`.
 
 ## WITH_GST and WITHOUT_GST
 
+Which one a bill uses is decided by its **Book's series type** (docs/BILL_NUMBERING.md), never
+typed on the bill; an edit keeps the saved mode. The formulas below are unchanged by that.
+
 Same taxable side, different tax:
 
 | | WITH_GST | WITHOUT_GST |

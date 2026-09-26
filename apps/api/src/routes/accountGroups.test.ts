@@ -198,6 +198,8 @@ describe.skipIf(!TEST_DB)('Account Group Master API (integration, needs TEST_DAT
     process.env.PORT = '0'; // server.ts boots a listener on import; keep it off a real port
     inArray = (await import('drizzle-orm')).inArray;
     const client = await import('../db/client');
+    // Fail closed before the first write: the pool must really be on the throwaway database.
+    await (await import('../test-support/dbGuard')).assertTestDatabase(client, TEST_DB);
     db = client.db;
     sqlClient = client.sql;
     schema = client.schema;

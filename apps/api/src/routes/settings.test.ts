@@ -301,6 +301,8 @@ describe.skipIf(!TEST_DB)('Settings, company profile and logo API (integration, 
     process.env.PORT = '0';
     inArray = (await import('drizzle-orm')).inArray;
     const client = await import('../db/client');
+    // Fail closed before the first write: the pool must really be on the throwaway database.
+    await (await import('../test-support/dbGuard')).assertTestDatabase(client, TEST_DB);
     db = client.db;
     sqlClient = client.sql;
     schema = client.schema;

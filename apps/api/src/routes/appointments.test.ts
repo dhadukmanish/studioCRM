@@ -296,6 +296,8 @@ describe.skipIf(!TEST_DB)('Appointments API (integration, needs TEST_DATABASE_UR
     process.env.PORT = '0'; // server.ts boots a listener on import; keep it off a real port
     ({ and, eq, inArray } = await import('drizzle-orm'));
     const client = await import('../db/client');
+    // Fail closed before the first write: the pool must really be on the throwaway database.
+    await (await import('../test-support/dbGuard')).assertTestDatabase(client, TEST_DB);
     db = client.db;
     sqlClient = client.sql;
     schema = client.schema;

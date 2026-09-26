@@ -17,11 +17,12 @@ interface GridProps {
   items: ItemLookup[];
   itemOptions: Option[];
   taxMode: InvoiceTaxMode;
-  onAdd: () => void;
+  /** A new line after `index`, or at the end when omitted. */
+  onAdd: (after?: number) => void;
   /** Enter at the end of a line: the next one, appended only when there is no next one. */
   onNext: (index: number) => void;
   onRemove: (index: number) => void;
-  /** Index whose Item cell should take focus, set after Enter or Add line. */
+  /** Index whose Item cell should take focus, set after Enter or a row's +. */
   focusIndex: number | null;
   onFocused: () => void;
   disabled?: boolean;
@@ -40,12 +41,14 @@ export function BillLinesGrid({ lines, fieldIds, amounts, items, itemOptions, ta
     <div className="overflow-x-auto">
       {/* Ten data columns have to stay readable side by side: the two pickers take a share of
           the width, every money column is fixed so the figures line up, and Remark takes what
-          is left. The min-width is what the row genuinely needs before its own scroller. */}
-      <table className="w-full min-w-[1100px] border-separate border-spacing-0">
+          is left. The min-width is what the row genuinely needs before its own scroller.
+          table-fixed: a long item or product name truncates in its picker instead of widening
+          its column and squeezing Remark. */}
+      <table className="w-full min-w-[1100px] table-fixed border-separate border-spacing-0">
         <colgroup>
           <col className="w-10" />
-          <col className="w-[17%]" />
-          <col className="w-[17%]" />
+          <col className="w-[15%]" />
+          <col className="w-[15%]" />
           <col className="w-[72px]" />
           <col className="w-[96px]" />
           <col className="w-[104px]" />
@@ -53,7 +56,7 @@ export function BillLinesGrid({ lines, fieldIds, amounts, items, itemOptions, ta
           <col className="w-[96px]" />
           <col className="w-[108px]" />
           <col />
-          <col className="w-10" />
+          <col className="w-[72px]" />
         </colgroup>
         <thead>
           <tr className="bg-head">
@@ -71,7 +74,7 @@ export function BillLinesGrid({ lines, fieldIds, amounts, items, itemOptions, ta
             {/* `relative`, because `.sr-only` is absolutely positioned: without a positioned
                 ancestor its containing block is the page itself, so it escapes this grid's
                 horizontal scroller and drags the whole document sideways on a phone. */}
-            <th scope="col" className="table-head relative px-2"><span className="sr-only">Remove</span></th>
+            <th scope="col" className="table-head relative px-2"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -85,6 +88,7 @@ export function BillLinesGrid({ lines, fieldIds, amounts, items, itemOptions, ta
               itemOptions={itemOptions}
               taxMode={taxMode}
               onEnter={() => onNext(i)}
+              onAdd={() => onAdd(i)}
               onRemove={() => onRemove(i)}
               focus={focusIndex === i}
               onFocused={onFocused}
@@ -93,19 +97,16 @@ export function BillLinesGrid({ lines, fieldIds, amounts, items, itemOptions, ta
           ))}
           {lines.length === 0 && (
             <tr>
-              <td colSpan={11} className="border-b border-line px-3 py-6 text-center text-[13px] text-gray-500">
-                This bill has no lines yet. Add at least one before saving.
+              <td colSpan={11} className="border-b border-line px-3 py-5 text-center text-[13px] text-gray-500">
+                {/* Never stuck: with every line removed, the first one can still be added. */}
+                <button type="button" className="btn-outline" onClick={() => onAdd()} disabled={disabled}>
+                  <Plus className="h-4 w-4" strokeWidth={1.5} /> Add item
+                </button>
               </td>
             </tr>
           )}
         </tbody>
       </table>
-      <div className="mt-2 flex items-center gap-3">
-        <button type="button" className="btn-outline" onClick={onAdd} disabled={disabled}>
-          <Plus className="h-4 w-4" /> Add line
-        </button>
-        <span className="text-[12px] text-gray-500">Item → Product → Qty → Rate, then Enter to start the next line.</span>
-      </div>
     </div>
   );
 }
@@ -120,6 +121,7 @@ interface RowProps {
   itemOptions: Option[];
   taxMode: InvoiceTaxMode;
   onEnter: () => void;
+  onAdd: () => void;
   onRemove: () => void;
   focus: boolean;
   onFocused: () => void;
@@ -128,7 +130,7 @@ interface RowProps {
 
 const cell = 'border-b border-line px-2 py-1 align-top';
 
-function BillLineRow({ index, line, amount, items, itemOptions, taxMode, onEnter, onRemove, focus, onFocused, disabled }: RowProps) {
+function BillLineRow({ index, line, amount, items, itemOptions, taxMode, onEnter, onAdd, onRemove, focus, onFocused, disabled }: RowProps) {
   const { control, register, setValue, formState: { errors } } = useFormContext<BillFormValues>();
   // One request per item, shared by every line that uses it — react-query caches by item id.
   const subItems = useSubItemsLookup(line.itemId || undefined);
@@ -141,7 +143,7 @@ function BillLineRow({ index, line, amount, items, itemOptions, taxMode, onEnter
   const itemCell = useRef<HTMLDivElement>(null);
   const row = useRef<HTMLTableRowElement>(null);
 
-  // Fast entry: after Enter (or Add line) the caret belongs in the new line's first cell.
+  // Fast entry: after Enter (or a row's +) the caret belongs in the new line's first cell.
   useEffect(() => {
     if (!focus) return;
     itemCell.current?.querySelector('button')?.focus();
@@ -258,10 +260,16 @@ function BillLineRow({ index, line, amount, items, itemOptions, taxMode, onEnter
         <TextInput size="sm" placeholder="Optional note" aria-label={`Remark, line ${index + 1}`} disabled={disabled} onKeyDown={nextLineOnEnter} {...register(`items.${index}.remark`)} />
         <CellError message={lineErrors?.remark?.message} />
       </td>
-      <td className={`${cell} pt-1.5 text-center`}>
-        <button type="button" className="row-action-danger" onClick={onRemove} disabled={disabled} aria-label={`Remove line ${index + 1}`} title="Remove line">
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+      <td className={`${cell} pt-1.5`}>
+        {/* Add sits BEFORE Delete, in the accent tint so it is the easy one to find; Delete stays quiet. */}
+        <div className="flex items-center justify-center gap-1">
+          <button type="button" className="row-action-add" onClick={onAdd} disabled={disabled} aria-label={`Add item after line ${index + 1}`} title="Add item">
+            <Plus className="h-3.5 w-3.5" strokeWidth={1.5} />
+          </button>
+          <button type="button" className="row-action-danger" onClick={onRemove} disabled={disabled} aria-label={`Remove line ${index + 1}`} title="Remove line">
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />
+          </button>
+        </div>
       </td>
     </tr>
   );

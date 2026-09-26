@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { INVOICE_TAX_MODES, INVOICE_TAX_MODE_LABELS, type InvoiceTaxMode } from '../enums.js';
 
 /**
  * Book Master — a Book is one independent BILL NUMBER SERIES, not a text master.
@@ -20,6 +21,17 @@ export const BOOK_LIMITS = { bookNumber: 60 } as const;
 export const BOOK_SERIES_START_MAX = 1_000_000_000;
 /** The starting number a book gets when the payload does not ask for a different one. */
 export const BOOK_SERIES_START_DEFAULT = 1;
+
+/**
+ * A Book's SERIES TYPE — whether the bills it numbers charge GST. The same two values as a bill's
+ * tax mode, because the book decides it: a new bill's tax mode IS its book's series type (the
+ * server derives it and refuses a payload that contradicts it). A business may run one book of
+ * either type, or several of each, active at once. Frozen once the book has issued a number.
+ */
+export const BOOK_SERIES_TYPES = INVOICE_TAX_MODES;
+export type BookSeriesType = InvoiceTaxMode;
+export const BOOK_SERIES_TYPE_LABELS: Record<BookSeriesType, string> = INVOICE_TAX_MODE_LABELS;
+export const BOOK_SERIES_TYPE_DEFAULT: BookSeriesType = 'WITH_GST';
 
 export const bookSchema = z.object({
   /**
@@ -43,6 +55,7 @@ export const bookSchema = z.object({
         .max(BOOK_SERIES_START_MAX, 'Series starts at is too large'),
     )
     .default(BOOK_SERIES_START_DEFAULT),
+  seriesType: z.enum(BOOK_SERIES_TYPES, { errorMap: () => ({ message: 'Select a valid series type' }) }).default(BOOK_SERIES_TYPE_DEFAULT),
   /** Active means the book can be picked for NEW bills. Inactive keeps all of its history. */
   isActive: z.boolean().default(true),
 });

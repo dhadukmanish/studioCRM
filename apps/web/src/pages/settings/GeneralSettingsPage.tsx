@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Save } from 'lucide-react';
 import { Field, Select, Spinner, Switch, TextArea, TextInput } from '@/components/ui';
-import { useSave, useSettings } from '@/lib/queries';
+import { useBooksLookup, useSave, useSettings } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
 import { THEMES } from '@/lib/theme';
 import { todayISO } from '@/lib/format';
-import { DATE_FORMATS, DEFAULT_WHATSAPP_INVOICE_MESSAGE, INVOICE_LINK_PLACEHOLDER, WHATSAPP_MESSAGE_MAX, WHATSAPP_MESSAGE_VARIABLES, dateFormatLabel, formatDateOnly, unknownMessageVariables } from '@erp/shared';
+import { BOOK_SERIES_TYPE_LABELS, DATE_FORMATS, DEFAULT_WHATSAPP_INVOICE_MESSAGE, INVOICE_LINK_PLACEHOLDER, WHATSAPP_MESSAGE_MAX, WHATSAPP_MESSAGE_VARIABLES, dateFormatLabel, formatDateOnly, unknownMessageVariables } from '@erp/shared';
 
 /** Tenant-wide settings. Keys mirror DEFAULT_SETTINGS in apps/api/src/services/settings.ts — add a control here when you add a key there. */
 export default function GeneralSettingsPage() {
@@ -18,6 +18,9 @@ export default function GeneralSettingsPage() {
   const set = (k: string, v: any) => setS((x) => ({ ...x, [k]: v }));
   const today = todayISO();
   const unknownVars = unknownMessageVariables(String(s.whatsappInvoiceMessage ?? ''));
+  const books = useBooksLookup();
+  // A configured book that has since gone inactive is not in the active lookup: shown as Automatic, which is what Billing does with it.
+  const defaultBookId = (books.data ?? []).some((b) => b.id === s.defaultBillingBookId) ? String(s.defaultBillingBookId) : '';
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -29,7 +32,7 @@ export default function GeneralSettingsPage() {
           <div className="card p-5 space-y-4">
             <h3 className="section-title">Display & locale</h3>
             <p className="text-[12.5px] text-gray-500">Company name, logo, address and GSTIN are set on the default company in <Link to="/modules/settings/companies" className="text-primary hover:underline">Settings → Companies</Link>.</p>
-            <Field label="Default Theme" hint="Users can still switch from the top bar"><div className="flex gap-2">{THEMES.map((t) => <button key={t.key} type="button" onClick={() => set('themeMode', t.key)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] ${s.themeMode === t.key ? 'border-primary bg-primary/5 text-primary' : 'border-line text-gray-600 hover:bg-gray-50'}`}><span className="h-4 w-4 rounded-full border border-line" style={{ background: t.swatch }} />{t.label}</button>)}</div></Field>
+            <Field label="Default Theme" hint="Users can still switch from the top bar"><div className="flex flex-wrap gap-2">{THEMES.map((t) => <button key={t.key} type="button" onClick={() => set('themeMode', t.key)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] ${s.themeMode === t.key ? 'border-primary bg-primary/5 text-primary' : 'border-line text-gray-600 hover:bg-gray-50'}`}><span className="h-4 w-4 rounded-full border border-line" style={{ background: t.swatch }} />{t.label}</button>)}</div></Field>
             <Field label="Primary Color" hint="Also change `primary` in apps/web/tailwind.config.js for the compiled theme"><div className="flex items-center gap-2"><input type="color" value={s.primaryColor ?? '#006CB8'} onChange={(e) => set('primaryColor', e.target.value)} className="h-10 w-14 rounded border border-line" /><TextInput value={s.primaryColor ?? ''} onChange={(e) => set('primaryColor', e.target.value)} className="w-[140px] font-mono" /></div></Field>
             <Field label="Date Format" hint="How every date in the app is shown and typed. Stored dates are not changed."><Select value={s.dateFormat} onChange={(v) => set('dateFormat', v)} placeholder="" options={DATE_FORMATS.map((v) => ({ value: v, label: `${dateFormatLabel(v)}  —  ${formatDateOnly(today, v)}` }))} /></Field>
             <Field label="Time Format"><Select value={s.timeFormat} onChange={(v) => set('timeFormat', v)} placeholder="" options={[{ value: 'hh:mm tt', label: '12 hours' }, { value: 'HH:mm', label: '24 hours' }]} /></Field>
@@ -42,6 +45,20 @@ export default function GeneralSettingsPage() {
             <Field label="Minimum Password Length"><TextInput type="number" min={4} max={64} value={s.passwordMinLength ?? 6} onChange={(e) => set('passwordMinLength', Number(e.target.value))} className="w-[120px]" /></Field>
             <Switch checked={!!s.requireCompanyOnUsers} onChange={(v) => set('requireCompanyOnUsers', v)} label="Users must be assigned at least one company" />
             <Switch checked={!!s.allowSelfSignup} onChange={(v) => set('allowSelfSignup', v)} label="Allow self sign-up (requires a signup route)" />
+          </div>
+          <div className="card p-5 space-y-4">
+            <h3 className="section-title">Billing</h3>
+            <Field
+              label="Default Billing Book"
+              hint="The book a new bill opens with when several books are active. Automatic uses the last-used active book; with only one active book, that book is always used."
+            >
+              <Select
+                value={defaultBookId}
+                onChange={(v) => set('defaultBillingBookId', v || null)}
+                placeholder="Automatic (last used)"
+                options={(books.data ?? []).map((b) => ({ value: b.id, label: `${b.bookNumber} — ${BOOK_SERIES_TYPE_LABELS[b.seriesType]}` }))}
+              />
+            </Field>
           </div>
           <div className="card p-5 space-y-4 lg:col-span-2">
             <h3 className="section-title">Invoice sharing</h3>

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, qs } from '@/lib/api';
 import { toast } from '@/lib/toast';
-import type { HeadGroup } from '@erp/shared';
+import type { BookSeriesType, HeadGroup } from '@erp/shared';
 import type { ListState } from '@/components/data/DataTable';
 
 export interface Page<T> { rows: T[]; total: number; page: number; pageSize: number }
@@ -36,7 +36,14 @@ export interface ItemLookup { id: string; itemName: string; gstRate: number }
 
 /** Active Book Master rows, for Billing's book (bill number series) picker. */
 export const useBooksLookup = () => useQuery({ queryKey: ['lookup', 'books'], queryFn: () => api.get<BookLookup[]>('/api/common/lookups/books'), staleTime: 60_000 });
-export interface BookLookup { id: string; bookNumber: string }
+export interface BookLookup { id: string; bookNumber: string; seriesType: BookSeriesType }
+
+/**
+ * The Book a new bill opens with — decided by the server (`resolveDefaultBook`): the only active
+ * book, else the configured default, else the last used, else a stable first. Takes no number.
+ */
+export const useDefaultBillingBook = (enabled: boolean) =>
+  useQuery({ queryKey: ['bills', 'default-book'], queryFn: () => api.get<{ bookId: string | null; reason: string }>('/api/bills/default-book'), enabled, staleTime: 0 });
 
 /**
  * Active products under one item. Disabled without an item: the endpoint answers `[]` for a

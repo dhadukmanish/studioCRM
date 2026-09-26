@@ -127,6 +127,20 @@
       "when": 1790338262970,
       "tag": "0017_noisy_colonel_america",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790402245992,
+      "tag": "0018_superb_mimic",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790402247341,
+      "tag": "0019_backfill_book_series_type",
+      "breakpoints": true
     }
   ]
 }

@@ -288,6 +288,8 @@ describe.skipIf(!TEST_DB)('Sub Item Master API (integration, needs TEST_DATABASE
     eq = orm.eq;
     inArray = orm.inArray;
     const client = await import('../db/client');
+    // Fail closed before the first write: the pool must really be on the throwaway database.
+    await (await import('../test-support/dbGuard')).assertTestDatabase(client, TEST_DB);
     db = client.db;
     sqlClient = client.sql;
     schema = client.schema;

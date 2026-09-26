@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { BOOK_LIMITS, BOOK_SERIES_START_DEFAULT, type FilterFieldDef } from '@erp/shared';
+import { BOOK_LIMITS, BOOK_SERIES_START_DEFAULT, BOOK_SERIES_TYPES, BOOK_SERIES_TYPE_DEFAULT, BOOK_SERIES_TYPE_LABELS, type BookSeriesType, type FilterFieldDef } from '@erp/shared';
 import { Crumb } from '@/components/layout/AppShell';
 import { DataTable, useListState, type Column } from '@/components/data/DataTable';
 import { Badge, ConfirmDialog, Drawer, Dropdown, Field, Select, Spinner, Switch, TextInput } from '@/components/ui';
@@ -17,6 +17,8 @@ interface Book {
   id: string;
   bookNumber: string;
   seriesStartsAt: number;
+  /** With / Without GST — decides the tax mode of every new bill in this series. */
+  seriesType: BookSeriesType;
   /** System-managed counter — read-only everywhere on this screen. */
   nextBillNumber: number;
   isActive: boolean;
@@ -24,18 +26,19 @@ interface Book {
   updatedAt: string;
 }
 
-/** A book that has handed out at least one number can no longer change where its series began. */
+/** A book that has handed out at least one number can no longer change where its series began, or its type. */
 const seriesInUse = (b: Book) => b.nextBillNumber !== b.seriesStartsAt;
 
-type FormValues = { bookNumber: string; seriesStartsAt: string; isActive: boolean };
-const emptyForm: FormValues = { bookNumber: '', seriesStartsAt: String(BOOK_SERIES_START_DEFAULT), isActive: true };
+type FormValues = { bookNumber: string; seriesType: BookSeriesType; seriesStartsAt: string; isActive: boolean };
+const emptyForm: FormValues = { bookNumber: '', seriesType: BOOK_SERIES_TYPE_DEFAULT, seriesStartsAt: String(BOOK_SERIES_START_DEFAULT), isActive: true };
+const SERIES_TYPE_OPTIONS = BOOK_SERIES_TYPES.map((t) => ({ value: t, label: BOOK_SERIES_TYPE_LABELS[t] }));
 
 /* ------------------------------------------------------------------ form -- */
 
 function BookForm({ open, onClose, row }: { open: boolean; onClose: () => void; row?: Book | null }) {
   const { register, handleSubmit, control, reset, setError, formState: { errors } } = useForm<FormValues>({ defaultValues: emptyForm });
   useEffect(() => {
-    if (open) reset(row ? { bookNumber: row.bookNumber, seriesStartsAt: String(row.seriesStartsAt), isActive: row.isActive } : emptyForm);
+    if (open) reset(row ? { bookNumber: row.bookNumber, seriesType: row.seriesType, seriesStartsAt: String(row.seriesStartsAt), isActive: row.isActive } : emptyForm);
   }, [open, row, reset]);
 
   const locked = !!row && seriesInUse(row);
@@ -43,7 +46,7 @@ function BookForm({ open, onClose, row }: { open: boolean; onClose: () => void; 
   const submit = handleSubmit((v) => {
     // A locked series is not resubmitted at all: the API refuses a change, and sending the
     // unchanged value back would only make the request look like an attempted edit.
-    const { seriesStartsAt, ...rest } = v;
+    const { seriesStartsAt, seriesType, ...rest } = v;
     save.mutate(
       { method: row ? 'put' : 'post', url: row ? `${URL}/${row.id}` : URL, body: locked ? rest : v },
       { onError: (e) => applyApiErrors(e, setError as any) },
@@ -81,6 +84,18 @@ function BookForm({ open, onClose, row }: { open: boolean; onClose: () => void; 
       <form onSubmit={submit} className="space-y-4">
         <Field label="Book Number" required error={errors.bookNumber?.message} hint="E.g. 2026-27. Each book numbers its bills independently.">
           <TextInput autoFocus placeholder="Enter book number" maxLength={BOOK_LIMITS.bookNumber} {...register('bookNumber', { required: 'Book number is required', setValueAs: (v) => (typeof v === 'string' ? v.trim() : v) })} />
+        </Field>
+        <Field
+          label="Series Type"
+          required={!locked}
+          error={errors.seriesType?.message}
+          hint={locked ? 'Locked — bills already issued in this series keep its tax mode.' : 'New bills in this book are With or Without GST accordingly.'}
+        >
+          <Controller
+            control={control}
+            name="seriesType"
+            render={({ field }) => <Select value={field.value} onChange={(v) => v && field.onChange(v)} placeholder="" options={SERIES_TYPE_OPTIONS} disabled={locked} />}
+          />
         </Field>
         <Field
           label="Series Starts At"
@@ -125,6 +140,7 @@ export default function BooksPage() {
 
   const filterFields: FilterFieldDef[] = [
     { key: 'bookNumber', label: 'Book Number' },
+    { key: 'seriesType', label: 'Series Type', type: 'select', options: SERIES_TYPE_OPTIONS },
     { key: 'seriesStartsAt', label: 'Series Starts At', type: 'number' },
     { key: 'isActive', label: 'Active', type: 'boolean' },
     { key: 'updatedAt', label: 'Last Modified', type: 'date' },
@@ -137,6 +153,7 @@ export default function BooksPage() {
   const columns: Column<Book>[] = [
     { key: '_seq', header: '#', sortable: false, width: 56, locked: true, render: (_r, i) => <span className="text-gray-500">{(state.page - 1) * state.limit + i + 1}</span> },
     { key: 'bookNumber', header: 'Book Number', render: (r) => <span className="font-medium text-gray-900">{r.bookNumber}</span> },
+    { key: 'seriesType', header: 'Series Type', render: (r) => <Badge color={r.seriesType === 'WITH_GST' ? 'blue' : 'gray'}>{BOOK_SERIES_TYPE_LABELS[r.seriesType]}</Badge> },
     { key: 'seriesStartsAt', header: 'Series Starts At' },
     /**
      * Read-only, and hidden by default: until Billing exists every book's next number still

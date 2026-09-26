@@ -137,7 +137,7 @@ describe.skipIf(!TEST_DB)('Receivables reports (integration, needs TEST_DATABASE
 
   /** A fresh book per test: filtering by it gives every test its own report scope inside one tenant. */
   async function newBook(tenantId: string, bookNumber = `RV${Math.random().toString(36).slice(2, 8)}`) {
-    const [book] = await db.insert(schema.books).values({ tenantId, bookNumber, seriesStartsAt: 1, nextBillNumber: 1 }).returning();
+    const [book] = await db.insert(schema.books).values({ tenantId, bookNumber, seriesStartsAt: 1, nextBillNumber: 1, seriesType: 'WITHOUT_GST' }).returning();
     return book.id;
   }
   const newMobile = () => `9${Math.floor(100000000 + Math.random() * 899999999)}`;
@@ -184,9 +184,10 @@ describe.skipIf(!TEST_DB)('Receivables reports (integration, needs TEST_DATABASE
     process.env.PORT = '0';
     ({ inArray } = await import('drizzle-orm'));
     const client = await import('../db/client');
+    // Fail closed before the first write: the pool must really be on the throwaway database.
+    await (await import('../test-support/dbGuard')).assertTestDatabase(client, TEST_DB);
     // Never seed through a client that was built before DATABASE_URL was pointed at the throwaway
     // database (a top-level import of any db-touching module does exactly that).
-    if (client.DATABASE_URL !== TEST_DB) throw new Error('The db client is not connected to TEST_DATABASE_URL — refusing to write test data');
     db = client.db;
     sqlClient = client.sql;
     schema = client.schema;
@@ -389,7 +390,11 @@ describe.skipIf(!TEST_DB)('Receivables reports (integration, needs TEST_DATABASE
       const bookId = await newBook(A.tenantId);
       const mobile = newMobile();
       await bill(A.token, mA, bookId, mobile, 1000, '2026-09-01', 'Rajesh Patel');
-      await bill(A.token, mA, bookId, `+91 ${mobile.slice(0, 5)} ${mobile.slice(5)}`, 2000, '2026-09-02', 'Rajesh Patal');
+      // A bill saved before Billing required exactly 10 digits kept the mobile as typed. The API no
+      // longer accepts that shape, so the legacy row is made the way it existed: saved, then its
+      // display value set as it was typed (the normalized key is unchanged).
+      const legacy = await bill(A.token, mA, bookId, mobile, 2000, '2026-09-02', 'Rajesh Patal');
+      await db.update(schema.bills).set({ mobileNumber: `+91 ${mobile.slice(0, 5)} ${mobile.slice(5)}` }).where(inArray(schema.bills.id, [legacy.id]));
       const other = newMobile();
       await bill(A.token, mA, bookId, other, 4000, '2026-09-03', 'Rajesh Patel');
 
