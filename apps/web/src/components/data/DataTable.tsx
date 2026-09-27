@@ -195,12 +195,12 @@ function FilterBuilder({ fields, value, onApply, onClose, storageKey }: { fields
                     <Select size="sm" value={String(f.value ?? '')} onChange={(v) => upd(i, { value: v })} options={[{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }]} placeholder="Select" />
                   ) : type === 'date' && f.op === 'between' ? (
                     <div className="flex items-center gap-2">
-                      <DateInput size="sm" value={Array.isArray(f.value) ? String(f.value[0] ?? '') : ''} onChange={(v) => upd(i, { value: [isoOrBlank(v), Array.isArray(f.value) ? f.value[1] : ''] })} />
+                      <DateInput size="sm" clearable value={Array.isArray(f.value) ? String(f.value[0] ?? '') : ''} onChange={(v) => upd(i, { value: [isoOrBlank(v), Array.isArray(f.value) ? f.value[1] : ''] })} />
                       <span className="text-[12px] text-gray-500">and</span>
-                      <DateInput size="sm" value={Array.isArray(f.value) ? String(f.value[1] ?? '') : ''} onChange={(v) => upd(i, { value: [Array.isArray(f.value) ? f.value[0] : '', isoOrBlank(v)] })} />
+                      <DateInput size="sm" clearable value={Array.isArray(f.value) ? String(f.value[1] ?? '') : ''} onChange={(v) => upd(i, { value: [Array.isArray(f.value) ? f.value[0] : '', isoOrBlank(v)] })} />
                     </div>
                   ) : type === 'date' ? (
-                    <DateInput size="sm" value={String(f.value ?? '')} onChange={(v) => upd(i, { value: isoOrBlank(v) })} />
+                    <DateInput size="sm" clearable value={String(f.value ?? '')} onChange={(v) => upd(i, { value: isoOrBlank(v) })} />
                   ) : f.op === 'between' ? (
                     <div className="flex items-center gap-2">
                       <TextInput size="sm" type="number" value={Array.isArray(f.value) ? String(f.value[0] ?? '') : ''} onChange={(e) => upd(i, { value: [e.target.value, Array.isArray(f.value) ? f.value[1] : ''] })} />

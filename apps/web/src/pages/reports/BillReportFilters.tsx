@@ -12,7 +12,7 @@ import {
   type BillReportTab,
   type InvoiceTaxMode,
 } from '@erp/shared';
-import { DateInput, Select, Spinner, TextInput } from '@/components/ui';
+import { DateRangeInput, Select, Spinner, TextInput } from '@/components/ui';
 import { cx } from '@/lib/format';
 import { useDateFormatters } from '@/lib/settings';
 import { useBillReportCustomer, useBillReportCustomers, type BillReportScope } from '@/lib/billReport';
@@ -74,11 +74,9 @@ export function BillReportFilterBar({ resolved, caption, searchActive, onClearAl
   return (
     <div className="mb-3">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div role="group" aria-label="Bill date range" className="flex items-center gap-1.5 text-[12px] text-gray-500">
+        <div className="flex items-center gap-1.5 text-[12px] text-gray-500">
           <span className="whitespace-nowrap">Bill date</span>
-          <DateInput size="sm" className="w-[132px]" aria-label="Bill date from" value={from} onChange={(v) => setDate('from', v)} />
-          <span className="text-gray-400">to</span>
-          <DateInput size="sm" className="w-[132px]" aria-label="Bill date to" value={to} onChange={(v) => setDate('to', v)} />
+          <DateRangeInput label="Bill date" from={from} to={to} onFrom={(v) => setDate('from', v)} onTo={(v) => setDate('to', v)} />
         </div>
         <div className="flex items-center gap-1.5 text-[12px] text-gray-500 max-sm:w-full">
           <span>Customer</span>

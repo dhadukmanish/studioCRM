@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Download, Eye, Printer, X } from 'lucide-react';
 import { INVOICE_COLORS } from '@erp/shared';
-import { DateInput, Modal } from '@/components/ui';
+import { DateRangeInput, Modal } from '@/components/ui';
 import { ApiError } from '@/lib/api';
 import { cx } from '@/lib/format';
 import { toast } from '@/lib/toast';
@@ -49,10 +49,8 @@ export function ViewChips<V extends string>({ label, views, labels, counts, valu
 /** An optional From / To date range for the table toolbar. Dates only through DateInput. */
 export function DateRange({ label, from, to, onChange }: { label: string; from?: string; to?: string; onChange: (r: { from?: string; to?: string }) => void }) {
   return (
-    <div role="group" aria-label={`${label} range`} className="flex items-center gap-1.5">
-      <DateInput size="sm" className="w-[132px]" value={from ?? ''} onChange={(v) => onChange({ from: v || undefined, to })} aria-label={`${label} from`} />
-      <span className="text-[12px] text-gray-400">to</span>
-      <DateInput size="sm" className="w-[132px]" value={to ?? ''} onChange={(v) => onChange({ from, to: v || undefined })} aria-label={`${label} to`} />
+    <div className="flex items-center gap-1.5">
+      <DateRangeInput label={label} from={from} to={to} onFrom={(v) => onChange({ from: v || undefined, to })} onTo={(v) => onChange({ from, to: v || undefined })} />
       {(from || to) && (
         <button type="button" className="row-action" title="Clear dates" aria-label={`Clear ${label.toLowerCase()} range`} onClick={() => onChange({})}><X className="h-4 w-4" /></button>
       )}

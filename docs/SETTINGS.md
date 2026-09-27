@@ -53,10 +53,19 @@ field is `DateInput` (`components/ui/DateInput.tsx`):
 - a text field showing the tenant's format, with the format as its placeholder;
 - the value it reports is always `"YYYY-MM-DD"` or `''`; half-typed text is reported as typed so
   the form can refuse it (`validDate`) instead of silently blanking it;
-- forgiving entry — `/ - .` or space as separator, `5/9/2026`, a pasted ISO date;
-- the calendar is the browser's own month grid, opened by the icon, Alt+↓ or F4 through a hidden
-  native input's `showPicker()` — it shows no date text, so its locale cannot leak. No calendar
-  library was added.
+- forgiving entry — `/ - .` or space as separator, `5/9/2026`, eight digits `27092026` (read in
+  the tenant's order), a pasted ISO date;
+- the calendar is our own pop-up (`components/ui/Calendar.tsx`, no library), opened by the icon,
+  Alt+↓ or F4: month grid with Sunday first, the caption opens months → a page of twelve years (an
+  old Birth Date is a few clicks), arrows / PageUp / PageDown / Home / End / Enter in the grid,
+  Escape back to the field, Tab kept inside. **Today** is offered by default; **Clear** only where
+  the caller passes `clearable` — optional fields, never a required one. It computes on business
+  dates only (`lib/calendar.ts`, UTC-only arithmetic), so a picked day cannot shift a day in any
+  timezone. `min` / `max` grey out days a range forbids; typing is still validated by the form
+  and the server.
+- `DateRangeInput` pairs a From and a To for report filters: the span is shaded, To cannot be
+  picked before From, and picking From moves on to To. Each end commits through the caller's own
+  handler, so URL-persisted report filters keep their rules.
 - Filters (`DataTable`) only ever commit a complete ISO date to a filter value, because the
   server casts it with `::date`.
 

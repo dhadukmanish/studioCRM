@@ -23,7 +23,7 @@ export function CustomFieldInputs({ moduleName, value, onChange, className }: { 
           case 'percent':
             return <Field {...common}><TextInput type="number" step="any" value={v} readOnly={f.isReadOnly} onChange={(e) => set(f.fieldName, e.target.value === '' ? null : Number(e.target.value))} /></Field>;
           case 'date':
-            return <Field {...common}><DateInput value={v} readOnly={f.isReadOnly} onChange={(x) => set(f.fieldName, isIsoDate(x) ? x : null)} /></Field>;
+            return <Field {...common}><DateInput value={v} readOnly={f.isReadOnly} clearable={!f.isRequired} onChange={(x) => set(f.fieldName, isIsoDate(x) ? x : null)} /></Field>;
           case 'datetime':
             return <Field {...common}><TextInput type="datetime-local" value={v} readOnly={f.isReadOnly} onChange={(e) => set(f.fieldName, e.target.value)} /></Field>;
           case 'time':

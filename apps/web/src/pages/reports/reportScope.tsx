@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { RotateCcw } from 'lucide-react';
 import { isIsoDate, type ReceivablesOverview } from '@erp/shared';
-import { DateInput, Select } from '@/components/ui';
+import { DateInput, DateRangeInput, Select } from '@/components/ui';
 import { api } from '@/lib/api';
 import { cx, fmtMoney } from '@/lib/format';
 import { useDateFormatters } from '@/lib/settings';
@@ -34,12 +34,14 @@ export const useReportBooks = () =>
 
 export const useBookLabel = (bookId?: string) => useReportBooks().data?.find((b) => b.id === bookId)?.bookNumber;
 
-/** A DateInput that only commits a complete date (or a clear) — half-typed text never reaches the URL. */
+/** Only a complete date (or a clear) is committed — half-typed text never reaches the URL. */
+const complete = (onChange: (v: string | undefined) => void) => (v: string) => (v === '' ? onChange(undefined) : isIsoDate(v) ? onChange(v) : undefined);
+
 function ScopeDate({ label, value, onChange }: { label: string; value?: string; onChange: (v: string | undefined) => void }) {
   return (
     <label className="flex items-center gap-1.5 text-[12px] text-gray-500">
       <span className="whitespace-nowrap">{label}</span>
-      <DateInput size="sm" className="w-[132px]" aria-label={label} value={value ?? ''} onChange={(v) => (v === '' ? onChange(undefined) : isIsoDate(v) ? onChange(v) : undefined)} />
+      <DateInput size="sm" className="w-[132px]" aria-label={label} value={value ?? ''} clearable onChange={complete(onChange)} />
     </label>
   );
 }
@@ -52,10 +54,9 @@ export function ScopeBar({ asOf }: { asOf?: string }) {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
       <ScopeDate label="As of" value={scope.asOf ?? asOf} onChange={(v) => set({ asOf: v })} />
-      <div className="flex items-center gap-1.5">
-        <ScopeDate label="Bill date" value={scope.from} onChange={(v) => set({ from: v })} />
-        <span className="text-[12px] text-gray-400">–</span>
-        <DateInput size="sm" className="w-[132px]" aria-label="Bill date to" value={scope.to ?? ''} onChange={(v) => (v === '' ? set({ to: undefined }) : isIsoDate(v) ? set({ to: v }) : undefined)} />
+      <div className="flex items-center gap-1.5 text-[12px] text-gray-500">
+        <span className="whitespace-nowrap">Bill date</span>
+        <DateRangeInput label="Bill date" from={scope.from} to={scope.to} onFrom={complete((v) => set({ from: v }))} onTo={complete((v) => set({ to: v }))} />
       </div>
       <label className="flex items-center gap-1.5 text-[12px] text-gray-500">
         <span>Book</span>

@@ -93,10 +93,16 @@ export function formatTimestamp(
  * it is not a real date. Forgiving about the separator (/ - . or space) and single-digit
  * day/month ("5/9/2026"), strict about a four-digit year and about the day existing. A value
  * that starts with a four-digit year is read as year-month-day whatever the setting, so a
- * pasted ISO date always works.
+ * pasted ISO date always works. Eight digits with no separator ("27092026") are read in the
+ * tenant's order too — the fastest way to key a date.
  */
 export function parseDisplayDate(text: string | null | undefined, format: DateFormat = DEFAULT_DATE_FORMAT): string | null {
-  const parts = (text ?? '').trim().split(/[\/\-.\s]+/);
+  const raw = (text ?? '').trim();
+  if (/^\d{8}$/.test(raw)) {
+    const split = format === 'yyyy-MM-dd' ? [raw.slice(0, 4), raw.slice(4, 6), raw.slice(6)] : [raw.slice(0, 2), raw.slice(2, 4), raw.slice(4)];
+    return parseDisplayDate(split.join('/'), format === 'yyyy-MM-dd' ? 'dd/MM/yyyy' : format);
+  }
+  const parts = raw.split(/[\/\-.\s]+/);
   if (parts.length !== 3 || parts.some((p) => !/^\d+$/.test(p))) return null;
   let y: string, m: string, d: string;
   if (parts[0].length === 4) [y, m, d] = parts;

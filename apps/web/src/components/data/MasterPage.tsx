@@ -101,7 +101,7 @@ export function MasterForm({ cfg, open, onClose, row }: { cfg: MasterConfig; ope
             case 'number':
               return <Field key={f.name} label={f.label} required={f.required} error={err} hint={f.hint} className={cls}><TextInput type="number" step="any" {...register(f.name, rules)} placeholder={f.placeholder} disabled={dis} /></Field>;
             case 'date':
-              return <Field key={f.name} label={f.label} required={f.required} error={err} hint={f.hint} className={cls}><Controller control={control} name={f.name} rules={{ ...rules, validate: validDate }} render={({ field }) => <DateInput {...field} disabled={dis} />} /></Field>;
+              return <Field key={f.name} label={f.label} required={f.required} error={err} hint={f.hint} className={cls}><Controller control={control} name={f.name} rules={{ ...rules, validate: validDate }} render={({ field }) => <DateInput {...field} disabled={dis} clearable={!f.required} />} /></Field>;
             default:
               return <Field key={f.name} label={f.label} required={f.required} error={err} hint={f.hint} className={cls}><TextInput {...register(f.name, rules)} placeholder={f.placeholder} disabled={dis} /></Field>;
           }

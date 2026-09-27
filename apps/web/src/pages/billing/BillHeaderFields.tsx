@@ -128,7 +128,7 @@ export function BillHeaderFields({ bill, bookOptions, booksLoading, taxMode, lin
           <TextInput size="sm" placeholder="Enter baby name" maxLength={BILL_LIMITS.babyName} disabled={disabled} {...register('babyName', { setValueAs: trimmed })} />
         </Field>
         <Field label="Planned Delivery" error={errors.deliveryDate?.message}>
-          <Controller control={control} name="deliveryDate" rules={{ validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" disabled={disabled} />} />
+          <Controller control={control} name="deliveryDate" rules={{ validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" disabled={disabled} clearable />} />
         </Field>
         <Field
           label="Next Visit Date"
@@ -143,7 +143,7 @@ export function BillHeaderFields({ bill, bookOptions, booksLoading, taxMode, lin
             )
           }
         >
-          <Controller control={control} name="nextVisitDate" rules={{ validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" disabled={disabled} aria-label="Next visit date" />} />
+          <Controller control={control} name="nextVisitDate" rules={{ validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" disabled={disabled} clearable aria-label="Next visit date" />} />
         </Field>
         <Field label="Birthdate">
           <div className="flex h-8 items-center">

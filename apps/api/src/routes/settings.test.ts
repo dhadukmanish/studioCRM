@@ -124,6 +124,11 @@ describe('parseDisplayDate — what the operator typed, back to YYYY-MM-DD', () 
     ['2026-09-25', 'yyyy-MM-dd', DAY],
     ['2026-09-25', 'dd/MM/yyyy', DAY], // a pasted ISO date always works
     ['29/02/2028', 'dd/MM/yyyy', '2028-02-29'],
+    ['25092026', 'dd/MM/yyyy', DAY], // eight digits, keyed without separators
+    ['25092026', 'dd-MM-yyyy', DAY],
+    ['09252026', 'MM/dd/yyyy', DAY],
+    ['20260925', 'yyyy-MM-dd', DAY],
+    ['29022028', 'dd/MM/yyyy', '2028-02-29'],
   ] as const)('reads %p under %s as %s', (text, format, iso) => {
     expect(parseDisplayDate(text, format)).toBe(iso);
   });
@@ -138,6 +143,9 @@ describe('parseDisplayDate — what the operator typed, back to YYYY-MM-DD', () 
     ['abc', 'dd/MM/yyyy'],
     ['', 'dd/MM/yyyy'],
     ['25/09/2026', 'yyyy-MM-dd'],
+    ['29022026', 'dd/MM/yyyy'], // eight digits, still a real day or nothing
+    ['25092026', 'MM/dd/yyyy'],
+    ['2509202', 'dd/MM/yyyy'],
   ] as const)('refuses %p under %s', (text, format) => {
     expect(parseDisplayDate(text, format)).toBeNull();
   });
