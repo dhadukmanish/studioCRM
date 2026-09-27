@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Controller, FormProvider, useFieldArray, useForm, useWatch } from 'react-hook-form';
 import { useQuery } from '@tanstack/react-query';
@@ -12,6 +12,7 @@ import {
   calculateBill,
   formatGst,
   invoiceFileName,
+  isIsoDate,
   normalizeMobile,
   type BillDiscountType,
   type GstSummaryRow,
@@ -25,6 +26,8 @@ import { ShareInvoiceDialog } from '@/components/invoice/ShareInvoiceDialog';
 import { applyApiErrors, useBooksLookup, useDefaultBillingBook, useItemsLookup, useSave, type AppointmentLookup } from '@/lib/queries';
 import { useAuthStore } from '@/store/auth';
 import { cx, fmtMoney, todayISO } from '@/lib/format';
+import { addDays } from '@/lib/calendar';
+import { usePrintSettings } from '@/lib/settings';
 import { BillHeaderFields } from './BillHeaderFields';
 import { BillLinesGrid } from './BillLinesGrid';
 import { BillPaymentsPanel } from './BillPaymentsPanel';
@@ -168,6 +171,24 @@ function BillForm({ bill }: { bill?: BillRecord }) {
    */
   const defaultBook = useDefaultBillingBook(!bill);
   const bookId = useWatch({ control, name: 'bookId' });
+
+  /**
+   * Print & Invoice → Default delivery days: a NEW bill suggests Planned Delivery = Bill Date + N.
+   * Only while the field is empty or still holds our own last suggestion — never over a date the
+   * operator typed — and never on a saved bill, so no historical bill changes.
+   */
+  const print = usePrintSettings();
+  const billDate = useWatch({ control, name: 'billDate' });
+  const suggestedDelivery = useRef<string | null>(null);
+  useEffect(() => {
+    const days = print.defaultDeliveryDays;
+    if (bill || days == null || !isIsoDate(billDate)) return;
+    const current = form.getValues('deliveryDate');
+    if (current && current !== suggestedDelivery.current) return;
+    const next = addDays(billDate, days);
+    suggestedDelivery.current = next;
+    if (current !== next) setValue('deliveryDate', next);
+  }, [bill, billDate, print.defaultDeliveryDays, form, setValue]);
   useEffect(() => {
     const suggested = defaultBook.data?.bookId;
     if (bill || !suggested || form.getValues('bookId')) return;

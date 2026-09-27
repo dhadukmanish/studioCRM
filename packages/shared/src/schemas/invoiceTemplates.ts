@@ -30,7 +30,7 @@ export const INVOICE_TEMPLATE_LIMITS = { templateName: 60, description: 200, tit
 // Plain text: no control characters other than line breaks and tabs.
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
-const plainText = (label: string, max: number) =>
+export const plainText = (label: string, max: number) =>
   z
     .string({ invalid_type_error: `${label} must be text` })
     .max(max, `${label} cannot exceed ${max} characters`)
@@ -84,6 +84,11 @@ export const invoiceTemplateConfigSchema = z
         showTaxableTotal: bool,
         showGstTotal: bool,
         showGstSummary: bool,
+        // Added with Print & Invoice settings. Defaults keep every template stored before them valid and unchanged.
+        /** "Rupees … Only" under the totals, from the stored Grand Total. */
+        showAmountInWords: bool.default(false),
+        /** Advance / Received and Balance Due — the bill's DERIVED payment position (services/billPayments.ts). */
+        showPayments: bool.default(false),
       })
       .strict(),
     footer: z
@@ -93,6 +98,8 @@ export const invoiceTemplateConfigSchema = z
         showThankYou: bool,
         thankYou: plainText('Thank-you note', INVOICE_TEMPLATE_LIMITS.thankYou),
         showSignatory: bool,
+        /** A blank "Received By" line for the customer's handwritten signature — no user or name is filled in. */
+        showReceivedBy: bool.default(false),
       })
       .strict(),
     page: z
@@ -134,8 +141,8 @@ const baseConfig = (): InvoiceTemplateConfig => ({
   },
   customer: { showMobile: true, showBabyName: true, showBirthDate: true, showAppointmentReference: false, showDeliveryDate: true, showRemark: true },
   columns: CLASSIC_COLUMNS,
-  totals: { showSubTotal: true, showDiscount: true, showTaxableTotal: true, showGstTotal: true, showGstSummary: true },
-  footer: { showTerms: false, terms: '', showThankYou: true, thankYou: 'Thank you for choosing us.', showSignatory: true },
+  totals: { showSubTotal: true, showDiscount: true, showTaxableTotal: true, showGstTotal: true, showGstSummary: true, showAmountInWords: false, showPayments: false },
+  footer: { showTerms: false, terms: '', showThankYou: true, thankYou: 'Thank you for choosing us.', showSignatory: true, showReceivedBy: false },
   page: { paperSize: 'A4', orientation: 'PORTRAIT', margins: 'NORMAL', density: 'NORMAL' },
 });
 
@@ -171,8 +178,35 @@ export function starterInvoiceTemplates(): StarterInvoiceTemplate[] {
     { templateName: 'Classic', description: 'Balanced layout for every bill, with or without GST.', supportedMode: 'BOTH', layoutPreset: 'CLASSIC', isDefault: true, config: classic },
     { templateName: 'Compact', description: 'Short, tight layout — fewer columns and details.', supportedMode: 'BOTH', layoutPreset: 'COMPACT', isDefault: false, config: compact },
     { templateName: 'Detailed GST', description: 'Full tax invoice: HSN, amount before discount, GST summary and terms.', supportedMode: 'WITH_GST', layoutPreset: 'DETAILED', isDefault: false, config: detailed },
+    legacyStudioTemplate(),
   ];
 }
 
 /** The template used when a tenant has none that fits — so an invoice can always be rendered. */
-export const BUILT_IN_INVOICE_TEMPLATE = (): StarterInvoiceTemplate => ({ ...starterInvoiceTemplates()[0], templateName: 'Classic (built-in)', isDefault: false });
+export const BUILT_IN_INVOICE_TEMPLATE = (): StarterInvoiceTemplate => ({ ...starterInvoiceTemplates().find((t) => t.templateName === 'Classic')!, templateName: 'Classic (built-in)', isDefault: false });
+
+export const LEGACY_STUDIO_TEMPLATE_NAME = 'Legacy Studio';
+
+/**
+ * "Legacy Studio" — the studio's old printed bill, re-drawn: letterhead with the logo beside the
+ * company block and the copy label opposite, customer and bill details side by side, a thin-ruled
+ * item table with each line's discount, totals with the amount in words and the bill's Advance /
+ * Received and Balance, then bank details, footer image, "Received By" and the authorised signature.
+ * Never the default: a tenant chooses it.
+ */
+export function legacyStudioTemplate(): StarterInvoiceTemplate {
+  const cfg = baseConfig();
+  cfg.header = { ...cfg.header, showCompanyEmail: false };
+  cfg.customer = { showMobile: true, showBabyName: true, showBirthDate: false, showAppointmentReference: false, showDeliveryDate: true, showRemark: true };
+  cfg.columns = ['serial', 'item', 'product', 'quantity', 'rate', 'amount', 'discount', 'gstRate', 'gstAmount', 'total'];
+  cfg.totals = { showSubTotal: true, showDiscount: true, showTaxableTotal: true, showGstTotal: true, showGstSummary: false, showAmountInWords: true, showPayments: true };
+  cfg.footer = { showTerms: true, terms: '', showThankYou: false, thankYou: '', showSignatory: true, showReceivedBy: true };
+  return {
+    templateName: LEGACY_STUDIO_TEMPLATE_NAME,
+    description: 'The studio bill layout: letterhead, customer and bill details, line discounts, amount in words, advance, bank details and signatures.',
+    supportedMode: 'BOTH',
+    layoutPreset: 'STUDIO',
+    isDefault: false,
+    config: cfg,
+  };
+}

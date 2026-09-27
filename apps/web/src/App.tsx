@@ -37,6 +37,7 @@ const TodaysWorkPage = lazy(() => import('@/pages/work/TodaysWorkPage'));
 const DeliveryReportPage = lazy(() => import('@/pages/reports/DeliveryReportPage'));
 const AppointmentReportPage = lazy(() => import('@/pages/reports/AppointmentReportPage'));
 const InvoiceTemplatesPage = lazy(() => import('@/pages/settings/invoice-templates/InvoiceTemplatesPage'));
+const PrintSettingsPage = lazy(() => import('@/pages/settings/print/PrintSettingsPage'));
 const InvoiceTemplateDesignerPage = lazy(() => import('@/pages/settings/invoice-templates/InvoiceTemplateDesignerPage'));
 
 /** Redirects to /signin when logged out. */
@@ -109,6 +110,7 @@ export default function App() {
                 <Route path="activity-logs" element={<Guard permission="admin_activity_logs"><ActivityLogsPage /></Guard>} />
                 <Route path="custom-fields" element={<Guard permission="settings_custom_fields"><CustomFieldsPage /></Guard>} />
                 <Route path="general" element={<Guard permission="settings_general"><GeneralSettingsPage /></Guard>} />
+                <Route path="print-invoice" element={<Guard permission="settings_invoice_templates"><PrintSettingsPage /></Guard>} />
                 <Route path="invoice-templates" element={<Guard permission="settings_invoice_templates"><InvoiceTemplatesPage /></Guard>} />
                 <Route path="*" element={<ComingSoon />} />
               </Route>

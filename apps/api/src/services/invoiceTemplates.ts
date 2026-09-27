@@ -3,6 +3,7 @@ import {
   BUILT_IN_INVOICE_TEMPLATE,
   INVOICE_TEMPLATE_LIMITS,
   isTemplateCompatible,
+  legacyStudioTemplate,
   pickInvoiceTemplate,
   starterInvoiceTemplates,
   INVOICE_TAX_MODE_LABELS,
@@ -15,6 +16,7 @@ import {
 import { db, schema, type Db } from '../db/client';
 import { notFound, validation } from '../lib/errors';
 import { revokeActiveLinks } from './publicInvoiceLinkRevoke';
+import { getSettings, updateSettings } from './settings';
 
 /**
  * Invoice Template Master — business rules (docs/INVOICE_TEMPLATES.md).
@@ -45,10 +47,25 @@ export type InvoiceTemplateRecord = ReturnType<typeof shapeTemplate>;
  */
 export async function ensureStarterTemplates(tenantId: string, exec: Db = db) {
   const [{ n }] = await exec.select({ n: count() }).from(T).where(eq(T.tenantId, tenantId));
-  if (Number(n) > 0) return;
+  if (Number(n) > 0) return ensureLegacyStudio(tenantId, exec);
   for (const s of starterInvoiceTemplates()) {
     await exec.insert(T).values({ tenantId, ...s }).onConflictDoNothing();
   }
+}
+
+/**
+ * "Legacy Studio" came after the first starters, so a tenant seeded before it gets it here — ONCE.
+ * A marker in the tenant's settings records that it was offered: a tenant that deletes it never
+ * sees it re-created, and a tenant's own template of the same name is never touched (the unique
+ * name index makes the insert a no-op). It is never made the default.
+ */
+const LEGACY_SEED = 'LEGACY_STUDIO';
+async function ensureLegacyStudio(tenantId: string, exec: Db) {
+  const settings = await getSettings(tenantId);
+  const seeds: string[] = Array.isArray(settings.invoiceTemplateSeeds) ? settings.invoiceTemplateSeeds : [];
+  if (seeds.includes(LEGACY_SEED)) return;
+  await exec.insert(T).values({ tenantId, ...legacyStudioTemplate(), isDefault: false }).onConflictDoNothing();
+  await updateSettings(tenantId, { invoiceTemplateSeeds: [...seeds, LEGACY_SEED] });
 }
 
 export async function listTemplates(tenantId: string) {

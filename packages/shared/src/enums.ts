@@ -142,26 +142,43 @@ export type InvoiceTemplateMode = (typeof INVOICE_TEMPLATE_MODES)[number];
 export const INVOICE_TEMPLATE_MODE_LABELS: Record<InvoiceTemplateMode, string> = { BOTH: 'With & without GST', WITH_GST: 'With GST only', WITHOUT_GST: 'Without GST only' };
 
 /** The controlled visual styles. Each is a fixed set of typography/border rules, not free CSS. */
-export const INVOICE_LAYOUT_PRESETS = ['CLASSIC', 'COMPACT', 'DETAILED'] as const;
+export const INVOICE_LAYOUT_PRESETS = ['CLASSIC', 'COMPACT', 'DETAILED', 'STUDIO'] as const;
 export type InvoiceLayoutPreset = (typeof INVOICE_LAYOUT_PRESETS)[number];
-export const INVOICE_LAYOUT_PRESET_LABELS: Record<InvoiceLayoutPreset, string> = { CLASSIC: 'Classic', COMPACT: 'Compact', DETAILED: 'Detailed' };
+export const INVOICE_LAYOUT_PRESET_LABELS: Record<InvoiceLayoutPreset, string> = { CLASSIC: 'Classic', COMPACT: 'Compact', DETAILED: 'Detailed', STUDIO: 'Studio' };
 
 /**
  * The item-table columns an invoice can print, all read from the bill line's own snapshot.
- * `amount` is Qty x Rate before the bill discount; `taxable` is the net base after it.
+ * `amount` is Qty x Rate before the bill discount; `discount` is the line's stored share of the bill
+ * discount; `taxable` is the net base after it.
  */
-export const INVOICE_COLUMNS = ['serial', 'item', 'product', 'hsn', 'quantity', 'rate', 'amount', 'taxable', 'gstRate', 'gstAmount', 'total', 'remark'] as const;
+export const INVOICE_COLUMNS = ['serial', 'item', 'product', 'hsn', 'quantity', 'rate', 'amount', 'discount', 'taxable', 'gstRate', 'gstAmount', 'total', 'remark'] as const;
 export type InvoiceColumn = (typeof INVOICE_COLUMNS)[number];
 export const INVOICE_COLUMN_LABELS: Record<InvoiceColumn, string> = {
-  serial: '#', item: 'Item', product: 'Product', hsn: 'HSN/SAC', quantity: 'Qty', rate: 'Rate', amount: 'Amount',
+  serial: '#', item: 'Item', product: 'Product', hsn: 'HSN/SAC', quantity: 'Qty', rate: 'Rate', amount: 'Amount', discount: 'Discount',
   taxable: 'Taxable', gstRate: 'GST %', gstAmount: 'GST', total: 'Total', remark: 'Remark',
 };
 
 export const INVOICE_ALIGNMENTS = ['LEFT', 'CENTER', 'RIGHT'] as const;
 export type InvoiceAlignment = (typeof INVOICE_ALIGNMENTS)[number];
-export const INVOICE_PAPER_SIZES = ['A4'] as const;
+export const INVOICE_PAPER_SIZES = ['A4', 'A5'] as const;
+export type InvoicePaperSize = (typeof INVOICE_PAPER_SIZES)[number];
 export const INVOICE_ORIENTATIONS = ['PORTRAIT'] as const;
 export const INVOICE_MARGINS = ['NARROW', 'NORMAL'] as const;
 export type InvoiceMargin = (typeof INVOICE_MARGINS)[number];
 export const INVOICE_DENSITIES = ['COMPACT', 'NORMAL'] as const;
 export type InvoiceDensity = (typeof INVOICE_DENSITIES)[number];
+
+/**
+ * Print & Invoice settings (docs/INVOICE_TEMPLATES.md, "Print & Invoice settings"). The accent is a
+ * restrained, print-safe colour for rules and headings only — every one stays readable in black and
+ * white. The copy label is print metadata ("Original" / "Duplicate"), never a second bill.
+ */
+export const INVOICE_ACCENTS = ['NEUTRAL', 'BLUE', 'TEAL', 'GREEN', 'MAROON', 'PURPLE'] as const;
+export type InvoiceAccent = (typeof INVOICE_ACCENTS)[number];
+export const INVOICE_ACCENT_LABELS: Record<InvoiceAccent, string> = { NEUTRAL: 'Neutral', BLUE: 'Blue', TEAL: 'Teal', GREEN: 'Green', MAROON: 'Maroon', PURPLE: 'Purple' };
+export const INVOICE_COPY_LABELS = ['NONE', 'ORIGINAL', 'DUPLICATE', 'OFFICE_COPY'] as const;
+export type InvoiceCopyLabel = (typeof INVOICE_COPY_LABELS)[number];
+export const INVOICE_COPY_LABEL_TEXT: Record<InvoiceCopyLabel, string> = { NONE: 'None', ORIGINAL: 'Original', DUPLICATE: 'Duplicate', OFFICE_COPY: 'Office Copy' };
+/** Images a company can add for printing, besides its logo. */
+export const PRINT_ASSET_KINDS = ['SIGNATURE', 'FOOTER'] as const;
+export type PrintAssetKind = (typeof PRINT_ASSET_KINDS)[number];

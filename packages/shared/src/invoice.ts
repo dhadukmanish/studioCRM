@@ -13,17 +13,21 @@ import { calculateBill, type GstSummaryRow } from './billing.js';
 import { formatDateOnly, type DateFormat } from './dates.js';
 import {
   INVOICE_COLUMN_LABELS,
+  INVOICE_COPY_LABEL_TEXT,
   type BillDiscountType,
   type InvoiceColumn,
+  type InvoiceCopyLabel,
   type InvoiceDensity,
   type InvoiceLayoutPreset,
   type InvoiceMargin,
+  type InvoicePaperSize,
   type InvoiceTaxMode,
   type InvoiceTemplateMode,
   type InvoiceAlignment,
 } from './enums.js';
 import type { CompanyProfile } from './schemas/org.js';
 import type { InvoiceTemplateConfig } from './schemas/invoiceTemplates.js';
+import { DEFAULT_PRINT_SETTINGS, INVOICE_ACCENT_COLORS, type PrintSettings } from './schemas/printSettings.js';
 
 /* ------------------------------------------------------------- inputs -- */
 
@@ -85,6 +89,15 @@ export type InvoiceCellAlign = 'left' | 'center' | 'right';
  */
 export interface InvoiceColumnModel { key: InvoiceColumn; label: string; align: InvoiceCellAlign; weight: number; wrap: boolean }
 
+/** Where a renderer fetches a company image from (logo / signature / footer image) — a reference, never a URL. */
+export interface InvoiceImageRef { companyId: string; version: string; contentType: string }
+
+/**
+ * A bill's DERIVED payment position, read by the invoice service from `services/billPayments.ts`
+ * (active receipt allocations + active advance applications). The model only formats it.
+ */
+export interface InvoicePayments { paid: number; outstanding: number }
+
 export interface InvoiceRenderModel {
   /** True only for the designer's in-memory sample — renderers mark it as SAMPLE. */
   isSample: boolean;
@@ -95,21 +108,44 @@ export interface InvoiceRenderModel {
   header: {
     alignment: InvoiceAlignment;
     /** Where to fetch the logo from (the company-logo service); the renderer never trusts a URL here. */
-    logo: { companyId: string; version: string; contentType: string; alignment: InvoiceAlignment } | null;
+    logo: (InvoiceImageRef & { alignment: InvoiceAlignment }) | null;
     companyName: string | null;
     lines: string[];
   };
+  /** "Original" / "Duplicate" / "Office Copy" — print metadata, top right. null = none. */
+  copyLabel: string | null;
+  /** The accent (hex) for rules and headings — dark and print-safe (INVOICE_ACCENT_COLORS). */
+  accent: string;
   /** Every fixed heading both renderers print — defined once, here. */
-  labels: { billedTo: string; details: string; gstSummary: string; remark: string; terms: string; signatoryCaption: string };
+  labels: { billedTo: string; details: string; gstSummary: string; remark: string; terms: string; signatoryCaption: string; bank: string; note: string; receivedBy: string; amountInWords: string };
   meta: InvoiceField[];
   customer: InvoiceField[];
   columns: InvoiceColumnModel[];
   /** One row per bill line, one formatted cell per column. */
   rows: string[][];
-  totals: { label: string; value: string; strong: boolean }[];
+  /** `strong` = Grand Total (ruled above); `bold` = emphasised without a rule (Balance Due). */
+  totals: { label: string; value: string; strong: boolean; bold?: boolean }[];
+  /** "Rupees Twelve Thousand … Only" for the stored Grand Total, or null. */
+  amountInWords: string | null;
   gstSummary: { columns: string[]; rows: string[][]; total: string[] } | null;
   remark: string | null;
-  footer: { terms: string | null; thankYou: string | null; signatory: string | null };
+  footer: {
+    terms: string | null;
+    thankYou: string | null;
+    signatory: string | null;
+    /** Print & Invoice settings: the invoice note, a one-line footer text, bank details (only the ones that exist). */
+    note: string | null;
+    text: string | null;
+    bank: InvoiceField[] | null;
+    /** A blank line for the customer's handwritten "Received By" — nothing is filled in. */
+    receivedBy: boolean;
+    /** Drawn above the signatory line when the company has one and the settings show it. */
+    signatureImage: InvoiceImageRef | null;
+    /** Optional graphic at the lower left (terms graphic, brand mark…). */
+    footerImage: InvoiceImageRef | null;
+  };
+  /** "Page x of y" in the PDF page footer. */
+  showPageNumbers: boolean;
   /** "2026-27 / 1" — printed in every PDF page footer. */
   documentLabel: string;
   fileName: string;
@@ -123,6 +159,12 @@ export interface InvoiceRenderModel {
  */
 export interface InvoiceStyle {
   preset: InvoiceLayoutPreset;
+  paperSize: InvoicePaperSize;
+  /**
+   * STACKED: logo row, then the company block (Classic / Compact / Detailed).
+   * SIDE: logo at the left, the company block beside it, copy label and title opposite (Studio).
+   */
+  headerLayout: 'STACKED' | 'SIDE';
   pageWidth: number;
   pageHeight: number;
   margin: number;
@@ -154,33 +196,47 @@ export interface InvoiceStyle {
 /** The only colours an invoice uses. A business document ignores the app theme on purpose. */
 export const INVOICE_COLORS = { paper: '#FFFFFF', text: '#111827', muted: '#4B5563', line: '#D1D5DB', rule: '#111827', headFill: '#F3F4F6', sample: '#DC2626' } as const;
 
-const A4 = { width: 595.28, height: 841.89 };
-const MARGIN: Record<InvoiceMargin, number> = { NARROW: 24, NORMAL: 36 };
+const PAPER: Record<InvoicePaperSize, { width: number; height: number }> = { A4: { width: 595.28, height: 841.89 }, A5: { width: 419.53, height: 595.28 } };
+const MARGIN: Record<InvoicePaperSize, Record<InvoiceMargin, number>> = { A4: { NARROW: 24, NORMAL: 36 }, A5: { NARROW: 18, NORMAL: 24 } };
 
-export function invoiceStyle(preset: InvoiceLayoutPreset, margins: InvoiceMargin, density: InvoiceDensity): InvoiceStyle {
+export function invoiceStyle(preset: InvoiceLayoutPreset, margins: InvoiceMargin, density: InvoiceDensity, paperSize: InvoicePaperSize = 'A4'): InvoiceStyle {
   const tight = density === 'COMPACT' ? 0.7 : 1;
+  const paper = PAPER[paperSize] ?? PAPER.A4;
+  const a5 = paperSize === 'A5';
+  // A5 is ~0.7 of A4's width: type steps down a little (never below a readable size) and the fixed blocks narrow.
+  const f = a5 ? 0.9 : 1;
   const base = {
     CLASSIC: { fontSize: 9, smallSize: 8, titleSize: 16, companySize: 14, tableBorders: 'rows' as const, headerFill: true },
     COMPACT: { fontSize: 8, smallSize: 7, titleSize: 13, companySize: 12, tableBorders: 'rows' as const, headerFill: false },
     DETAILED: { fontSize: 8.5, smallSize: 7.5, titleSize: 15, companySize: 14, tableBorders: 'grid' as const, headerFill: true },
+    // Studio: a quiet letterhead (large company name, small title), thin rules, no fills — low ink.
+    STUDIO: { fontSize: 8.5, smallSize: 7.5, titleSize: 10, companySize: 15, tableBorders: 'rows' as const, headerFill: false },
   }[preset];
+  const margin = MARGIN[paperSize]?.[margins] ?? MARGIN.A4[margins];
+  const contentW = paper.width - 2 * margin;
   return {
     preset,
-    pageWidth: A4.width,
-    pageHeight: A4.height,
-    margin: MARGIN[margins],
+    paperSize,
+    headerLayout: preset === 'STUDIO' ? 'SIDE' : 'STACKED',
+    pageWidth: paper.width,
+    pageHeight: paper.height,
+    margin,
     ...base,
-    cellPadX: 4,
-    cellPadY: (preset === 'COMPACT' ? 3 : 4.5) * tight,
-    sectionGap: (preset === 'COMPACT' ? 10 : 14) * tight,
-    logoMaxHeight: preset === 'COMPACT' ? 40 : 56,
-    logoMaxWidth: 150,
+    fontSize: Math.max(7, base.fontSize * f),
+    smallSize: Math.max(6.5, base.smallSize * f),
+    titleSize: base.titleSize * f,
+    companySize: base.companySize * f,
+    cellPadX: a5 ? 3 : 4,
+    cellPadY: (preset === 'COMPACT' ? 3 : 4.5) * tight * (a5 ? 0.85 : 1),
+    sectionGap: (preset === 'COMPACT' ? 10 : 14) * tight * (a5 ? 0.8 : 1),
+    logoMaxHeight: (preset === 'COMPACT' ? 40 : preset === 'STUDIO' ? 52 : 56) * (a5 ? 0.8 : 1),
+    logoMaxWidth: a5 ? 110 : 150,
     lineHeight: 1.3,
-    customerLabelWidth: 62,
-    metaLabelWidth: 70,
-    totalsWidth: Math.min(230, (A4.width - 2 * MARGIN[margins]) * 0.45),
+    customerLabelWidth: a5 ? 54 : 62,
+    metaLabelWidth: a5 ? 60 : 70,
+    totalsWidth: Math.min(a5 ? 190 : 230, contentW * (a5 ? 0.55 : 0.45)),
     summaryColumns: [0.3, 0.35, 0.35],
-    signatureLineWidth: 140,
+    signatureLineWidth: a5 ? 110 : 140,
   };
 }
 
@@ -209,6 +265,34 @@ export function formatDecimal(value: number): string {
   return frac === 0 ? String(whole) : `${hundredths < 0 && whole === 0 ? '-' : ''}${whole}.${String(frac).padStart(2, '0').replace(/0$/, '')}`;
 }
 
+const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+const upTo99 = (n: number) => (n < 20 ? ONES[n] : `${TENS[Math.floor(n / 10)]}${n % 10 ? ` ${ONES[n % 10]}` : ''}`);
+const upTo999 = (n: number) => [n >= 100 ? `${ONES[Math.floor(n / 100)]} Hundred` : '', n % 100 ? upTo99(n % 100) : ''].filter(Boolean).join(' ');
+/** A whole number in the Indian system — crore, lakh, thousand, hundred. Crores above 99 recurse ("One Hundred Crore"). */
+function indianWords(n: number): string {
+  if (n === 0) return 'Zero';
+  const crore = Math.floor(n / 10_000_000);
+  const lakh = Math.floor((n % 10_000_000) / 100_000);
+  const thousand = Math.floor((n % 100_000) / 1000);
+  const rest = n % 1000;
+  return [crore ? `${indianWords(crore)} Crore` : '', lakh ? `${upTo99(lakh)} Lakh` : '', thousand ? `${upTo99(thousand)} Thousand` : '', rest ? upTo999(rest) : ''].filter(Boolean).join(' ');
+}
+
+/**
+ * A stored amount in Indian words, as a bill prints it: 12550.50 -> "Rupees Twelve Thousand Five
+ * Hundred Fifty and Fifty Paise Only". Works on paise, like `formatAmount`, so it never disagrees
+ * with the figure printed beside it.
+ */
+export function amountInWords(value: number): string {
+  const paise = Math.round(Math.abs(value) * 100);
+  const rupees = Math.floor(paise / 100);
+  const p = paise % 100;
+  const sign = value < 0 && paise ? 'Minus ' : '';
+  if (rupees === 0 && p) return `${sign}${upTo99(p)} Paise Only`;
+  return `${sign}Rupees ${indianWords(rupees)}${p ? ` and ${upTo99(p)} Paise` : ''} Only`;
+}
+
 /** "Invoice-2026-27-1.pdf" — book and bill number only (no customer data), safe on every file system. */
 export function invoiceFileName(bookNumber: string, billNumber: number): string {
   const safe = `${bookNumber}-${billNumber}`.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
@@ -225,28 +309,31 @@ export const isTemplateCompatible = (supportedMode: InvoiceTemplateMode, taxMode
  *   2. otherwise the first active compatible template — BOTH before single-mode, then by name,
  *      then by id, so the choice is stable;
  *   3. otherwise null, and the caller uses the built-in Classic.
+ * A Studio-preset template (Legacy Studio) is never picked in step 2: it was added to existing
+ * tenants later, and must not quietly become what their bills print — it prints only as the
+ * default or when chosen.
  * An explicitly chosen template is validated by the caller instead (it must fit, or it is refused).
  */
-export function pickInvoiceTemplate<T extends { id: string; templateName: string; supportedMode: InvoiceTemplateMode; isDefault: boolean; isActive: boolean }>(
+export function pickInvoiceTemplate<T extends { id: string; templateName: string; supportedMode: InvoiceTemplateMode; isDefault: boolean; isActive: boolean; layoutPreset?: string }>(
   templates: T[],
   taxMode: InvoiceTaxMode,
 ): T | null {
   const usable = templates.filter((t) => t.isActive && isTemplateCompatible(t.supportedMode, taxMode));
   const def = usable.find((t) => t.isDefault);
   if (def) return def;
-  const ranked = [...usable].sort((a, b) => Number(b.supportedMode === 'BOTH') - Number(a.supportedMode === 'BOTH') || a.templateName.localeCompare(b.templateName) || a.id.localeCompare(b.id));
+  const ranked = usable.filter((t) => t.layoutPreset !== 'STUDIO').sort((a, b) => Number(b.supportedMode === 'BOTH') - Number(a.supportedMode === 'BOTH') || a.templateName.localeCompare(b.templateName) || a.id.localeCompare(b.id));
   return ranked[0] ?? null;
 }
 
 /* ------------------------------------------------------------ builder -- */
 
 const COLUMN_WEIGHT: Record<InvoiceColumn, number> = {
-  serial: 0.45, item: 2, product: 2.3, hsn: 1, quantity: 0.75, rate: 1.15, amount: 1.25, taxable: 1.25, gstRate: 0.75, gstAmount: 1.1, total: 1.35, remark: 1.8,
+  serial: 0.45, item: 2, product: 2.3, hsn: 1, quantity: 0.75, rate: 1.15, amount: 1.25, discount: 1.1, taxable: 1.25, gstRate: 0.75, gstAmount: 1.1, total: 1.35, remark: 1.8,
 };
 /** Only these columns may wrap onto a second line; a number broken across lines is unreadable. */
 const WRAPPING_COLUMNS: InvoiceColumn[] = ['item', 'product', 'remark'];
 const COLUMN_ALIGN: Record<InvoiceColumn, InvoiceCellAlign> = {
-  serial: 'center', item: 'left', product: 'left', hsn: 'left', quantity: 'right', rate: 'right', amount: 'right', taxable: 'right', gstRate: 'right', gstAmount: 'right', total: 'right', remark: 'left',
+  serial: 'center', item: 'left', product: 'left', hsn: 'left', quantity: 'right', rate: 'right', amount: 'right', discount: 'right', taxable: 'right', gstRate: 'right', gstAmount: 'right', total: 'right', remark: 'left',
 };
 /** Columns that only mean something when tax was charged. `taxable` equals `total` without GST, so it would only repeat it. */
 const GST_ONLY_COLUMNS: InvoiceColumn[] = ['gstRate', 'gstAmount', 'taxable'];
@@ -260,6 +347,8 @@ const CELL: Record<InvoiceColumn, (l: Line, i: number) => string> = {
   quantity: (l) => formatDecimal(l.quantity),
   rate: (l) => formatAmount(l.rate),
   amount: (l) => formatAmount(l.grossTaxable),
+  // The line's STORED share of the bill discount (docs/BILLING_CALCULATION.md) — never re-allocated here.
+  discount: (l) => formatAmount(l.discountAllocated),
   taxable: (l) => formatAmount(l.taxableAmount),
   gstRate: (l) => `${formatDecimal(l.gstRateSnapshot)}%`,
   gstAmount: (l) => formatAmount(l.gstAmount),
@@ -274,9 +363,16 @@ export function buildInvoiceModel(input: {
   company: CompanyProfile | null;
   dateFormat: DateFormat;
   template: InvoiceTemplateSource;
+  /** Print & Invoice settings; absent = the defaults (nothing extra configured). */
+  print?: PrintSettings;
+  /** The bill's derived payment position — printed only by a template that shows payments. */
+  payments?: InvoicePayments | null;
+  /** This print's copy label, overriding the settings' default (the preview's Original / Duplicate choice). */
+  copyLabel?: InvoiceCopyLabel;
   isSample?: boolean;
 }): InvoiceRenderModel {
   const { bill, company, dateFormat, template } = input;
+  const print = input.print ?? DEFAULT_PRINT_SETTINGS;
   const cfg = template.config;
   const withGst = bill.taxMode === 'WITH_GST';
   const date = (v: string | null) => formatDateOnly(v, dateFormat);
@@ -307,7 +403,8 @@ export function buildInvoiceModel(input: {
 
   // Without GST, Taxable and the GST columns go (Taxable would only repeat Total), and so does
   // Amount (Qty x Rate) when there is no discount — it would print the same figure twice.
-  const keys = cfg.columns.filter((k) => withGst || (!GST_ONLY_COLUMNS.includes(k) && !(k === 'amount' && bill.discountAmount <= 0)));
+  // A Discount column on a bill without a discount would be a column of zeros.
+  const keys = cfg.columns.filter((k) => !(k === 'discount' && bill.discountAmount <= 0) && (withGst || (!GST_ONLY_COLUMNS.includes(k) && !(k === 'amount' && bill.discountAmount <= 0))));
   const columns = keys.map((key) => ({ key, label: key === 'total' && !withGst ? 'Amount' : INVOICE_COLUMN_LABELS[key], align: COLUMN_ALIGN[key], weight: COLUMN_WEIGHT[key], wrap: WRAPPING_COLUMNS.includes(key) }));
   if (!withGst) {
     // With a discount the pre-discount figure differs from the line's Amount: call it Gross.
@@ -326,6 +423,12 @@ export function buildInvoiceModel(input: {
   if (withGst && t.showTaxableTotal) totals.push({ label: 'Taxable Amount', value: formatAmount(bill.netTaxable), strong: false });
   if (withGst && t.showGstTotal) totals.push({ label: 'GST', value: formatAmount(bill.gstAmount), strong: false });
   totals.push({ label: 'Grand Total', value: formatRupees(bill.grandTotal), strong: true });
+  // Payments only as the server derived them (active receipts + applied advance) — an unapplied
+  // customer advance or a cancelled receipt is not in `paid`. Formatted, never computed, here.
+  if (t.showPayments && input.payments) {
+    totals.push({ label: 'Advance / Received', value: formatAmount(input.payments.paid), strong: false });
+    totals.push({ label: 'Balance Due', value: formatRupees(input.payments.outstanding), strong: false, bold: true });
+  }
 
   const summaryRows = withGst && t.showGstSummary ? bill.gstSummary : [];
   const gstSummary = summaryRows.length
@@ -337,28 +440,59 @@ export function buildInvoiceModel(input: {
       }
     : null;
 
-  const logo = company?.logo && cfg.header.showLogo ? { companyId: company.id, version: company.logo.version, contentType: company.logo.contentType, alignment: cfg.header.logoAlignment } : null;
+  // The logo prints when the template shows it AND Print settings have not switched logos off.
+  const logo = company?.logo && cfg.header.showLogo && print.showLogo ? { companyId: company.id, version: company.logo.version, contentType: company.logo.contentType, alignment: cfg.header.logoAlignment } : null;
+  const image = (ref: CompanyProfile['signature']) => (company && ref ? { companyId: company.id, version: ref.version, contentType: ref.contentType } : null);
+
+  // Terms: the template's own text when it has some; otherwise the tenant's (Print & Invoice
+  // settings) — so a template that shows terms without its own text prints the company's.
+  const terms = !cfg.footer.showTerms ? null : present(cfg.footer.terms) ? cfg.footer.terms : print.showTerms && present(print.terms) ? print.terms : null;
+  const b = print.bank;
+  const bank = print.showBankDetails
+    ? [
+        { label: 'Bank', value: b.bankName },
+        { label: 'A/c Name', value: b.accountName },
+        { label: 'A/c No.', value: b.accountNumber },
+        { label: 'IFSC', value: b.ifsc },
+        { label: 'Branch', value: b.branch },
+      ].filter((f) => present(f.value))
+    : [];
+  const copy = input.copyLabel ?? print.copyLabel;
+  const signatory = cfg.footer.showSignatory && company ? `For ${company.name}` : null;
 
   return {
     isSample: !!input.isSample,
     template: { id: template.id, name: template.templateName, layoutPreset: template.layoutPreset, supportedMode: template.supportedMode },
     taxMode: bill.taxMode,
     title: withGst ? cfg.header.title : cfg.header.titleWithoutGst,
-    style: invoiceStyle(template.layoutPreset, cfg.page.margins, cfg.page.density),
-    labels: { billedTo: 'BILLED TO', details: 'INVOICE DETAILS', gstSummary: 'GST SUMMARY', remark: 'REMARK', terms: 'TERMS & CONDITIONS', signatoryCaption: 'Authorised Signatory' },
+    style: invoiceStyle(template.layoutPreset, cfg.page.margins, cfg.page.density, cfg.page.paperSize),
+    copyLabel: copy === 'NONE' ? null : INVOICE_COPY_LABEL_TEXT[copy],
+    accent: INVOICE_ACCENT_COLORS[print.accent] ?? INVOICE_ACCENT_COLORS.NEUTRAL,
+    labels: {
+      billedTo: 'BILLED TO', details: 'INVOICE DETAILS', gstSummary: 'GST SUMMARY', remark: 'REMARK', terms: 'TERMS & CONDITIONS', signatoryCaption: 'Authorised Signatory',
+      bank: 'BANK DETAILS', note: 'NOTE', receivedBy: 'Received By', amountInWords: 'Amount in words',
+    },
     header: { alignment: cfg.header.alignment, logo, companyName: cfg.header.showCompanyName && company ? company.name : null, lines },
     meta,
     customer,
     columns,
     rows,
     totals,
+    amountInWords: t.showAmountInWords ? amountInWords(bill.grandTotal) : null,
     gstSummary,
     remark: cfg.customer.showRemark && present(bill.remark) ? bill.remark : null,
     footer: {
-      terms: cfg.footer.showTerms && present(cfg.footer.terms) ? cfg.footer.terms : null,
+      terms,
       thankYou: cfg.footer.showThankYou && present(cfg.footer.thankYou) ? cfg.footer.thankYou : null,
-      signatory: cfg.footer.showSignatory && company ? `For ${company.name}` : null,
+      signatory,
+      note: present(print.invoiceNote) ? print.invoiceNote : null,
+      text: present(print.footerText) ? print.footerText : null,
+      bank: bank.length ? bank : null,
+      receivedBy: !!cfg.footer.showReceivedBy,
+      signatureImage: signatory && print.showSignature ? image(company?.signature ?? null) : null,
+      footerImage: print.showFooterImage ? image(company?.footerImage ?? null) : null,
     },
+    showPageNumbers: print.showPageNumbers,
     documentLabel: `${bill.bookNumber} / ${bill.billNumber}`,
     fileName: invoiceFileName(bill.bookNumber, bill.billNumber),
   };
@@ -416,4 +550,11 @@ export function sampleInvoiceBill(taxMode: InvoiceTaxMode = 'WITH_GST'): Invoice
     })),
     gstSummary: calc.gstSummary,
   };
+}
+
+/** The sample bill's payment position for previews: a round advance, the rest due. Sample only — a real bill's comes from the server. */
+export function sampleInvoicePayments(bill: InvoiceBillSource): InvoicePayments {
+  const grand = Math.round(bill.grandTotal * 100);
+  const paid = Math.min(500_000, grand);
+  return { paid: paid / 100, outstanding: (grand - paid) / 100 };
 }

@@ -3,10 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { Copy, Eye, MoreHorizontal, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 import { INVOICE_LAYOUT_PRESET_LABELS, INVOICE_TEMPLATE_MODE_LABELS } from '@erp/shared';
 import { Badge, ConfirmDialog, Dropdown, EmptyState, Modal, Spinner } from '@/components/ui';
-import { InvoiceSheet } from '@/components/invoice/InvoiceDocument';
+import { InvoiceSheet, useCompanyImages, type InvoiceImages } from '@/components/invoice/InvoiceDocument';
 import { TEMPLATES_KEY, useInvoiceTemplates, type InvoiceTemplateRecord } from '@/lib/invoice';
 import { useSave } from '@/lib/queries';
-import { useCompanyLogo, useCompanyProfile } from '@/lib/settings';
 import { useAuthStore } from '@/store/auth';
 import { sampleModeFor, useSampleModel } from './useSampleModel';
 
@@ -14,16 +13,16 @@ const PERMISSION = 'settings_invoice_templates';
 const INVALIDATE = [TEMPLATES_KEY, 'bill-invoice'];
 
 /** One thumbnail: the real renderer over the sample bill, scaled down and cropped to the top of the page. */
-function Thumbnail({ t, logoSrc }: { t: InvoiceTemplateRecord; logoSrc: string | null }) {
+function Thumbnail({ t, images }: { t: InvoiceTemplateRecord; images: InvoiceImages }) {
   const model = useSampleModel(t, sampleModeFor(t.supportedMode));
   return (
     <div className="pointer-events-none h-[232px] overflow-hidden rounded-t-lg border-b border-line bg-gray-100 px-3 pt-3" aria-hidden>
-      <InvoiceSheet model={model} logoSrc={logoSrc} scale={0.27} />
+      <InvoiceSheet model={model} images={images} scale={0.27} />
     </div>
   );
 }
 
-function PreviewModal({ t, logoSrc, onClose }: { t: InvoiceTemplateRecord; logoSrc: string | null; onClose: () => void }) {
+function PreviewModal({ t, images, onClose }: { t: InvoiceTemplateRecord; images: InvoiceImages; onClose: () => void }) {
   const [mode, setMode] = useState(sampleModeFor(t.supportedMode));
   const model = useSampleModel(t, mode);
   return (
@@ -35,7 +34,7 @@ function PreviewModal({ t, logoSrc, onClose }: { t: InvoiceTemplateRecord; logoS
           ))}
         </div>
       )}
-      <div className="rounded-md bg-gray-100 p-4"><InvoiceSheet model={model} logoSrc={logoSrc} maxScale={0.95} /></div>
+      <div className="rounded-md bg-gray-100 p-4"><InvoiceSheet model={model} images={images} maxScale={0.95} /></div>
     </Modal>
   );
 }
@@ -48,8 +47,7 @@ export default function InvoiceTemplatesPage() {
   const nav = useNavigate();
   const q = useInvoiceTemplates();
   const can = useAuthStore((s) => s.can);
-  const company = useCompanyProfile().data;
-  const logoSrc = useCompanyLogo(company?.id, company?.logo?.version).data ?? null;
+  const images = useCompanyImages();
   const [preview, setPreview] = useState<InvoiceTemplateRecord | null>(null);
   const [del, setDel] = useState<InvoiceTemplateRecord | null>(null);
   const action = useSave({ invalidate: INVALIDATE });
@@ -79,7 +77,7 @@ export default function InvoiceTemplatesPage() {
           {rows.map((t) => (
             <div key={t.id} data-template-card={t.templateName} className={`rounded-lg border bg-white transition-colors duration-150 ${t.isDefault ? 'border-primary/60' : 'border-line hover:border-gray-300'}`}>
               <button type="button" className="block w-full text-left" onClick={() => setPreview(t)} aria-label={`Preview ${t.templateName}`}>
-                <Thumbnail t={t} logoSrc={logoSrc} />
+                <Thumbnail t={t} images={images} />
               </button>
               <div className="p-3">
                 <div className="flex items-start justify-between gap-2">
@@ -108,7 +106,7 @@ export default function InvoiceTemplatesPage() {
         </div>
       )}
 
-      {preview && <PreviewModal t={preview} logoSrc={logoSrc} onClose={() => setPreview(null)} />}
+      {preview && <PreviewModal t={preview} images={images} onClose={() => setPreview(null)} />}
       <ConfirmDialog
         open={!!del}
         onClose={() => setDel(null)}

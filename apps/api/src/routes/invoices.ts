@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { ok } from '../lib/respond';
 import { forbidden, notFound, validation } from '../lib/errors';
-import { hasPermission, publicLinkCreateSchema, shareOpenedSchema } from '@erp/shared';
+import { hasPermission, INVOICE_COPY_LABELS, publicLinkCreateSchema, shareOpenedSchema, type InvoiceCopyLabel } from '@erp/shared';
 import { recordStage } from '../services/work';
 import { getBillInvoice, getBillInvoicePdf, getBillInvoiceShare, resolveShareTemplate } from '../services/invoice';
 import { logActivity } from '../services/activity';
@@ -30,15 +30,17 @@ const PERMISSION = 'operations_billing';
 function params(req: { params: unknown; query: unknown }) {
   const { id } = req.params as { id: string };
   if (!isUuid(id)) throw notFound('Bill');
-  const { templateId } = (req.query ?? {}) as { templateId?: string };
+  const { templateId, copy } = (req.query ?? {}) as { templateId?: string; copy?: string };
   if (templateId !== undefined && templateId !== '' && !isUuid(templateId)) throw validation('Unknown invoice template');
-  return { id, templateId: templateId || undefined };
+  // This print's copy label (Original / Duplicate / Office Copy) — print metadata, never a second bill.
+  if (copy !== undefined && copy !== '' && !(INVOICE_COPY_LABELS as readonly string[]).includes(copy)) throw validation('Unknown copy label');
+  return { id, templateId: templateId || undefined, copyLabel: (copy || undefined) as InvoiceCopyLabel | undefined };
 }
 
 export async function invoiceRoutes(app: FastifyInstance) {
   app.get('/api/bills/:id/invoice', { preHandler: app.requirePermission(PERMISSION) }, async (req) => {
-    const { id, templateId } = params(req);
-    const { model } = await getBillInvoice(req.user.tenantId, id, templateId);
+    const { id, templateId, copyLabel } = params(req);
+    const { model } = await getBillInvoice(req.user.tenantId, id, templateId, copyLabel);
     // Characters the PDF fonts cannot draw: the preview warns, and the PDF download refuses them (docs/INVOICE_TEMPLATES.md).
     return ok({ ...model, pdfUnprintable: [...new Set(unprintableText(model).flatMap((p) => p.characters))] });
   });
@@ -110,8 +112,8 @@ export async function invoiceRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/bills/:id/invoice/pdf', { preHandler: app.requirePermission(PERMISSION) }, async (req, reply) => {
-    const { id, templateId } = params(req);
-    const { bytes, fileName } = await getBillInvoicePdf(req.user.tenantId, id, templateId);
+    const { id, templateId, copyLabel } = params(req);
+    const { bytes, fileName } = await getBillInvoicePdf(req.user.tenantId, id, templateId, copyLabel);
     const download = (req.query as { download?: string }).download === '1';
     return reply
       .header('content-type', 'application/pdf')

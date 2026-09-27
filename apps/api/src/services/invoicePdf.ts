@@ -37,6 +37,11 @@ function printedText(model: InvoiceRenderModel): [area: string, text: string][] 
   if (model.footer.terms) out.push(['Terms', model.footer.terms]);
   if (model.footer.thankYou) out.push(['Thank-you note', model.footer.thankYou]);
   if (model.footer.signatory) out.push(['Signatory', model.footer.signatory]);
+  if (model.copyLabel) out.push(['Copy label', model.copyLabel], ['Copy label', model.copyLabel.toUpperCase()]);
+  if (model.amountInWords) out.push(['Amount in words', model.amountInWords]);
+  if (model.footer.note) out.push(['Invoice note', model.footer.note]);
+  if (model.footer.text) out.push(['Footer text', model.footer.text]);
+  model.footer.bank?.forEach((f) => out.push(['Bank details', f.label], ['Bank details', f.value]));
   return out;
 }
 
@@ -81,25 +86,54 @@ const C = { text: hex(INVOICE_COLORS.text), muted: hex(INVOICE_COLORS.muted), li
 /** Replaces characters that are not printable in a PDF text run (control chars). Tabs become spaces. */
 const clean = (s: string) => s.replace(/\t/g, ' ').replace(/[\u0000-\u001F\u007F]/g, '');
 
-export interface InvoiceLogo { data: Uint8Array; contentType: string }
+export interface InvoiceImage { data: Uint8Array; contentType: string }
+/** @deprecated the logo alone — kept so a bare image still means "the logo". */
+export type InvoiceLogo = InvoiceImage;
+/** The company images an invoice may draw; each is drawn only when the model asks for it. */
+export interface InvoiceImages { logo?: InvoiceImage | null; signature?: InvoiceImage | null; footer?: InvoiceImage | null }
 export interface RenderPdfOptions { /** Written as the PDF's creation/modification date — pass the bill's updatedAt for stable output. */ date?: Date }
 
 /**
- * Renders the invoice. The logo is optional: absent, or in a format pdf-lib cannot embed, the
- * header simply has no image. Text no embedded font can draw is refused (422) before anything is
- * drawn; the shaper's own glyph check is the backstop.
+ * Renders the invoice. Images are optional: absent, or in a format pdf-lib cannot embed, that area
+ * simply has no image (the space collapses — never a broken-image box). Text no embedded font can
+ * draw is refused (422) before anything is drawn; the shaper's own glyph check is the backstop.
+ * A bare image as the second argument is the logo.
  */
-export async function renderInvoicePdf(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts: RenderPdfOptions = {}): Promise<Uint8Array> {
+export async function renderInvoicePdf(model: InvoiceRenderModel, images: InvoiceImages | InvoiceImage | null, opts: RenderPdfOptions = {}): Promise<Uint8Array> {
   assertPrintable(model);
+  const imgs: InvoiceImages = !images ? {} : 'data' in images ? { logo: images } : images;
   try {
-    return await render(model, logo, opts);
+    return await render(model, imgs, opts);
   } catch (e) {
     if (e instanceof UnprintableTextError) throw unprintableError([{ area: 'the invoice', characters: e.characters }]);
     throw e;
   }
 }
 
-async function render(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts: RenderPdfOptions): Promise<Uint8Array> {
+/**
+ * WebP cannot be embedded by pdf-lib; the browser converts WebP uploads to PNG, so a stored WebP can
+ * only come from an old or direct API upload — it is skipped, not faked. A PNG/JPEG that passed the
+ * magic-byte check but that pdf-lib cannot decode is skipped the same way: one bad image must not
+ * make every invoice of the tenant fail.
+ */
+async function embed(doc: PDFDocument, img: InvoiceImage | null | undefined): Promise<PDFImage | null> {
+  if (!img) return null;
+  try {
+    if (img.contentType === 'image/png') return await doc.embedPng(img.data);
+    if (img.contentType === 'image/jpeg') return await doc.embedJpg(img.data);
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** An image's drawn size inside a box — aspect ratio kept, never enlarged, never stretched. */
+const fitInto = (img: PDFImage, maxW: number, maxH: number) => {
+  const k = Math.min(maxW / img.width, maxH / img.height, 1);
+  return { w: img.width * k, h: img.height * k };
+};
+
+async function render(model: InvoiceRenderModel, imgs: InvoiceImages, opts: RenderPdfOptions): Promise<Uint8Array> {
   const s = model.style;
   const doc = await PDFDocument.create();
   const tx = await PdfText.create(doc);
@@ -114,19 +148,12 @@ async function render(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts:
   doc.setCreationDate(when);
   doc.setModificationDate(when);
 
-  let image: PDFImage | null = null;
-  if (logo && model.header.logo) {
-    // WebP cannot be embedded by pdf-lib; the browser converts WebP uploads to PNG, so a stored
-    // WebP can only come from an old or direct API upload — it is skipped, not faked. A PNG/JPEG
-    // that passed the magic-byte check but that pdf-lib cannot decode is skipped the same way:
-    // one bad logo must not make every invoice of the tenant fail.
-    try {
-      if (logo.contentType === 'image/png') image = await doc.embedPng(logo.data);
-      else if (logo.contentType === 'image/jpeg') image = await doc.embedJpg(logo.data);
-    } catch {
-      image = null;
-    }
-  }
+  const image = model.header.logo ? await embed(doc, imgs.logo) : null;
+  const signatureImg = model.footer.signatureImage ? await embed(doc, imgs.signature) : null;
+  const footerImg = model.footer.footerImage ? await embed(doc, imgs.footer) : null;
+  // The accent tints rules and section headings only; neutral is the classic near-black.
+  const accent = /^#[0-9a-f]{6}$/i.test(model.accent) ? hex(model.accent) : C.rule;
+  const headingColor = s.preset === 'STUDIO' ? accent : C.muted;
 
   const W = s.pageWidth;
   const H = s.pageHeight;
@@ -168,36 +195,85 @@ async function render(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts:
 
   newPage();
 
-  /* ---- header: logo row, company block (stacked, each aligned as configured) ---- */
-  if (image && model.header.logo) {
-    const scale = Math.min(s.logoMaxWidth / image.width, s.logoMaxHeight / image.height, 1);
-    const w = image.width * scale;
-    const h = image.height * scale;
-    const a = model.header.logo.alignment;
-    const x = a === 'RIGHT' ? M + contentW - w : a === 'CENTER' ? M + (contentW - w) / 2 : M;
-    page.drawImage(image, { x, y: H - y - h, width: w, height: h });
-    y += h + 6;
-  }
   const ha = model.header.alignment;
-  if (model.header.companyName) {
-    for (const l of wrap(model.header.companyName, s.companySize, bold, contentW)) {
-      text(l, M, y, contentW, s.companySize, bold, C.text, ha);
-      y += lh(s.companySize);
+  if (s.headerLayout === 'SIDE') {
+    /* ---- Studio letterhead: logo left, company block beside it, copy label + title at the right ---- */
+    const top = y;
+    let logoW = 0;
+    let logoH = 0;
+    if (image) {
+      const d = fitInto(image, s.logoMaxWidth, s.logoMaxHeight);
+      logoW = d.w;
+      logoH = d.h;
+      page.drawImage(image, { x: M, y: H - top - d.h, width: d.w, height: d.h });
     }
-  }
-  for (const line of model.header.lines) {
-    for (const l of wrap(line, s.smallSize, regular, contentW)) {
-      text(l, M, y, contentW, s.smallSize, regular, C.muted, ha);
-      y += lh(s.smallSize);
+    const rightW = Math.min(140, contentW * 0.28);
+    // No logo: the company block takes the freed space — no empty logo box.
+    const blockX = M + (logoW ? logoW + 12 : 0);
+    const blockW = contentW - (blockX - M) - rightW - 8;
+    let t = top;
+    if (model.header.companyName) {
+      for (const l of wrap(model.header.companyName, s.companySize, bold, blockW)) {
+        text(l, blockX, t, blockW, s.companySize, bold, C.text);
+        t += lh(s.companySize);
+      }
+      t += 1;
     }
-  }
-  y += 4;
-  hline(M, M + contentW, y, C.rule, s.preset === 'COMPACT' ? 0.5 : 1);
-  y += s.sectionGap * 0.8;
+    for (const line of model.header.lines) {
+      for (const l of wrap(line, s.smallSize, regular, blockW)) {
+        text(l, blockX, t, blockW, s.smallSize, regular, C.muted);
+        t += lh(s.smallSize);
+      }
+    }
+    let r = top;
+    if (model.copyLabel) {
+      text(model.copyLabel.toUpperCase(), M + contentW - rightW, r, rightW, s.smallSize, bold, accent, 'right');
+      r += lh(s.smallSize) + 3;
+    }
+    for (const l of wrap(model.title.toUpperCase(), s.titleSize, bold, rightW)) {
+      text(l, M + contentW - rightW, r, rightW, s.titleSize, bold, C.text, 'right');
+      r += lh(s.titleSize);
+    }
+    y = Math.max(top + logoH, t, r) + 6;
+    hline(M, M + contentW, y, accent, 1);
+    y += s.sectionGap * 0.8;
+  } else {
+    /* ---- header: logo row, company block (stacked, each aligned as configured) ---- */
+    if (image && model.header.logo) {
+      const { w, h } = fitInto(image, s.logoMaxWidth, s.logoMaxHeight);
+      const a = model.header.logo.alignment;
+      const x = a === 'RIGHT' ? M + contentW - w : a === 'CENTER' ? M + (contentW - w) / 2 : M;
+      page.drawImage(image, { x, y: H - y - h, width: w, height: h });
+      y += h + 6;
+    }
+    if (model.header.companyName) {
+      for (const l of wrap(model.header.companyName, s.companySize, bold, contentW)) {
+        text(l, M, y, contentW, s.companySize, bold, C.text, ha);
+        y += lh(s.companySize);
+      }
+    }
+    for (const line of model.header.lines) {
+      for (const l of wrap(line, s.smallSize, regular, contentW)) {
+        text(l, M, y, contentW, s.smallSize, regular, C.muted, ha);
+        y += lh(s.smallSize);
+      }
+    }
+    y += 4;
+    hline(M, M + contentW, y, accent, s.preset === 'COMPACT' ? 0.5 : 1);
+    y += s.sectionGap * 0.8;
 
-  /* ---- title, then "Billed To" (left) and invoice details (right) ---- */
-  text(model.title.toUpperCase(), M, y, contentW, s.titleSize, bold, C.text, ha === 'CENTER' ? 'center' : 'left');
-  y += lh(s.titleSize) + 4;
+    /* ---- title (the copy label on the same line, at the right) ---- */
+    const labelW = model.copyLabel ? width(model.copyLabel.toUpperCase(), s.smallSize, bold) + 8 : 0;
+    const titleLines = wrap(model.title.toUpperCase(), s.titleSize, bold, contentW - (ha === 'CENTER' ? 2 * labelW : labelW));
+    if (model.copyLabel) text(model.copyLabel.toUpperCase(), M, y + (s.titleSize - s.smallSize) / 2, contentW, s.smallSize, bold, C.muted, 'right');
+    titleLines.forEach((l) => {
+      text(l, M + (ha === 'CENTER' ? labelW : 0), y, contentW - (ha === 'CENTER' ? 2 * labelW : labelW), s.titleSize, bold, C.text, ha === 'CENTER' ? 'center' : 'left');
+      y += lh(s.titleSize);
+    });
+    y += 4;
+  }
+
+  /* ---- "Billed To" (left) and invoice details (right) ---- */
 
   const colW = contentW / 2 - 8;
   const fieldRows = (fields: InvoiceField[], x: number, w: number, top: number, labelW: number) => {
@@ -210,8 +286,8 @@ async function render(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts:
     }
     return t;
   };
-  text(model.labels.billedTo, M, y, colW, s.smallSize, bold, C.muted);
-  text(model.labels.details, M + contentW / 2 + 8, y, colW, s.smallSize, bold, C.muted);
+  text(model.labels.billedTo, M, y, colW, s.smallSize, bold, headingColor);
+  text(model.labels.details, M + contentW / 2 + 8, y, colW, s.smallSize, bold, headingColor);
   const blockTop = y + lh(s.smallSize) + 2;
   const leftEnd = fieldRows(model.customer, M, colW, blockTop, s.customerLabelWidth);
   const rightEnd = fieldRows(model.meta, M + contentW / 2 + 8, colW, blockTop, s.metaLabelWidth);
@@ -257,9 +333,9 @@ async function render(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts:
   const drawHead = () => {
     const top = y;
     if (s.headerFill) page.drawRectangle({ x: M, y: H - top - headH, width: contentW, height: headH, color: C.headFill });
-    hline(M, M + contentW, top, s.tableBorders === 'grid' ? C.line : C.rule, s.tableBorders === 'grid' ? 0.5 : 0.8);
+    hline(M, M + contentW, top, s.tableBorders === 'grid' ? C.line : accent, s.tableBorders === 'grid' ? 0.5 : 0.8);
     model.columns.forEach((c, i) => headLines[i].forEach((l, j) => text(l, xs[i] + padX, top + padY + j * lh(headSize), cellW[i] - 2 * padX, headSize, bold, C.text, c.align)));
-    hline(M, M + contentW, top + headH, s.tableBorders === 'grid' ? C.line : C.rule, s.tableBorders === 'grid' ? 0.5 : 0.8);
+    hline(M, M + contentW, top + headH, s.tableBorders === 'grid' ? C.line : accent, s.tableBorders === 'grid' ? 0.5 : 0.8);
     if (s.tableBorders === 'grid') [...xs, M + contentW].forEach((x) => vline(x, top, top + headH, C.line));
     y += headH;
   };
@@ -291,7 +367,7 @@ async function render(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts:
       const top = y;
       cellLines.forEach((lines, i) => lines.slice(from, from + take).forEach((l, j) => text(l, xs[i] + padX, top + padY + j * lh(bodySize), cellW[i] - 2 * padX, bodySize, regular, C.text, model.columns[i].align)));
       const end = from + take >= total;
-      hline(M, M + contentW, top + segH, end && last && s.tableBorders === 'rows' ? C.rule : C.line, end && last && s.tableBorders === 'rows' ? 0.8 : 0.5);
+      hline(M, M + contentW, top + segH, end && last && s.tableBorders === 'rows' ? accent : C.line, end && last && s.tableBorders === 'rows' ? 0.8 : 0.5);
       if (s.tableBorders === 'grid') [...xs, M + contentW].forEach((x) => vline(x, top, top + segH, C.line));
       y += segH;
       from += take;
@@ -312,7 +388,11 @@ async function render(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts:
   const sumW = contentW - totalsW - 24;
   const sumRowH = lh(s.smallSize) + 2 * Math.max(2, padY - 1);
   const sumH = sum ? (sum.rows.length + 2) * sumRowH + lh(s.smallSize) + 4 : 0;
-  const bandH = Math.max(totalsH, sumH);
+  // Amount in words sits at the left of the totals, under the GST summary when there is one.
+  const wordsLines = model.amountInWords ? wrap(model.amountInWords, s.fontSize, bold, sumW) : [];
+  const wordsTop = sum ? sumH + 6 : 0;
+  const wordsH = wordsLines.length ? lh(s.smallSize) + 2 + wordsLines.length * lh(s.fontSize) : 0;
+  const bandH = Math.max(totalsH, wordsH ? wordsTop + wordsH : sumH);
   if (bandH > room()) newPage();
   const bandTop = y;
 
@@ -334,16 +414,27 @@ async function render(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts:
     sumRow(sum.total, bold, false);
   }
 
+  if (wordsLines.length) {
+    let w = bandTop + wordsTop;
+    text(model.labels.amountInWords, M, w, sumW, s.smallSize, bold, headingColor);
+    w += lh(s.smallSize) + 2;
+    wordsLines.forEach((l) => {
+      text(l, M, w, sumW, s.fontSize, bold, C.text);
+      w += lh(s.fontSize);
+    });
+  }
+
   let t = bandTop;
   for (const r of model.totals) {
     const size = r.strong ? s.fontSize + 2 : s.fontSize;
     const h = totalRowH(r.strong);
+    const weight = r.strong || r.bold ? bold : regular;
     if (r.strong) {
-      hline(totalsX, M + contentW, t + 1, C.rule, 0.8);
+      hline(totalsX, M + contentW, t + 1, accent, 0.8);
       t += 4;
     }
-    text(r.label, totalsX, t + 1, totalsW / 2, size, r.strong ? bold : regular, r.strong ? C.text : C.muted);
-    text(r.value, totalsX + totalsW / 2, t + 1, totalsW / 2, size, r.strong ? bold : regular, C.text, 'right');
+    text(r.label, totalsX, t + 1, totalsW / 2, size, weight, r.strong || r.bold ? C.text : C.muted);
+    text(r.value, totalsX + totalsW / 2, t + 1, totalsW / 2, size, weight, C.text, 'right');
     t += h - (r.strong ? 4 : 0);
   }
   y = bandTop + bandH + s.sectionGap;
@@ -357,7 +448,7 @@ async function render(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts:
     // and one line, and carry on line by line (terms can be longer than a page).
     if (h > room() && (h <= H - bottom - M || labelH + lh(size) > room())) newPage();
     if (label) {
-      text(label, M, y, contentW, s.smallSize, bold, C.muted);
+      text(label, M, y, contentW, s.smallSize, bold, headingColor);
       y += labelH;
     }
     lines.forEach((l) => {
@@ -368,16 +459,64 @@ async function render(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts:
     y += s.sectionGap * 0.6;
   };
   if (model.remark) block(model.labels.remark, model.remark, s.fontSize, C.text);
+  if (model.footer.note) block(model.labels.note, model.footer.note, s.fontSize, C.text);
   if (model.footer.terms) block(model.labels.terms, model.footer.terms, s.smallSize, C.muted);
   if (model.footer.thankYou) block(null, model.footer.thankYou, s.fontSize, C.text, 'center');
-  if (model.footer.signatory) {
-    const h = lh(s.fontSize) * 2 + 28;
-    if (h > room()) newPage();
-    const sigW = 200;
-    text(model.footer.signatory, M + contentW - sigW, y, sigW, s.fontSize, bold, C.text, 'right');
-    hline(M + contentW - s.signatureLineWidth, M + contentW, y + lh(s.fontSize) + 26, C.line);
-    text(model.labels.signatoryCaption, M + contentW - sigW, y + lh(s.fontSize) + 29, sigW, s.smallSize, regular, C.muted, 'right');
-    y += h;
+
+  /*
+   * ---- sign-off band, kept whole on one page ----
+   * LEFT: bank details (only those that exist), the footer image, a blank "Received By" line.
+   * RIGHT: "For <company>", the signature image (or a blank space to sign in), the signatory line.
+   * An empty side takes no space, so a template with only a signatory looks as it always did.
+   */
+  const f = model.footer;
+  const leftW = Math.min(contentW * 0.55, contentW - s.signatureLineWidth - 40);
+  const bankLabelW = s.customerLabelWidth - 8;
+  const bankLines = (f.bank ?? []).map((b) => ({ ...b, lines: wrap(b.value, s.smallSize, regular, leftW - bankLabelW) }));
+  const bankH = bankLines.length ? lh(s.smallSize) + 2 + bankLines.reduce((h, b) => h + b.lines.length * lh(s.smallSize) + 1, 0) + 6 : 0;
+  const foot = footerImg ? fitInto(footerImg, Math.min(leftW, 220), 70) : null;
+  const footH = foot ? foot.h + 6 : 0;
+  const receivedH = f.receivedBy ? 30 + lh(s.smallSize) : 0;
+  const leftH = bankH + footH + receivedH;
+  const sigImg = signatureImg ? fitInto(signatureImg, s.signatureLineWidth, 44) : null;
+  const signSpace = sigImg ? sigImg.h + 6 : 26;
+  const rightH = f.signatory ? lh(s.fontSize) + signSpace + 3 + lh(s.smallSize) + 2 : 0;
+  const signH = Math.max(leftH, rightH);
+  if (signH > 0) {
+    if (signH > room()) newPage();
+    const top = y;
+    let l = top;
+    if (bankLines.length) {
+      text(model.labels.bank, M, l, leftW, s.smallSize, bold, headingColor);
+      l += lh(s.smallSize) + 2;
+      for (const b of bankLines) {
+        text(b.label, M, l, bankLabelW, s.smallSize, regular, C.muted);
+        b.lines.forEach((line, i) => text(line, M + bankLabelW, l + i * lh(s.smallSize), leftW - bankLabelW, s.smallSize, i === 0 ? bold : regular, C.text));
+        l += b.lines.length * lh(s.smallSize) + 1;
+      }
+      l += 6;
+    }
+    if (footerImg && foot) {
+      page.drawImage(footerImg, { x: M, y: H - l - foot.h, width: foot.w, height: foot.h });
+      l += foot.h + 6;
+    }
+    if (f.receivedBy) {
+      hline(M, M + s.signatureLineWidth, l + 26, C.line);
+      text(model.labels.receivedBy, M, l + 29, s.signatureLineWidth, s.smallSize, regular, C.muted);
+    }
+    if (f.signatory) {
+      const sigW = 200;
+      text(f.signatory, M + contentW - sigW, top, sigW, s.fontSize, bold, C.text, 'right');
+      const lineY = top + lh(s.fontSize) + signSpace;
+      if (signatureImg && sigImg) page.drawImage(signatureImg, { x: M + contentW - sigImg.w, y: H - lineY + 3, width: sigImg.w, height: sigImg.h });
+      hline(M + contentW - s.signatureLineWidth, M + contentW, lineY, C.line);
+      text(model.labels.signatoryCaption, M + contentW - sigW, lineY + 3, sigW, s.smallSize, regular, C.muted, 'right');
+    }
+    y = top + signH;
+  }
+  if (f.text) {
+    y += s.sectionGap * 0.6;
+    block(null, f.text, s.smallSize, C.muted, 'center');
   }
 
   /* ---- page footers, now that the page count is known ---- */
@@ -386,7 +525,7 @@ async function render(model: InvoiceRenderModel, logo: InvoiceLogo | null, opts:
     const top = H - M - s.smallSize * 1.2;
     hline(M, M + contentW, top - 4, C.line);
     text(`${model.title} ${model.documentLabel}`, M, top, contentW / 2, s.smallSize, regular, C.muted);
-    text(`Page ${i + 1} of ${pages.length}`, M + contentW / 2, top, contentW / 2, s.smallSize, regular, C.muted, 'right');
+    if (model.showPageNumbers) text(`Page ${i + 1} of ${pages.length}`, M + contentW / 2, top, contentW / 2, s.smallSize, regular, C.muted, 'right');
   });
 
   tx.finish();

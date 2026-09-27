@@ -30,7 +30,7 @@ bill, a line, a book counter or the appointment counter.
 | `template_name` | unique per tenant, case-insensitive (`invoice_templates_tenant_name_lower_idx`) |
 | `description` | optional internal note |
 | `supported_mode` | `BOTH` \| `WITH_GST` \| `WITHOUT_GST` (check constraint) |
-| `layout_preset` | `CLASSIC` \| `COMPACT` \| `DETAILED` (check constraint) |
+| `layout_preset` | `CLASSIC` \| `COMPACT` \| `DETAILED` \| `STUDIO` (check constraint; `STUDIO` added by migration `0023`) |
 | `is_default` | at most one per tenant — partial unique index `invoice_templates_one_default_idx` |
 | `is_active` | a default must be active (`invoice_templates_default_is_active_check`) |
 | `config` | jsonb, the controlled presentation config below |
@@ -56,7 +56,7 @@ drawn as text — there is no HTML, CSS, script, URL or expression anywhere.
 | `columns` | ordered list from `serial, item, product, hsn, quantity, rate, amount, taxable, gstRate, gstAmount, total, remark`. Membership = visible, position = order. Must include `total` and one of `item`/`product`; no duplicates |
 | `totals` | show Sub Total, Discount, Taxable Amount, GST, rate-wise GST summary |
 | `footer` | terms (≤ 1000 chars), thank-you note, authorised signatory |
-| `page` | A4, portrait (fixed for now), margins `NORMAL`/`NARROW`, spacing `NORMAL`/`COMPACT` |
+| `page` | A4 or A5, portrait, margins `NORMAL`/`NARROW`, spacing `NORMAL`/`COMPACT` |
 
 **Always printed, whatever the template says** (they identify the invoice): the title, Bill No.,
 Book, Bill Date, the customer name and the Grand Total.
@@ -237,3 +237,73 @@ customer's link (`GET /i/<token>`) serves this same PDF through `getBillInvoiceP
 (`services/invoice.ts`) for the template the link was made with — byte-identical to the
 authenticated download; it adds no PDF code of its own. `getBillInvoicePdf` stays the reusable
 entry point for a future official WhatsApp Business API transport.
+
+## Print & Invoice settings
+
+**Settings → Print & Invoice** (`/modules/settings/print-invoice`, `pages/settings/print/`) holds what
+every invoice prints besides the bill, beside a live preview drawn by the SAME builder and renderer
+over the sample bill (never saved). Permission: `settings_invoice_templates` (read to view, update
+to change) — the same people who manage templates; no new permission. Anyone signed in may READ the
+settings (they come with `GET /api/settings`), because every invoice viewer renders with them.
+
+| Area | Where it lives | Notes |
+| --- | --- | --- |
+| Company name, address, mobile, GSTIN, logo | the default company (`Settings → Companies`) | shown read-only here, with the existing logo field; one truth, never copied |
+| Show logo / signature / footer image / bank details / terms / page numbers | `app_settings.settings.print` | master switches; a template's own switches still apply |
+| Bank name, account name, account number, IFSC (upper-cased), branch | `print.bank` | display text for customers to pay into — NOT the Account Master (money truth) |
+| Invoice note, terms & conditions, footer text | `print` | plain text, wrapped in the PDF, length-capped |
+| Accent | `print.accent` | a preset (`INVOICE_ACCENT_COLORS`), dark and print-safe; tints rules and headings only |
+| Copy label (Original / Duplicate / Office Copy / none) | `print.copyLabel` | the default; the invoice preview can print another (`?copy=`); a label, never a second bill |
+| Default delivery days | `print.defaultDeliveryDays` | a NEW bill suggests Planned Delivery = Bill Date + N while the field is empty or still holds that suggestion; saved bills never change |
+| Signature image, footer image | `company_print_assets` (migration `0023`) | like the logo: bytea in the database (a deploy replaces the site folder), per default company, PNG/JPEG ≤ 1 MB by the file's own bytes (WebP converted to PNG by the form, refused by the API), aspect ratio kept, never stretched |
+
+- **Stored** under the `print` key of the tenant's app settings — no table. `PUT /api/settings/print`
+  validates the whole object strictly (`printSettingsSchema`); General settings can never change it.
+  Reads are normalised **field by field** (`toPrintSettings`): a value that no longer validates takes
+  its default and every other value is kept. Settings writes merge top-level keys in the database
+  (`settings || patch`), so two writers of different keys cannot undo each other.
+- **Terms**: a template that shows terms prints its own text; with none of its own it prints the
+  settings' terms (when shown). A template that hides terms prints none.
+- **Paper size, columns, totals** stay per template (Designer → Page: **A4 or A5**).
+- **Historical behaviour — current branding, like the logo.** No bill stores its branding: an old
+  bill re-printed today shows today's logo, signature, bank details, terms and accent, and its
+  current payment position. Figures never change (they are the bill's own). A public invoice link
+  (`/i/<token>`) is therefore NOT revoked by a Print settings change or a new receipt — the same rule
+  the logo has always followed; a template edit or a bill edit still revokes it.
+
+### Payments on an invoice
+
+A template with **Advance / Received and Balance Due** (`totals.showPayments`, on for Legacy Studio)
+prints the bill's DERIVED payment position — `paidPaiseByBill` (`services/billPayments.ts`, the one
+Paid definition: allocations on ACTIVE receipts + ACTIVE advance applications), worked in paise.
+A cancelled receipt and a customer's unapplied advance are not in it. Read only when printed.
+**Amount in words** (`totals.showAmountInWords`) is `amountInWords(grandTotal)` — Indian crore/lakh
+wording, from the same paise as the printed figure.
+
+### Legacy Studio
+
+The studio's old printed bill, re-drawn on the **Studio** preset (`layoutPreset = 'STUDIO'`):
+letterhead with the logo beside the company block and the copy label + title opposite (no logo → no
+empty box), customer and bill details side by side, a thin-ruled item table (Item, Product, Qty,
+Rate, Amount, **Discount** = the line's stored allocation, GST % / GST on GST bills, Total), totals
+with amount in words, Advance / Received and Balance Due, then note, terms, and a sign-off band —
+bank details, the footer image and a blank **Received By** line at the left; "For <company>", the
+signature image and "Authorised Signatory" at the right. Nothing is invented: the old bill's
+"Image No." has no authoritative field and is not printed; "Received By" is a blank line for a
+handwritten signature, never a user's name.
+
+- New tenants get it with the other starters. Existing tenants get it ONCE (marker
+  `invoiceTemplateSeeds` in app settings): deleting it never brings it back, a tenant's own template
+  of that name is never touched, and it is **never made the default**.
+- `pickInvoiceTemplate` never picks a Studio-preset template by itself (step 2): it prints only as the
+  tenant default or when chosen, so adding it cannot change what an existing tenant's bills print.
+
+### Legacy Print Settings — what was not migrated
+
+| Legacy setting | Decision |
+| --- | --- |
+| Company, Address, Mobile, GSTIN, Display Logo, logo / signature / terms images, Bank & A/c, IFSC & Branch, Note, Footer, Delivery Day, Bill Line Color, Bill Copy, Bill Print Size, mobile number on print | **Migrated** (above; line colour → Accent; print size → template A4/A5; mobile on print → the template's Customer switches) |
+| Default printer, direct print / direct view, Save-and-Print / Save-and-View, message box before print | **Obsolete desktop behaviour** — the browser's Print and the PDF are the print path |
+| SMS 1–4, SMS text, daily SMS timing, SMS to owner/staff, OTP via SMS / WhatsApp | **Obsolete / outside the architecture** — there is no SMS gateway; WhatsApp is click-to-chat with a public link (docs/WHATSAPP_SHARING.md) |
+| Permission-password workflow | **Not applicable** — Roles & Permissions (RBAC) |
+| Email checkbox | **Not applicable** — no email integration exists |

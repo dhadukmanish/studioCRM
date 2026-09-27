@@ -1,6 +1,7 @@
 import { and, asc, desc, eq } from 'drizzle-orm';
 import { db, schema } from '../db/client';
-import { DEFAULT_TIME_ZONE, LOGO_MAX_BYTES, todayInTimeZone, type CompanyProfile, type LogoContentType } from '@erp/shared';
+import { DEFAULT_TIME_ZONE, LOGO_MAX_BYTES, PRINT_ASSET_LABELS, todayInTimeZone, type CompanyProfile, type LogoContentType, type PrintAssetKind } from '@erp/shared';
+import { alias } from 'drizzle-orm/pg-core';
 import { notFound, validation } from '../lib/errors';
 
 export { LOGO_MAX_BYTES };
@@ -14,6 +15,9 @@ export { LOGO_MAX_BYTES };
 
 const c = schema.companies;
 const l = schema.companyLogos;
+const pa = schema.companyPrintAssets;
+const sig = alias(pa, 'sig');
+const foot = alias(pa, 'foot');
 
 export async function getCompanyProfile(tenantId: string): Promise<CompanyProfile | null> {
   const [row] = await db
@@ -21,15 +25,19 @@ export async function getCompanyProfile(tenantId: string): Promise<CompanyProfil
       id: c.id, name: c.name, legalName: c.legalName, taxId: c.taxId, email: c.email, phone: c.phone, website: c.website,
       addressLine1: c.addressLine1, addressLine2: c.addressLine2, city: c.city, state: c.state, pincode: c.pincode,
       countryCode: c.countryCode, currency: c.currency, logoUpdatedAt: l.updatedAt, logoContentType: l.contentType,
+      sigUpdatedAt: sig.updatedAt, sigContentType: sig.contentType, footUpdatedAt: foot.updatedAt, footContentType: foot.contentType,
     })
     .from(c)
     .leftJoin(l, and(eq(l.companyId, c.id), eq(l.tenantId, c.tenantId)))
+    .leftJoin(sig, and(eq(sig.companyId, c.id), eq(sig.tenantId, c.tenantId), eq(sig.kind, 'SIGNATURE')))
+    .leftJoin(foot, and(eq(foot.companyId, c.id), eq(foot.tenantId, c.tenantId), eq(foot.kind, 'FOOTER')))
     .where(eq(c.tenantId, tenantId))
     .orderBy(desc(c.isDefault), asc(c.createdAt))
     .limit(1);
   if (!row) return null;
-  const { logoUpdatedAt, logoContentType, ...company } = row;
-  return { ...company, logo: logoUpdatedAt && logoContentType ? { version: logoVersion(logoUpdatedAt), contentType: logoContentType } : null };
+  const { logoUpdatedAt, logoContentType, sigUpdatedAt, sigContentType, footUpdatedAt, footContentType, ...company } = row;
+  const ref = (at: Date | null, type: string | null) => (at && type ? { version: logoVersion(at), contentType: type } : null);
+  return { ...company, logo: ref(logoUpdatedAt, logoContentType), signature: ref(sigUpdatedAt, sigContentType), footerImage: ref(footUpdatedAt, footContentType) };
 }
 
 /** The cache key a logo URL carries: it changes whenever the image is replaced. */
@@ -78,6 +86,48 @@ export async function deleteCompanyLogo(tenantId: string, companyId: string) {
   const company = await requireCompany(tenantId, companyId);
   await db.delete(l).where(and(eq(l.companyId, companyId), eq(l.tenantId, tenantId)));
   return company;
+}
+
+/*
+ * Print images (Print & Invoice settings): the authorised signature and the footer image of the
+ * tenant's DEFAULT company — the one invoices print. Same rules as the logo: at most 1 MB, PNG /
+ * JPEG / WebP by the file's own bytes (the form converts WebP to PNG, which the PDF can embed),
+ * stored in the database so a deploy cannot lose them, always read inside the caller's tenant.
+ */
+async function defaultCompany(tenantId: string) {
+  const [row] = await db.select({ id: c.id, name: c.name }).from(c).where(eq(c.tenantId, tenantId)).orderBy(desc(c.isDefault), asc(c.createdAt)).limit(1);
+  if (!row) throw notFound('Company');
+  return row;
+}
+
+export async function getPrintAsset(tenantId: string, kind: PrintAssetKind, companyId?: string) {
+  const id = companyId ?? (await defaultCompany(tenantId)).id;
+  const [row] = await db.select({ contentType: pa.contentType, data: pa.data, updatedAt: pa.updatedAt }).from(pa).where(and(eq(pa.companyId, id), eq(pa.tenantId, tenantId), eq(pa.kind, kind)));
+  if (!row) throw notFound(PRINT_ASSET_LABELS[kind]);
+  return row;
+}
+
+export async function savePrintAsset(tenantId: string, kind: PrintAssetKind, data: Buffer) {
+  const company = await defaultCompany(tenantId);
+  const label = PRINT_ASSET_LABELS[kind];
+  if (!data.length) throw validation(`The ${label.toLowerCase()} file is empty`);
+  if (data.length > LOGO_MAX_BYTES) throw validation(`The ${label.toLowerCase()} must be 1 MB or smaller`);
+  const contentType = sniffLogoType(data);
+  // PNG or JPEG only: the PDF cannot embed WebP, and an image the preview shows but the PDF drops
+  // would make them disagree. The settings form converts a chosen WebP to PNG before uploading.
+  if (!contentType || contentType === 'image/webp') throw validation(`The ${label.toLowerCase()} must be a PNG or JPEG image`);
+  const now = new Date();
+  await db
+    .insert(pa)
+    .values({ companyId: company.id, tenantId, kind, contentType, byteSize: data.length, data, updatedAt: now })
+    .onConflictDoUpdate({ target: [pa.companyId, pa.kind], set: { contentType, byteSize: data.length, data, updatedAt: now } });
+  return { company, asset: { version: logoVersion(now), contentType } };
+}
+
+export async function deletePrintAsset(tenantId: string, kind: PrintAssetKind) {
+  const company = await defaultCompany(tenantId);
+  const gone = await db.delete(pa).where(and(eq(pa.companyId, company.id), eq(pa.tenantId, tenantId), eq(pa.kind, kind))).returning({ kind: pa.kind });
+  return { company, removed: gone.length > 0 };
 }
 
 /** Today's business date for the tenant: the default company's time zone decides, never the server's or a browser's. */

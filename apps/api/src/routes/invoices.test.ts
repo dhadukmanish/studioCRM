@@ -54,6 +54,8 @@ const company: CompanyProfile = {
   countryCode: 'IN',
   currency: 'INR',
   logo: { version: '1790310793107', contentType: 'image/png' },
+  signature: null,
+  footerImage: null,
 };
 
 /**
@@ -261,7 +263,7 @@ describe('buildInvoiceModel — a WITH_GST bill', () => {
   });
 
   it('identifies the invoice whatever the template hides', () => {
-    const bare = model({ template: withConfig((c) => { c.customer = { showMobile: false, showBabyName: false, showBirthDate: false, showAppointmentReference: false, showDeliveryDate: false, showRemark: false }; c.totals = { showSubTotal: false, showDiscount: false, showTaxableTotal: false, showGstTotal: false, showGstSummary: false }; }) });
+    const bare = model({ template: withConfig((c) => { c.customer = { showMobile: false, showBabyName: false, showBirthDate: false, showAppointmentReference: false, showDeliveryDate: false, showRemark: false }; c.totals = { showSubTotal: false, showDiscount: false, showTaxableTotal: false, showGstTotal: false, showGstSummary: false, showAmountInWords: false, showPayments: false }; }) });
     expect(bare.meta.map((f) => f.label)).toEqual(['Bill No.', 'Book', 'Bill Date']);
     expect(bare.customer).toEqual([{ label: 'Customer', value: 'Maheshbhai Gangani', strong: true }]);
     expect(bare.totals).toEqual([{ label: 'Grand Total', value: '₹12,712.50', strong: true }]);
@@ -786,12 +788,12 @@ describe.skipIf(!TEST_DB)('Invoice templates and invoices API (integration, need
   });
 
   describe('templates', () => {
-    it('a tenant starts with the three starters and exactly one (BOTH) default — seeded once', async () => {
+    it('a tenant starts with the four starters (incl. Legacy Studio) and exactly one (BOTH) default — seeded once', async () => {
       const list = await templates(A.admin);
-      expect(list.map((t) => t.templateName).sort()).toEqual(['Classic', 'Compact', 'Detailed GST']);
+      expect(list.map((t) => t.templateName).sort()).toEqual(['Classic', 'Compact', 'Detailed GST', 'Legacy Studio']);
       expect(list.filter((t) => t.isDefault)).toHaveLength(1);
       expect(list.find((t) => t.isDefault)?.supportedMode).toBe('BOTH');
-      expect(await templates(A.admin)).toHaveLength(3);
+      expect(await templates(A.admin)).toHaveLength(4);
     });
 
     it('creates, edits and duplicates; a copy is never the default', async () => {

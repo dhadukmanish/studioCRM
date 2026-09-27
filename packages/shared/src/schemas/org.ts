@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DATE_FORMATS, TIME_FORMATS } from '../dates.js';
+import { printSettingsSchema } from './printSettings.js';
 import { WHATSAPP_MESSAGE_MAX, WHATSAPP_MESSAGE_VARIABLES, unknownMessageVariables } from '../whatsapp.js';
 
 export const companySchema = z.object({
@@ -59,6 +60,9 @@ export interface CompanyProfile {
   currency: string;
   /** null when the company has no logo; `version` changes whenever the image does. */
   logo: { version: string; contentType: string } | null;
+  /** The authorised-signature and footer images printed on invoices (Print & Invoice settings), same shape as the logo. */
+  signature: { version: string; contentType: string } | null;
+  footerImage: { version: string; contentType: string } | null;
 }
 
 /**
@@ -87,5 +91,7 @@ export const appSettingsSchema = z
      * `resolveDefaultBook`, never an error.
      */
     defaultBillingBookId: z.preprocess((v) => (v === '' ? null : v), z.string().uuid('Select a valid book').nullable()).optional(),
+    /** Print & Invoice settings — saved through their own endpoint; validated here too so General can never store a bad copy. */
+    print: printSettingsSchema.optional(),
   })
   .passthrough();

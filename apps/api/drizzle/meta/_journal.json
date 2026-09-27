@@ -162,6 +162,13 @@
       "when": 1790421897017,
       "tag": "0022_empty_gamma_corps",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790485754464,
+      "tag": "0023_milky_blacklash",
+      "breakpoints": true
     }
   ]
 }

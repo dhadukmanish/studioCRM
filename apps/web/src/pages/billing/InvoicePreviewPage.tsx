@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Download, MessageCircle, Printer } from 'lucide-react';
-import { INVOICE_TAX_MODE_LABELS, isTemplateCompatible } from '@erp/shared';
+import { INVOICE_COPY_LABELS, INVOICE_COPY_LABEL_TEXT, INVOICE_TAX_MODE_LABELS, isTemplateCompatible, type InvoiceCopyLabel } from '@erp/shared';
 import { Crumb } from '@/components/layout/AppShell';
 import { Badge, EmptyState, Select, Spinner } from '@/components/ui';
-import { InvoicePrintRoot, InvoiceSheet, useInvoiceLogo } from '@/components/invoice/InvoiceDocument';
+import { InvoicePrintRoot, InvoiceSheet, useInvoiceImages } from '@/components/invoice/InvoiceDocument';
 import { ShareInvoiceDialog } from '@/components/invoice/ShareInvoiceDialog';
 import { downloadInvoicePdf, useBillInvoice, useInvoiceTemplateLookup } from '@/lib/invoice';
 import { ApiError } from '@/lib/api';
@@ -19,10 +19,12 @@ export default function InvoicePreviewPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const [templateId, setTemplateId] = useState<string | undefined>(undefined);
-  const invoice = useBillInvoice(id, templateId);
+  // This print's copy label; unset = the Print & Invoice default. Print metadata only — never a new bill.
+  const [copy, setCopy] = useState<InvoiceCopyLabel | undefined>(undefined);
+  const invoice = useBillInvoice(id, templateId, copy);
   const templates = useInvoiceTemplateLookup();
   const model = invoice.data;
-  const logoSrc = useInvoiceLogo(model);
+  const images = useInvoiceImages(model);
   const [downloading, setDownloading] = useState(false);
   const [sharing, setSharing] = useState(false);
   // A chosen template can stop fitting (deactivated or edited since the picker loaded): fall back
@@ -44,7 +46,7 @@ export default function InvoicePreviewPage() {
   const download = async () => {
     setDownloading(true);
     try {
-      await downloadInvoicePdf(id!, model.fileName, templateId);
+      await downloadInvoicePdf(id!, model.fileName, templateId, copy);
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : 'The PDF could not be generated');
     } finally {
@@ -73,6 +75,17 @@ export default function InvoicePreviewPage() {
               options={options}
             />
           </label>
+          <label className="flex items-center gap-2 text-[13px] text-gray-600">
+            Copy
+            <Select
+              size="sm"
+              className="w-[130px]"
+              value={copy ?? ''}
+              onChange={(v) => setCopy((v || undefined) as InvoiceCopyLabel | undefined)}
+              placeholder={model.copyLabel ?? 'None'}
+              options={INVOICE_COPY_LABELS.map((c) => ({ value: c, label: INVOICE_COPY_LABEL_TEXT[c] }))}
+            />
+          </label>
           {invoice.isFetching && <Spinner />}
           <button type="button" className="btn-outline" disabled={invoice.isFetching} title={invoice.isFetching ? 'Loading the latest version of the bill…' : undefined} onClick={() => window.print()}>
             <Printer className="h-4 w-4" strokeWidth={1.5} /> Print
@@ -95,10 +108,10 @@ export default function InvoicePreviewPage() {
         </div>
       )}
       <div className="rounded-lg border border-line bg-gray-100 px-3 py-5 sm:px-6">
-        <InvoiceSheet model={model} logoSrc={logoSrc} maxScale={1.15} className="mx-auto max-w-[920px]" />
+        <InvoiceSheet model={model} images={images} maxScale={1.15} className="mx-auto max-w-[920px]" />
       </div>
-      <p className="mt-2 text-center text-[12px] text-gray-500">The downloaded PDF is split into A4 pages, with the table header repeated on each page.</p>
-      <InvoicePrintRoot model={model} logoSrc={logoSrc} />
+      <p className="mt-2 text-center text-[12px] text-gray-500">The downloaded PDF is split into {model.style.paperSize ?? 'A4'} pages, with the table header repeated on each page.</p>
+      <InvoicePrintRoot model={model} images={images} />
       {/* Shares the template shown here — never changes the tenant default or the bill. */}
       <ShareInvoiceDialog billId={id ?? null} open={sharing} onClose={() => setSharing(false)} templateId={templateId ?? model.template.id ?? undefined} />
     </>

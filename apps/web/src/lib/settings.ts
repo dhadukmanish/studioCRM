@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { formatClockTime, formatDateOnly, formatTimestamp, toDateFormat, toTimeFormat, type CompanyProfile, type DateFormat, type TimeFormat } from '@erp/shared';
+import { formatClockTime, formatDateOnly, formatTimestamp, toDateFormat, toPrintSettings, toTimeFormat, type CompanyProfile, type DateFormat, type PrintAssetKind, type PrintSettings, type TimeFormat } from '@erp/shared';
 import { api } from '@/lib/api';
 import { useSettings } from '@/lib/queries';
 
@@ -69,4 +69,32 @@ export function useCompanyLogo(companyId?: string | null, version?: string | nul
     staleTime: Infinity,
     retry: false,
   });
+}
+
+/** A print image (signature / footer) of the default company, one URL per version — like the logo. */
+export const printAssetUrl = (kind: PrintAssetKind, version: string) => `/api/settings/print-assets/${kind.toLowerCase()}?v=${encodeURIComponent(version)}`;
+
+/** A print image as a data URL for an <img> (the endpoint needs the bearer token). Keyed by version. */
+export function usePrintAsset(kind: PrintAssetKind, version?: string | null) {
+  return useQuery({
+    queryKey: ['print-asset', kind, version],
+    queryFn: async () => {
+      const blob = await api.blob(printAssetUrl(kind, version!));
+      return await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result));
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(blob);
+      });
+    },
+    enabled: !!version,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/** Print & Invoice settings, always complete (the server fills the defaults). */
+export function usePrintSettings(): PrintSettings {
+  const q = useSettings();
+  return useMemo(() => toPrintSettings(q.data?.print), [q.data?.print]);
 }

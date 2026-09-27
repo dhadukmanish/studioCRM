@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { InvoiceLayoutPreset, InvoiceRenderModel, InvoiceShareContext, InvoiceTemplateConfig, InvoiceTemplateMode, PreparedPublicInvoiceLink, PublicInvoiceLinkState } from '@erp/shared';
+import type { InvoiceCopyLabel, InvoiceLayoutPreset, InvoiceRenderModel, InvoiceShareContext, InvoiceTemplateConfig, InvoiceTemplateMode, PreparedPublicInvoiceLink, PublicInvoiceLinkState } from '@erp/shared';
 import { api, qs } from '@/lib/api';
 
 /** A stored template as `/api/settings/invoice-templates` returns it. */
@@ -38,10 +38,10 @@ export const useInvoiceTemplateLookup = () =>
  * `templateId` means "the tenant's default for this bill"; choosing one previews it without
  * changing the default.
  */
-export const useBillInvoice = (billId?: string, templateId?: string) =>
+export const useBillInvoice = (billId?: string, templateId?: string, copy?: InvoiceCopyLabel) =>
   useQuery({
-    queryKey: ['bill-invoice', billId, templateId ?? ''],
-    queryFn: () => api.get<BillInvoice>(`/api/bills/${billId}/invoice${qs({ templateId })}`),
+    queryKey: ['bill-invoice', billId, templateId ?? '', copy ?? ''],
+    queryFn: () => api.get<BillInvoice>(`/api/bills/${billId}/invoice${qs({ templateId, copy })}`),
     enabled: !!billId,
     // Always refetched on open: the preview must show the bill as saved NOW (and today's company
     // details), never a cached copy from before an edit — Print draws exactly this.
@@ -50,11 +50,11 @@ export const useBillInvoice = (billId?: string, templateId?: string) =>
   });
 
 /** The server-generated PDF — the authoritative document, not a screenshot of the preview. */
-export const fetchInvoicePdf = (billId: string, templateId?: string) => api.blob(`/api/bills/${billId}/invoice/pdf${qs({ templateId, download: 1 })}`);
+export const fetchInvoicePdf = (billId: string, templateId?: string, copy?: InvoiceCopyLabel) => api.blob(`/api/bills/${billId}/invoice/pdf${qs({ templateId, copy, download: 1 })}`);
 
 /** Downloads the server-generated PDF. */
-export async function downloadInvoicePdf(billId: string, fileName: string, templateId?: string) {
-  saveFile(await fetchInvoicePdf(billId, templateId), fileName);
+export async function downloadInvoicePdf(billId: string, fileName: string, templateId?: string, copy?: InvoiceCopyLabel) {
+  saveFile(await fetchInvoicePdf(billId, templateId, copy), fileName);
 }
 
 /**

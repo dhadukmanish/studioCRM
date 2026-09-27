@@ -5,6 +5,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore, type AuthUser } from '@/store/auth';
+import { DEFAULT_PRINT_SETTINGS, formatDateOnly } from '@erp/shared';
+import { addDays } from '@/lib/calendar';
+import { todayISO } from '@/lib/format';
 import BillFormPage from './BillFormPage';
 
 /**
@@ -32,7 +35,10 @@ vi.mock('@/lib/api', async (orig) => ({
     blob: vi.fn(),
   },
 }));
+// Print & Invoice settings — `defaultDeliveryDays` is switched per test.
+const print = { ...DEFAULT_PRINT_SETTINGS };
 vi.mock('@/lib/settings', () => ({
+  usePrintSettings: () => print,
   useDateFormatters: () => ({ date: (v: string) => v, time: (v: string) => v, stamp: (v: string) => v, stampTime: (v: string) => v }),
   useDisplayFormats: () => ({ dateFormat: 'dd-MM-yyyy', timeFormat: 'hh:mm tt' }),
   useCompanyProfile: () => ({ data: null }),
@@ -101,8 +107,11 @@ async function pasteInto(el: HTMLInputElement, pasted: string) {
 }
 const click = (el: Element | null) => act(async () => { (el as HTMLElement).click(); });
 
+const dateField = (label: string) => [...document.body.querySelectorAll('label.label')].find((l) => l.textContent?.trim() === label)?.parentElement?.querySelector('input[type=text]') as HTMLInputElement;
+
 describe('New Bill renders for real', () => {
   beforeEach(() => {
+    print.defaultDeliveryDays = null;
     uncaught.length = 0;
     window.addEventListener('error', onError);
     useAuthStore.setState({ user });
@@ -122,6 +131,28 @@ describe('New Bill renders for real', () => {
     expect(document.body.querySelector('[role="radiogroup"][aria-label="Tax mode"]')).toBeNull();
     expect(text()).toContain('Without GST');
     expect(text()).toContain('Auto-generated');
+  });
+
+  it('Default delivery days: a new bill suggests Bill Date + N, follows the bill date, and never overrides a typed date', async () => {
+    print.defaultDeliveryDays = 3;
+    await renderNewBill();
+    expect(uncaught).toEqual([]);
+    const today = todayISO();
+    expect(dateField('Planned Delivery').value).toBe(formatDateOnly(addDays(today, 3), 'dd-MM-yyyy'));
+    // Changing the bill date moves the suggestion with it…
+    await typeInto(dateField('Bill Date'), '28-02-2028');
+    await flush();
+    expect(dateField('Planned Delivery').value).toBe('02-03-2028');
+    // …until the operator types their own date, which is never overwritten.
+    await typeInto(dateField('Planned Delivery'), '15-03-2028');
+    await typeInto(dateField('Bill Date'), '01-03-2028');
+    await flush();
+    expect(dateField('Planned Delivery').value).toBe('15-03-2028');
+  });
+
+  it('no default delivery days: Planned Delivery starts empty', async () => {
+    await renderNewBill();
+    expect(dateField('Planned Delivery').value).toBe('');
   });
 
   it('shows Planned Delivery, Baby Name and Next Visit Date directly — no More details, no helper clutter', async () => {

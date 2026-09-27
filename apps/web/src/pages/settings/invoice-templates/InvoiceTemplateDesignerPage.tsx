@@ -19,10 +19,9 @@ import {
 } from '@erp/shared';
 import { Crumb } from '@/components/layout/AppShell';
 import { Checkbox, EmptyState, Field, Select, Spinner, Switch, TextArea, TextInput } from '@/components/ui';
-import { InvoiceSheet } from '@/components/invoice/InvoiceDocument';
+import { InvoiceSheet, useCompanyImages } from '@/components/invoice/InvoiceDocument';
 import { TEMPLATES_KEY, useInvoiceTemplate, type InvoiceTemplateRecord } from '@/lib/invoice';
 import { useSave } from '@/lib/queries';
-import { useCompanyLogo, useCompanyProfile } from '@/lib/settings';
 import { useAuthStore } from '@/store/auth';
 import { toast } from '@/lib/toast';
 import { sampleModeFor, useSampleModel } from './useSampleModel';
@@ -68,8 +67,7 @@ function Designer({ id, draft, setDraft, canSave, isDefault }: { id?: string; dr
   const nav = useNavigate();
   const [section, setSection] = useState<Section>('header');
   const [sampleMode, setSampleMode] = useState<InvoiceTaxMode>(sampleModeFor(draft.supportedMode));
-  const company = useCompanyProfile().data;
-  const logoSrc = useCompanyLogo(company?.id, company?.logo?.version).data ?? null;
+  const images = useCompanyImages();
   const cfg = draft.config;
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
   const setCfg = <K extends keyof InvoiceTemplateConfig>(key: K, patch: Partial<InvoiceTemplateConfig[K]>) => set({ config: { ...cfg, [key]: { ...(cfg[key] as object), ...patch } } });
@@ -176,6 +174,8 @@ function Designer({ id, draft, setDraft, canSave, isDefault }: { id?: string; dr
                   <Switch checked={cfg.totals.showTaxableTotal} onChange={(v) => setCfg('totals', { showTaxableTotal: v })} label="Taxable Amount (GST bills)" />
                   <Switch checked={cfg.totals.showGstTotal} onChange={(v) => setCfg('totals', { showGstTotal: v })} label="GST (GST bills)" />
                   <Switch checked={cfg.totals.showGstSummary} onChange={(v) => setCfg('totals', { showGstSummary: v })} label="Rate-wise GST summary (GST bills)" />
+                  <Switch checked={!!cfg.totals.showAmountInWords} onChange={(v) => setCfg('totals', { showAmountInWords: v })} label="Amount in words" />
+                  <Switch checked={!!cfg.totals.showPayments} onChange={(v) => setCfg('totals', { showPayments: v })} label="Advance / Received and Balance Due" />
                 </Toggles>
               </>
             )}
@@ -188,12 +188,14 @@ function Designer({ id, draft, setDraft, canSave, isDefault }: { id?: string; dr
                 <Switch checked={cfg.footer.showThankYou} onChange={(v) => setCfg('footer', { showThankYou: v })} label="Thank-you note" />
                 <TextInput size="sm" aria-label="Thank-you note" value={cfg.footer.thankYou} maxLength={INVOICE_TEMPLATE_LIMITS.thankYou} disabled={!cfg.footer.showThankYou} onChange={(e) => setCfg('footer', { thankYou: e.target.value })} />
                 <Switch checked={cfg.footer.showSignatory} onChange={(v) => setCfg('footer', { showSignatory: v })} label="Authorised signatory" />
+                <Switch checked={!!cfg.footer.showReceivedBy} onChange={(v) => setCfg('footer', { showReceivedBy: v })} label="“Received By” line" />
+                <Note>With terms shown but left empty, the Terms &amp; Conditions from Settings → Print &amp; Invoice print instead. Bank details, the note, signature and footer image also come from there.</Note>
               </>
             )}
             {section === 'page' && (
               <>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Paper"><Select size="sm" value="A4" placeholder="" disabled onChange={() => undefined} options={[{ value: 'A4', label: 'A4' }]} /></Field>
+                  <Field label="Paper"><Select size="sm" value={cfg.page.paperSize} placeholder="" onChange={(v) => setCfg('page', { paperSize: v as never })} options={[{ value: 'A4', label: 'A4' }, { value: 'A5', label: 'A5' }]} /></Field>
                   <Field label="Orientation"><Select size="sm" value="PORTRAIT" placeholder="" disabled onChange={() => undefined} options={[{ value: 'PORTRAIT', label: 'Portrait' }]} /></Field>
                   <Field label="Margins"><Select size="sm" value={cfg.page.margins} placeholder="" onChange={(v) => setCfg('page', { margins: v as never })} options={[{ value: 'NORMAL', label: 'Normal' }, { value: 'NARROW', label: 'Narrow' }]} /></Field>
                   <Field label="Spacing"><Select size="sm" value={cfg.page.density} placeholder="" onChange={(v) => setCfg('page', { density: v as never })} options={[{ value: 'NORMAL', label: 'Normal' }, { value: 'COMPACT', label: 'Compact' }]} /></Field>
@@ -218,7 +220,7 @@ function Designer({ id, draft, setDraft, canSave, isDefault }: { id?: string; dr
               })}
             </div>
           </div>
-          <InvoiceSheet model={model} logoSrc={logoSrc} maxScale={1} className="mx-auto max-w-[860px]" />
+          <InvoiceSheet model={model} images={images} maxScale={1} className="mx-auto max-w-[860px]" />
         </div>
       </div>
     </div>

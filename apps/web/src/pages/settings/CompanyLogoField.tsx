@@ -75,7 +75,7 @@ export function CompanyLogoField({ companyId, logoUpdatedAt }: { companyId?: str
 }
 
 /** WebP -> PNG through a canvas, scaled down to at most 800 px on the long side (plenty for a letterhead). */
-async function webpToPng(file: File): Promise<File> {
+export async function webpToPng(file: File): Promise<File> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, 800 / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas');
