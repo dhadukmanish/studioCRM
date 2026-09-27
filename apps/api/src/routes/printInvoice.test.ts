@@ -425,7 +425,7 @@ describe.skipIf(!TEST_DB)('Print & Invoice (integration, needs TEST_DATABASE_URL
   it('Legacy Studio: a new tenant has it; an existing tenant gets it once, never as default, never again after delete', async () => {
     const list = async (t: string) => (await req(t, 'GET', '/api/settings/invoice-templates')).json().data.rows as { id: string; templateName: string; isDefault: boolean }[];
     const a = await list(T.a.admin);
-    expect(a.map((t) => t.templateName).sort()).toEqual(['Classic', 'Compact', 'Detailed GST', 'Legacy Studio']);
+    expect(a.map((t) => t.templateName).sort()).toEqual(['Classic', 'Compact', 'Detailed GST', 'Legacy Studio', 'Professional Studio']);
     expect(a.find((t) => t.isDefault)?.templateName).toBe('Classic');
     // An existing tenant seeded BEFORE Legacy Studio: only the three old starters, no marker.
     const old = await seedTenant('prt-old');
@@ -438,7 +438,7 @@ describe.skipIf(!TEST_DB)('Print & Invoice (integration, needs TEST_DATABASE_URL
     expect(legacyRow).toBeDefined();
     expect(legacyRow!.isDefault).toBe(false);
     expect(got.find((t) => t.isDefault)?.templateName).toBe('Classic');
-    expect(await list(old.admin)).toHaveLength(4);
+    expect(await list(old.admin)).toHaveLength(5);
     expect((await req(old.admin, 'DELETE', `/api/settings/invoice-templates/${legacyRow!.id}`)).statusCode).toBe(200);
     expect((await list(old.admin)).map((t) => t.templateName)).not.toContain('Legacy Studio');
   });

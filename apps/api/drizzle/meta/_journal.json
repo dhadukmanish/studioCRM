@@ -169,6 +169,13 @@
       "when": 1790485754464,
       "tag": "0023_milky_blacklash",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1790494309389,
+      "tag": "0024_unusual_leo",
+      "breakpoints": true
     }
   ]
 }

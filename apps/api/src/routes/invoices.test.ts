@@ -788,12 +788,12 @@ describe.skipIf(!TEST_DB)('Invoice templates and invoices API (integration, need
   });
 
   describe('templates', () => {
-    it('a tenant starts with the four starters (incl. Legacy Studio) and exactly one (BOTH) default — seeded once', async () => {
+    it('a tenant starts with the five starters (incl. Legacy and Professional Studio) and exactly one (BOTH) default — seeded once', async () => {
       const list = await templates(A.admin);
-      expect(list.map((t) => t.templateName).sort()).toEqual(['Classic', 'Compact', 'Detailed GST', 'Legacy Studio']);
+      expect(list.map((t) => t.templateName).sort()).toEqual(['Classic', 'Compact', 'Detailed GST', 'Legacy Studio', 'Professional Studio']);
       expect(list.filter((t) => t.isDefault)).toHaveLength(1);
       expect(list.find((t) => t.isDefault)?.supportedMode).toBe('BOTH');
-      expect(await templates(A.admin)).toHaveLength(4);
+      expect(await templates(A.admin)).toHaveLength(5);
     });
 
     it('creates, edits and duplicates; a copy is never the default', async () => {

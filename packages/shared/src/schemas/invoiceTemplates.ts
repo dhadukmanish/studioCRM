@@ -179,6 +179,7 @@ export function starterInvoiceTemplates(): StarterInvoiceTemplate[] {
     { templateName: 'Compact', description: 'Short, tight layout — fewer columns and details.', supportedMode: 'BOTH', layoutPreset: 'COMPACT', isDefault: false, config: compact },
     { templateName: 'Detailed GST', description: 'Full tax invoice: HSN, amount before discount, GST summary and terms.', supportedMode: 'WITH_GST', layoutPreset: 'DETAILED', isDefault: false, config: detailed },
     legacyStudioTemplate(),
+    professionalStudioTemplate(),
   ];
 }
 
@@ -206,6 +207,32 @@ export function legacyStudioTemplate(): StarterInvoiceTemplate {
     description: 'The studio bill layout: letterhead, customer and bill details, line discounts, amount in words, advance, bank details and signatures.',
     supportedMode: 'BOTH',
     layoutPreset: 'STUDIO',
+    isDefault: false,
+    config: cfg,
+  };
+}
+
+export const PROFESSIONAL_STUDIO_TEMPLATE_NAME = 'Professional Studio';
+
+/**
+ * "Professional Studio" — a modern tax-invoice layout: a small centred title, the logo beside the
+ * company block with its contact details opposite, ONE compact customer + bill section (no Bill To /
+ * Ship To), an accent-headed item table, amount in words and bank details beside strong totals with
+ * the bill's Advance / Received and Balance, then terms, "Received By" and the authorised signature.
+ * The item columns reconcile per line: Qty x Rate - Discount + GST = Total (Discount and the GST
+ * columns drop out on bills that have none). Never the default: a tenant chooses it.
+ */
+export function professionalStudioTemplate(): StarterInvoiceTemplate {
+  const cfg = baseConfig();
+  cfg.customer = { showMobile: true, showBabyName: true, showBirthDate: true, showAppointmentReference: false, showDeliveryDate: true, showRemark: true };
+  cfg.columns = ['serial', 'item', 'product', 'quantity', 'rate', 'discount', 'gstRate', 'gstAmount', 'total'];
+  cfg.totals = { showSubTotal: true, showDiscount: true, showTaxableTotal: false, showGstTotal: true, showGstSummary: false, showAmountInWords: true, showPayments: true };
+  cfg.footer = { showTerms: true, terms: '', showThankYou: false, thankYou: '', showSignatory: true, showReceivedBy: true };
+  return {
+    templateName: PROFESSIONAL_STUDIO_TEMPLATE_NAME,
+    description: 'Modern tax invoice: clean header, one customer and bill section, accent table header, amount in words, bank details, strong totals and signatures.',
+    supportedMode: 'BOTH',
+    layoutPreset: 'PROFESSIONAL',
     isDefault: false,
     config: cfg,
   };

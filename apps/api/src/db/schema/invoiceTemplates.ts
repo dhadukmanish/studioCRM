@@ -39,7 +39,7 @@ export const invoiceTemplates = pgTable(
     uniqueIndex('invoice_templates_one_default_idx').on(t.tenantId).where(sql`${t.isDefault}`),
     index('invoice_templates_tenant_updated_idx').on(t.tenantId, t.updatedAt),
     check('invoice_templates_supported_mode_check', sql`${t.supportedMode} in ('BOTH', 'WITH_GST', 'WITHOUT_GST')`),
-    check('invoice_templates_layout_preset_check', sql`${t.layoutPreset} in ('CLASSIC', 'COMPACT', 'DETAILED', 'STUDIO')`),
+    check('invoice_templates_layout_preset_check', sql`${t.layoutPreset} in ('CLASSIC', 'COMPACT', 'DETAILED', 'STUDIO', 'PROFESSIONAL')`),
     check('invoice_templates_name_not_blank_check', sql`length(btrim(${t.templateName})) > 0`),
     // The default is what a bill prints with when nobody chooses: it must be usable.
     check('invoice_templates_default_is_active_check', sql`not ${t.isDefault} or ${t.isActive}`),

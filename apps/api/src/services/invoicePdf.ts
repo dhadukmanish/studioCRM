@@ -26,7 +26,7 @@ function printedText(model: InvoiceRenderModel): [area: string, text: string][] 
   // The title is drawn upper-cased at the top and as typed in the page footer: check both forms.
   const out: [string, string][] = [['Title', model.title], ['Title', model.title.toUpperCase()], ['Bill number', model.documentLabel]];
   if (model.header.companyName) out.push(['Company name', model.header.companyName]);
-  model.header.lines.forEach((l) => out.push(['Company details', l]));
+  [...model.header.lines, ...model.header.contact].forEach((l) => out.push(['Company details', l]));
   Object.values(model.labels).forEach((l) => out.push(['Invoice headings', l]));
   for (const f of [...model.customer, ...model.meta]) out.push([f.label, f.label], [f.label, f.value]);
   model.columns.forEach((c) => out.push(['Table headings', c.label]));
@@ -153,7 +153,9 @@ async function render(model: InvoiceRenderModel, imgs: InvoiceImages, opts: Rend
   const footerImg = model.footer.footerImage ? await embed(doc, imgs.footer) : null;
   // The accent tints rules and section headings only; neutral is the classic near-black.
   const accent = /^#[0-9a-f]{6}$/i.test(model.accent) ? hex(model.accent) : C.rule;
-  const headingColor = s.preset === 'STUDIO' ? accent : C.muted;
+  const banner = s.headerLayout === 'BANNER';
+  const headingColor = s.preset === 'STUDIO' || banner ? accent : C.muted;
+  const white = rgb(1, 1, 1);
 
   const W = s.pageWidth;
   const H = s.pageHeight;
@@ -196,7 +198,54 @@ async function render(model: InvoiceRenderModel, imgs: InvoiceImages, opts: Rend
   newPage();
 
   const ha = model.header.alignment;
-  if (s.headerLayout === 'SIDE') {
+  if (banner) {
+    /* ---- Professional: small centred title (copy label at its right), then logo | company | contact ---- */
+    const labelW = model.copyLabel ? width(model.copyLabel.toUpperCase(), s.smallSize, bold) + 8 : 0;
+    const titleW = contentW - 2 * labelW;
+    if (model.copyLabel) text(model.copyLabel.toUpperCase(), M, y + (s.titleSize - s.smallSize) / 2, contentW, s.smallSize, bold, accent, 'right');
+    for (const l of wrap(model.title.toUpperCase(), s.titleSize, bold, titleW)) {
+      text(l, M + labelW, y, titleW, s.titleSize, bold, C.text, 'center');
+      y += lh(s.titleSize);
+    }
+    y += 8;
+    const top = y;
+    let logoW = 0;
+    let logoH = 0;
+    if (image) {
+      const d = fitInto(image, s.logoMaxWidth, s.logoMaxHeight);
+      logoW = d.w;
+      logoH = d.h;
+      page.drawImage(image, { x: M, y: H - top - d.h, width: d.w, height: d.h });
+    }
+    // Contact column only as wide as its longest line (capped); absent = the company block takes the room.
+    const contactW = model.header.contact.length ? Math.min(contentW * 0.32, Math.max(...model.header.contact.map((l) => width(clean(l), s.smallSize, regular))) + 1) : 0;
+    const blockX = M + (logoW ? logoW + 12 : 0);
+    const blockW = contentW - (blockX - M) - (contactW ? contactW + 12 : 0);
+    let t = top;
+    if (model.header.companyName) {
+      for (const l of wrap(model.header.companyName, s.companySize, bold, blockW)) {
+        text(l, blockX, t, blockW, s.companySize, bold, C.text);
+        t += lh(s.companySize);
+      }
+      t += 1;
+    }
+    for (const line of model.header.lines) {
+      for (const l of wrap(line, s.smallSize, regular, blockW)) {
+        text(l, blockX, t, blockW, s.smallSize, regular, C.muted);
+        t += lh(s.smallSize);
+      }
+    }
+    let r = top;
+    for (const line of model.header.contact) {
+      for (const l of wrap(line, s.smallSize, regular, contactW)) {
+        text(l, M + contentW - contactW, r, contactW, s.smallSize, regular, C.muted, 'right');
+        r += lh(s.smallSize);
+      }
+    }
+    y = Math.max(top + logoH, t, r) + 6;
+    hline(M, M + contentW, y, accent, 0.8);
+    y += s.sectionGap * 0.8;
+  } else if (s.headerLayout === 'SIDE') {
     /* ---- Studio letterhead: logo left, company block beside it, copy label + title at the right ---- */
     const top = y;
     let logoW = 0;
@@ -332,6 +381,13 @@ async function render(model: InvoiceRenderModel, imgs: InvoiceImages, opts: Rend
 
   const drawHead = () => {
     const top = y;
+    if (banner) {
+      // Professional: the one coloured area — an accent band with white headings (dark accents only, so it stays readable in black and white).
+      page.drawRectangle({ x: M, y: H - top - headH, width: contentW, height: headH, color: accent });
+      model.columns.forEach((c, i) => headLines[i].forEach((l, j) => text(l, xs[i] + padX, top + padY + j * lh(headSize), cellW[i] - 2 * padX, headSize, bold, white, c.align)));
+      y += headH;
+      return;
+    }
     if (s.headerFill) page.drawRectangle({ x: M, y: H - top - headH, width: contentW, height: headH, color: C.headFill });
     hline(M, M + contentW, top, s.tableBorders === 'grid' ? C.line : accent, s.tableBorders === 'grid' ? 0.5 : 0.8);
     model.columns.forEach((c, i) => headLines[i].forEach((l, j) => text(l, xs[i] + padX, top + padY + j * lh(headSize), cellW[i] - 2 * padX, headSize, bold, C.text, c.align)));
@@ -392,7 +448,26 @@ async function render(model: InvoiceRenderModel, imgs: InvoiceImages, opts: Rend
   const wordsLines = model.amountInWords ? wrap(model.amountInWords, s.fontSize, bold, sumW) : [];
   const wordsTop = sum ? sumH + 6 : 0;
   const wordsH = wordsLines.length ? lh(s.smallSize) + 2 + wordsLines.length * lh(s.fontSize) : 0;
-  const bandH = Math.max(totalsH, wordsH ? wordsTop + wordsH : sumH);
+  // Bank details: beside the totals under the amount in words (Professional), else in the sign-off band.
+  const f = model.footer;
+  const bankLabelW = s.customerLabelWidth - 8;
+  const bankColW = banner ? sumW : Math.min(contentW * 0.55, contentW - s.signatureLineWidth - 40);
+  const bankLines = (f.bank ?? []).map((b) => ({ ...b, lines: wrap(b.value, s.smallSize, regular, bankColW - bankLabelW) }));
+  const bankH = bankLines.length ? lh(s.smallSize) + 2 + bankLines.reduce((h, b) => h + b.lines.length * lh(s.smallSize) + 1, 0) + 6 : 0;
+  const drawBank = (top: number) => {
+    let l = top;
+    text(model.labels.bank, M, l, bankColW, s.smallSize, bold, headingColor);
+    l += lh(s.smallSize) + 2;
+    for (const b of bankLines) {
+      text(b.label, M, l, bankLabelW, s.smallSize, regular, C.muted);
+      b.lines.forEach((line, i) => text(line, M + bankLabelW, l + i * lh(s.smallSize), bankColW - bankLabelW, s.smallSize, i === 0 ? bold : regular, C.text));
+      l += b.lines.length * lh(s.smallSize) + 1;
+    }
+    return l + 6;
+  };
+  const leftBandEnd = wordsH ? wordsTop + wordsH : sumH;
+  const bankTop = leftBandEnd ? leftBandEnd + 8 : 0;
+  const bandH = Math.max(totalsH + (banner ? 3 : 0), banner && bankH ? bankTop + bankH : leftBandEnd);
   if (bandH > room()) newPage();
   const bandTop = y;
 
@@ -424,6 +499,8 @@ async function render(model: InvoiceRenderModel, imgs: InvoiceImages, opts: Rend
     });
   }
 
+  if (banner && bankH) drawBank(bandTop + bankTop);
+
   let t = bandTop;
   for (const r of model.totals) {
     const size = r.strong ? s.fontSize + 2 : s.fontSize;
@@ -436,6 +513,11 @@ async function render(model: InvoiceRenderModel, imgs: InvoiceImages, opts: Rend
     text(r.label, totalsX, t + 1, totalsW / 2, size, weight, r.strong || r.bold ? C.text : C.muted);
     text(r.value, totalsX + totalsW / 2, t + 1, totalsW / 2, size, weight, C.text, 'right');
     t += h - (r.strong ? 4 : 0);
+    // Professional closes the Grand Total with a second rule: the figure sits in a ruled band.
+    if (r.strong && banner) {
+      hline(totalsX, M + contentW, t, accent, 0.8);
+      t += 3;
+    }
   }
   y = bandTop + bandH + s.sectionGap;
 
@@ -469,33 +551,49 @@ async function render(model: InvoiceRenderModel, imgs: InvoiceImages, opts: Rend
    * RIGHT: "For <company>", the signature image (or a blank space to sign in), the signatory line.
    * An empty side takes no space, so a template with only a signatory looks as it always did.
    */
-  const f = model.footer;
-  const leftW = Math.min(contentW * 0.55, contentW - s.signatureLineWidth - 40);
-  const bankLabelW = s.customerLabelWidth - 8;
-  const bankLines = (f.bank ?? []).map((b) => ({ ...b, lines: wrap(b.value, s.smallSize, regular, leftW - bankLabelW) }));
-  const bankH = bankLines.length ? lh(s.smallSize) + 2 + bankLines.reduce((h, b) => h + b.lines.length * lh(s.smallSize) + 1, 0) + 6 : 0;
-  const foot = footerImg ? fitInto(footerImg, Math.min(leftW, 220), 70) : null;
+  const leftW = bankColW;
+  // Professional centres the footer image between the two signature blocks: never wider than the room
+  // they leave, measured from the wider of the signature line and the "For <company>" text.
+  const sideW = Math.max(s.signatureLineWidth, f.signatory ? width(clean(f.signatory), s.fontSize, bold) : 0);
+  const foot = footerImg ? fitInto(footerImg, Math.max(40, Math.min(banner ? contentW - 2 * sideW - 48 : leftW, 220)), 70) : null;
   const footH = foot ? foot.h + 6 : 0;
   const receivedH = f.receivedBy ? 30 + lh(s.smallSize) : 0;
-  const leftH = bankH + footH + receivedH;
   const sigImg = signatureImg ? fitInto(signatureImg, s.signatureLineWidth, 44) : null;
   const signSpace = sigImg ? sigImg.h + 6 : 26;
   const rightH = f.signatory ? lh(s.fontSize) + signSpace + 3 + lh(s.smallSize) + 2 : 0;
-  const signH = Math.max(leftH, rightH);
+  if (banner) {
+    /*
+     * Professional sign-off, kept whole: "Received By" at the left and the signatory at the right on
+     * ONE level signature line; the footer image, if any, centred between them. Bank details are
+     * already beside the totals. An absent part takes no space.
+     */
+    const signH = Math.max(f.signatory ? rightH : receivedH, footH);
+    if (signH > 0) {
+      if (signH > room()) newPage();
+      const top = y;
+      const lineY = top + signH - lh(s.smallSize) - 5;
+      if (footerImg && foot) page.drawImage(footerImg, { x: M + (contentW - foot.w) / 2, y: H - top - foot.h, width: foot.w, height: foot.h });
+      if (f.receivedBy) {
+        hline(M, M + s.signatureLineWidth, lineY, C.line);
+        text(model.labels.receivedBy, M, lineY + 3, s.signatureLineWidth, s.smallSize, regular, C.muted);
+      }
+      if (f.signatory) {
+        const sigW = 200;
+        text(f.signatory, M + contentW - sigW, lineY - signSpace - lh(s.fontSize), sigW, s.fontSize, bold, C.text, 'right');
+        if (signatureImg && sigImg) page.drawImage(signatureImg, { x: M + contentW - sigImg.w, y: H - lineY + 3, width: sigImg.w, height: sigImg.h });
+        hline(M + contentW - s.signatureLineWidth, M + contentW, lineY, C.line);
+        text(model.labels.signatoryCaption, M + contentW - sigW, lineY + 3, sigW, s.smallSize, regular, C.muted, 'right');
+      }
+      y = top + signH;
+    }
+  }
+  const leftH = banner ? 0 : bankH + footH + receivedH;
+  const signH = banner ? 0 : Math.max(leftH, rightH);
   if (signH > 0) {
     if (signH > room()) newPage();
     const top = y;
     let l = top;
-    if (bankLines.length) {
-      text(model.labels.bank, M, l, leftW, s.smallSize, bold, headingColor);
-      l += lh(s.smallSize) + 2;
-      for (const b of bankLines) {
-        text(b.label, M, l, bankLabelW, s.smallSize, regular, C.muted);
-        b.lines.forEach((line, i) => text(line, M + bankLabelW, l + i * lh(s.smallSize), leftW - bankLabelW, s.smallSize, i === 0 ? bold : regular, C.text));
-        l += b.lines.length * lh(s.smallSize) + 1;
-      }
-      l += 6;
-    }
+    if (bankLines.length) l = drawBank(l);
     if (footerImg && foot) {
       page.drawImage(footerImg, { x: M, y: H - l - foot.h, width: foot.w, height: foot.h });
       l += foot.h + 6;

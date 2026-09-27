@@ -24,6 +24,7 @@ import {
   type InvoiceTaxMode,
   type InvoiceTemplateMode,
   type InvoiceAlignment,
+  OPT_IN_LAYOUT_PRESETS,
 } from './enums.js';
 import type { CompanyProfile } from './schemas/org.js';
 import type { InvoiceTemplateConfig } from './schemas/invoiceTemplates.js';
@@ -111,6 +112,8 @@ export interface InvoiceRenderModel {
     logo: (InvoiceImageRef & { alignment: InvoiceAlignment }) | null;
     companyName: string | null;
     lines: string[];
+    /** Contact lines printed in their own column opposite the company block (Professional); empty = they are in `lines`. */
+    contact: string[];
   };
   /** "Original" / "Duplicate" / "Office Copy" — print metadata, top right. null = none. */
   copyLabel: string | null;
@@ -163,8 +166,10 @@ export interface InvoiceStyle {
   /**
    * STACKED: logo row, then the company block (Classic / Compact / Detailed).
    * SIDE: logo at the left, the company block beside it, copy label and title opposite (Studio).
+   * BANNER: a small centred title (copy label at its right), then logo | company block | contact
+   * details, one compact customer + bill section, an accent-filled table header (Professional).
    */
-  headerLayout: 'STACKED' | 'SIDE';
+  headerLayout: 'STACKED' | 'SIDE' | 'BANNER';
   pageWidth: number;
   pageHeight: number;
   margin: number;
@@ -211,13 +216,15 @@ export function invoiceStyle(preset: InvoiceLayoutPreset, margins: InvoiceMargin
     DETAILED: { fontSize: 8.5, smallSize: 7.5, titleSize: 15, companySize: 14, tableBorders: 'grid' as const, headerFill: true },
     // Studio: a quiet letterhead (large company name, small title), thin rules, no fills — low ink.
     STUDIO: { fontSize: 8.5, smallSize: 7.5, titleSize: 10, companySize: 15, tableBorders: 'rows' as const, headerFill: false },
+    // Professional: small centred title, a firm company name, thin rules; colour only on the table header.
+    PROFESSIONAL: { fontSize: 8.5, smallSize: 7.5, titleSize: 9.5, companySize: 14, tableBorders: 'rows' as const, headerFill: false },
   }[preset];
   const margin = MARGIN[paperSize]?.[margins] ?? MARGIN.A4[margins];
   const contentW = paper.width - 2 * margin;
   return {
     preset,
     paperSize,
-    headerLayout: preset === 'STUDIO' ? 'SIDE' : 'STACKED',
+    headerLayout: preset === 'STUDIO' ? 'SIDE' : preset === 'PROFESSIONAL' ? 'BANNER' : 'STACKED',
     pageWidth: paper.width,
     pageHeight: paper.height,
     margin,
@@ -229,8 +236,8 @@ export function invoiceStyle(preset: InvoiceLayoutPreset, margins: InvoiceMargin
     cellPadX: a5 ? 3 : 4,
     cellPadY: (preset === 'COMPACT' ? 3 : 4.5) * tight * (a5 ? 0.85 : 1),
     sectionGap: (preset === 'COMPACT' ? 10 : 14) * tight * (a5 ? 0.8 : 1),
-    logoMaxHeight: (preset === 'COMPACT' ? 40 : preset === 'STUDIO' ? 52 : 56) * (a5 ? 0.8 : 1),
-    logoMaxWidth: a5 ? 110 : 150,
+    logoMaxHeight: (preset === 'COMPACT' ? 40 : preset === 'STUDIO' ? 52 : preset === 'PROFESSIONAL' ? 48 : 56) * (a5 ? 0.8 : 1),
+    logoMaxWidth: preset === 'PROFESSIONAL' ? (a5 ? 90 : 120) : a5 ? 110 : 150,
     lineHeight: 1.3,
     customerLabelWidth: a5 ? 54 : 62,
     metaLabelWidth: a5 ? 60 : 70,
@@ -309,9 +316,9 @@ export const isTemplateCompatible = (supportedMode: InvoiceTemplateMode, taxMode
  *   2. otherwise the first active compatible template — BOTH before single-mode, then by name,
  *      then by id, so the choice is stable;
  *   3. otherwise null, and the caller uses the built-in Classic.
- * A Studio-preset template (Legacy Studio) is never picked in step 2: it was added to existing
- * tenants later, and must not quietly become what their bills print — it prints only as the
- * default or when chosen.
+ * A Studio- or Professional-preset template (Legacy / Professional Studio) is never picked in
+ * step 2: they were added to existing tenants later, and must not quietly become what their bills
+ * print — they print only as the default or when chosen.
  * An explicitly chosen template is validated by the caller instead (it must fit, or it is refused).
  */
 export function pickInvoiceTemplate<T extends { id: string; templateName: string; supportedMode: InvoiceTemplateMode; isDefault: boolean; isActive: boolean; layoutPreset?: string }>(
@@ -321,7 +328,7 @@ export function pickInvoiceTemplate<T extends { id: string; templateName: string
   const usable = templates.filter((t) => t.isActive && isTemplateCompatible(t.supportedMode, taxMode));
   const def = usable.find((t) => t.isDefault);
   if (def) return def;
-  const ranked = usable.filter((t) => t.layoutPreset !== 'STUDIO').sort((a, b) => Number(b.supportedMode === 'BOTH') - Number(a.supportedMode === 'BOTH') || a.templateName.localeCompare(b.templateName) || a.id.localeCompare(b.id));
+  const ranked = usable.filter((t) => !OPT_IN_LAYOUT_PRESETS.includes(t.layoutPreset as InvoiceLayoutPreset)).sort((a, b) => Number(b.supportedMode === 'BOTH') - Number(a.supportedMode === 'BOTH') || a.templateName.localeCompare(b.templateName) || a.id.localeCompare(b.id));
   return ranked[0] ?? null;
 }
 
@@ -376,6 +383,7 @@ export function buildInvoiceModel(input: {
   const cfg = template.config;
   const withGst = bill.taxMode === 'WITH_GST';
   const date = (v: string | null) => formatDateOnly(v, dateFormat);
+  const pro = template.layoutPreset === 'PROFESSIONAL';
 
   // Header: only the company details this company actually has AND the template shows.
   const lines: string[] = [];
@@ -385,17 +393,32 @@ export function buildInvoiceModel(input: {
     lines.push(...[company.addressLine1, company.addressLine2, cityLine].filter(present));
   }
   const contact = [cfg.header.showCompanyPhone && present(company?.phone) ? `Phone: ${company!.phone}` : null, cfg.header.showCompanyEmail && present(company?.email) ? `Email: ${company!.email}` : null].filter(present);
-  if (contact.length) lines.push(contact.join('   '));
+  // Professional prints contact details in their own column (Mobile / Email / Website, one per
+  // line); the other presets keep them on one line of the company block, as they always have.
+  const contactColumn = pro
+    ? [
+        cfg.header.showCompanyPhone && present(company?.phone) ? `Mobile: ${company!.phone}` : null,
+        cfg.header.showCompanyEmail && present(company?.email) ? `Email: ${company!.email}` : null,
+        cfg.header.showCompanyEmail && present(company?.website) ? `Web: ${company!.website}` : null,
+      ].filter(present)
+    : [];
+  if (!pro && contact.length) lines.push(contact.join('   '));
   if (company && cfg.header.showCompanyGstin && present(company.taxId)) lines.push(`GSTIN: ${company.taxId}`);
 
-  const meta: InvoiceField[] = [
-    { label: 'Bill No.', value: String(bill.billNumber), strong: true },
-    { label: 'Book', value: bill.bookNumber },
-    { label: 'Bill Date', value: date(bill.billDate) },
-  ];
-  if (cfg.customer.showDeliveryDate && bill.deliveryDate) meta.push({ label: 'Delivery Date', value: date(bill.deliveryDate) });
+  const meta: InvoiceField[] = pro
+    ? [
+        { label: 'Book No.', value: bill.bookNumber },
+        { label: 'Bill No.', value: String(bill.billNumber), strong: true },
+        { label: 'Bill Date', value: date(bill.billDate) },
+      ]
+    : [
+        { label: 'Bill No.', value: String(bill.billNumber), strong: true },
+        { label: 'Book', value: bill.bookNumber },
+        { label: 'Bill Date', value: date(bill.billDate) },
+      ];
+  if (cfg.customer.showDeliveryDate && bill.deliveryDate) meta.push({ label: pro ? 'Planned Delivery' : 'Delivery Date', value: date(bill.deliveryDate) });
 
-  const customer: InvoiceField[] = [{ label: 'Customer', value: bill.customerName, strong: true }];
+  const customer: InvoiceField[] = [{ label: pro ? 'Name' : 'Customer', value: bill.customerName, strong: true }];
   if (cfg.customer.showMobile && present(bill.mobileNumber)) customer.push({ label: 'Mobile', value: bill.mobileNumber });
   if (cfg.customer.showBabyName && present(bill.babyName)) customer.push({ label: 'Baby Name', value: bill.babyName });
   if (cfg.customer.showBirthDate && bill.hasBirthDate && bill.birthDate) customer.push({ label: 'Birth Date', value: date(bill.birthDate) });
@@ -405,7 +428,7 @@ export function buildInvoiceModel(input: {
   // Amount (Qty x Rate) when there is no discount — it would print the same figure twice.
   // A Discount column on a bill without a discount would be a column of zeros.
   const keys = cfg.columns.filter((k) => !(k === 'discount' && bill.discountAmount <= 0) && (withGst || (!GST_ONLY_COLUMNS.includes(k) && !(k === 'amount' && bill.discountAmount <= 0))));
-  const columns = keys.map((key) => ({ key, label: key === 'total' && !withGst ? 'Amount' : INVOICE_COLUMN_LABELS[key], align: COLUMN_ALIGN[key], weight: COLUMN_WEIGHT[key], wrap: WRAPPING_COLUMNS.includes(key) }));
+  const columns = keys.map((key) => ({ key, label: key === 'total' && !withGst ? 'Amount' : pro && key === 'gstRate' ? 'GST%' : INVOICE_COLUMN_LABELS[key], align: COLUMN_ALIGN[key], weight: COLUMN_WEIGHT[key], wrap: WRAPPING_COLUMNS.includes(key) }));
   if (!withGst) {
     // With a discount the pre-discount figure differs from the line's Amount: call it Gross.
     const gross = columns.find((c) => c.key === 'amount');
@@ -469,10 +492,11 @@ export function buildInvoiceModel(input: {
     copyLabel: copy === 'NONE' ? null : INVOICE_COPY_LABEL_TEXT[copy],
     accent: INVOICE_ACCENT_COLORS[print.accent] ?? INVOICE_ACCENT_COLORS.NEUTRAL,
     labels: {
-      billedTo: 'BILLED TO', details: 'INVOICE DETAILS', gstSummary: 'GST SUMMARY', remark: 'REMARK', terms: 'TERMS & CONDITIONS', signatoryCaption: 'Authorised Signatory',
-      bank: 'BANK DETAILS', note: 'NOTE', receivedBy: 'Received By', amountInWords: 'Amount in words',
+      // Professional has ONE customer + bill section — no "Bill To" / "Ship To".
+      billedTo: pro ? 'CUSTOMER' : 'BILLED TO', details: pro ? 'BILL DETAILS' : 'INVOICE DETAILS', gstSummary: 'GST SUMMARY', remark: 'REMARK', terms: 'TERMS & CONDITIONS', signatoryCaption: 'Authorised Signatory',
+      bank: 'BANK DETAILS', note: 'NOTE', receivedBy: 'Received By', amountInWords: pro ? 'Total in words' : 'Amount in words',
     },
-    header: { alignment: cfg.header.alignment, logo, companyName: cfg.header.showCompanyName && company ? company.name : null, lines },
+    header: { alignment: cfg.header.alignment, logo, companyName: cfg.header.showCompanyName && company ? company.name : null, lines, contact: contactColumn },
     meta,
     customer,
     columns,

@@ -1,0 +1,2 @@
+ALTER TABLE "invoice_templates" DROP CONSTRAINT "invoice_templates_layout_preset_check";--> statement-breakpoint
+ALTER TABLE "invoice_templates" ADD CONSTRAINT "invoice_templates_layout_preset_check" CHECK ("invoice_templates"."layout_preset" in ('CLASSIC', 'COMPACT', 'DETAILED', 'STUDIO', 'PROFESSIONAL'));

@@ -142,9 +142,11 @@ export type InvoiceTemplateMode = (typeof INVOICE_TEMPLATE_MODES)[number];
 export const INVOICE_TEMPLATE_MODE_LABELS: Record<InvoiceTemplateMode, string> = { BOTH: 'With & without GST', WITH_GST: 'With GST only', WITHOUT_GST: 'Without GST only' };
 
 /** The controlled visual styles. Each is a fixed set of typography/border rules, not free CSS. */
-export const INVOICE_LAYOUT_PRESETS = ['CLASSIC', 'COMPACT', 'DETAILED', 'STUDIO'] as const;
+export const INVOICE_LAYOUT_PRESETS = ['CLASSIC', 'COMPACT', 'DETAILED', 'STUDIO', 'PROFESSIONAL'] as const;
 export type InvoiceLayoutPreset = (typeof INVOICE_LAYOUT_PRESETS)[number];
-export const INVOICE_LAYOUT_PRESET_LABELS: Record<InvoiceLayoutPreset, string> = { CLASSIC: 'Classic', COMPACT: 'Compact', DETAILED: 'Detailed', STUDIO: 'Studio' };
+export const INVOICE_LAYOUT_PRESET_LABELS: Record<InvoiceLayoutPreset, string> = { CLASSIC: 'Classic', COMPACT: 'Compact', DETAILED: 'Detailed', STUDIO: 'Studio', PROFESSIONAL: 'Professional' };
+/** Presets added to existing tenants after their first templates: never picked as a fallback (see `pickInvoiceTemplate`). */
+export const OPT_IN_LAYOUT_PRESETS: readonly InvoiceLayoutPreset[] = ['STUDIO', 'PROFESSIONAL'];
 
 /**
  * The item-table columns an invoice can print, all read from the bill line's own snapshot.

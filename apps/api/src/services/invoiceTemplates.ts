@@ -5,6 +5,7 @@ import {
   isTemplateCompatible,
   legacyStudioTemplate,
   pickInvoiceTemplate,
+  professionalStudioTemplate,
   starterInvoiceTemplates,
   INVOICE_TAX_MODE_LABELS,
   type InvoiceTaxMode,
@@ -47,25 +48,29 @@ export type InvoiceTemplateRecord = ReturnType<typeof shapeTemplate>;
  */
 export async function ensureStarterTemplates(tenantId: string, exec: Db = db) {
   const [{ n }] = await exec.select({ n: count() }).from(T).where(eq(T.tenantId, tenantId));
-  if (Number(n) > 0) return ensureLegacyStudio(tenantId, exec);
+  if (Number(n) > 0) return ensureLateStarters(tenantId, exec);
   for (const s of starterInvoiceTemplates()) {
     await exec.insert(T).values({ tenantId, ...s }).onConflictDoNothing();
   }
 }
 
 /**
- * "Legacy Studio" came after the first starters, so a tenant seeded before it gets it here — ONCE.
- * A marker in the tenant's settings records that it was offered: a tenant that deletes it never
- * sees it re-created, and a tenant's own template of the same name is never touched (the unique
- * name index makes the insert a no-op). It is never made the default.
+ * "Legacy Studio" and "Professional Studio" came after the first starters, so a tenant seeded
+ * before them gets each here — ONCE. A marker in the tenant's settings records that it was offered:
+ * a tenant that deletes it never sees it re-created, and a tenant's own template of the same name is
+ * never touched (the unique name index makes the insert a no-op). Neither is ever made the default.
  */
-const LEGACY_SEED = 'LEGACY_STUDIO';
-async function ensureLegacyStudio(tenantId: string, exec: Db) {
+const LATE_STARTERS = [
+  { seed: 'LEGACY_STUDIO', template: legacyStudioTemplate },
+  { seed: 'PROFESSIONAL_STUDIO', template: professionalStudioTemplate },
+] as const;
+async function ensureLateStarters(tenantId: string, exec: Db) {
   const settings = await getSettings(tenantId);
   const seeds: string[] = Array.isArray(settings.invoiceTemplateSeeds) ? settings.invoiceTemplateSeeds : [];
-  if (seeds.includes(LEGACY_SEED)) return;
-  await exec.insert(T).values({ tenantId, ...legacyStudioTemplate(), isDefault: false }).onConflictDoNothing();
-  await updateSettings(tenantId, { invoiceTemplateSeeds: [...seeds, LEGACY_SEED] });
+  const missing = LATE_STARTERS.filter((s) => !seeds.includes(s.seed));
+  if (!missing.length) return;
+  for (const s of missing) await exec.insert(T).values({ tenantId, ...s.template(), isDefault: false }).onConflictDoNothing();
+  await updateSettings(tenantId, { invoiceTemplateSeeds: [...seeds, ...missing.map((s) => s.seed)] });
 }
 
 export async function listTemplates(tenantId: string) {

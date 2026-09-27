@@ -19,7 +19,7 @@ digits; a Next Visit Date creates one linked appointment in the bill's transacti
 Delivery recorded one click at a time, position derived, never a status dropdown; appointments are
 Pending until one-click Done; Today's Work shows each job's one next step with one button (`docs/STUDIO_WORKFLOW.md`). Money
 received beyond a bill — or before any bill — is an advance that reduces nothing until explicitly
-applied (`docs/ADVANCE_PAYMENTS.md`). Settings → Print & Invoice holds branding images, bank details, terms, accent and the copy label; the "Legacy Studio" template reprints the old studio bill (`docs/INVOICE_TEMPLATES.md`). Reports → Bill Summary lists a period's bills (Summary / Detailed
+applied (`docs/ADVANCE_PAYMENTS.md`). Settings → Print & Invoice holds branding images, bank details, terms, accent and the copy label; the "Legacy Studio" template reprints the old studio bill and "Professional Studio" is a modern tax-invoice layout with no Bill To / Ship To (`docs/INVOICE_TEMPLATES.md`). Reports → Bill Summary lists a period's bills (Summary / Detailed
 tabs over one scope; Advance = received against the bill) (`docs/BILL_SUMMARY_REPORT.md`). The ledger / GL, a customer master and
 the CGST/SGST/IGST split are not started.
 Billing honours two contracts: `docs/BILL_NUMBERING.md` for identity and `docs/BILLING_CALCULATION.md`

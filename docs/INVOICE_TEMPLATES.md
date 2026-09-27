@@ -298,6 +298,45 @@ handwritten signature, never a user's name.
 - `pickInvoiceTemplate` never picks a Studio-preset template by itself (step 2): it prints only as the
   tenant default or when chosen, so adding it cannot change what an existing tenant's bills print.
 
+### Professional Studio
+
+A modern tax-invoice layout on the **Professional** preset (`layoutPreset = 'PROFESSIONAL'`,
+migration `0024` only widened the preset check; `headerLayout = 'BANNER'`), drawn by the same model
+and both renderers:
+
+- A small centred title ("Tax Invoice" / the without-GST title) with the copy label at its right;
+  then the logo (≤ 48 pt high, aspect kept, no box when absent), the company block (name, address,
+  GSTIN) and a contact column (Mobile, Email, Web — each only when the company profile has it, email
+  and website under the template's "Email" switch). Model: `header.contact`, empty for other presets,
+  whose contact line stays in `header.lines` as before.
+- ONE compact customer + bill section — headings **CUSTOMER** / **BILL DETAILS** (Name, Mobile, Baby
+  Name, Birth Date | Book No., Bill No., Bill Date, Planned Delivery; empty rows are not printed).
+  There is **no "Bill To" / "Ship To"**, and no PO, dispatch, place-of-supply or payment-terms field —
+  StudioCRM has no authoritative source for them. Tests assert their absence in model, preview and PDF.
+- Item table `# | Item | Product | Qty | Rate | Discount | GST% | GST | Total`: each line reconciles
+  (Qty × Rate − stored discount allocation + stored GST = stored line total; Qty × Rate is the stored
+  gross, rounded to the paisa, so a fractional quantity can differ by under half a paisa — add the
+  Amount column in the designer to print the gross itself). Discount drops out on a
+  bill without one; GST% / GST drop out without GST (and Total reads "Amount"). The header is the one
+  coloured area: an accent band with white headings — the tenant's Invoice Accent, never hard-coded
+  (choose Blue in Print & Invoice for the blue look; every accent is dark, so it prints readably in
+  black and white).
+- Beside the totals: Total in words, then bank details (only filled lines). Totals: Sub Total,
+  Discount, GST, **Grand Total** (ruled above and below), Advance / Received, **Balance Due** — the
+  same derived payments as Legacy Studio (active allocations + applied advance; an unapplied advance
+  or a cancelled receipt never counts). No Taxable row and no GST summary by default (the per-line
+  GST columns already carry it); both can be switched on in the designer.
+- Remark, note, terms, then the sign-off kept whole on one page: a blank **Received By** line at the
+  left and "For <company>" / signature image / "Authorised Signatory" at the right on ONE level line,
+  the footer image (if any) centred between them.
+- Seeded like Legacy Studio (marker `PROFESSIONAL_STUDIO`), never the default, never picked by
+  `pickInvoiceTemplate` step 2. The other templates' output is unchanged (verified byte-for-byte;
+  pinned by snapshot tests of their PDF text).
+- **Forward-only.** A build older than this one does not know the PROFESSIONAL preset: rolling the
+  code back while a tenant uses a Professional template (as default or on a share link) would break
+  that tenant's invoices. Before any such rollback, make Classic the default and deactivate the
+  Professional templates.
+
 ### Legacy Print Settings — what was not migrated
 
 | Legacy setting | Decision |

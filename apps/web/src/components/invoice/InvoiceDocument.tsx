@@ -24,7 +24,8 @@ export function InvoiceDocument({ model, images, print }: { model: InvoiceRender
   const s = model.style;
   const c = INVOICE_COLORS;
   const accent = /^#[0-9a-f]{6}$/i.test(model.accent) ? model.accent : c.rule;
-  const heading = s.preset === 'STUDIO' ? accent : c.muted;
+  const banner = s.headerLayout === 'BANNER';
+  const heading = s.preset === 'STUDIO' || banner ? accent : c.muted;
   const logoSrc = model.header.logo ? images?.logo : null;
   const signatureSrc = model.footer.signatureImage ? images?.signature : null;
   const footerSrc = model.footer.footerImage ? images?.footer : null;
@@ -45,7 +46,36 @@ export function InvoiceDocument({ model, images, print }: { model: InvoiceRender
   const label: CSSProperties = { fontSize: pt(s.smallSize), fontWeight: 600, color: heading, letterSpacing: '0.02em' };
   const field = (labelW: number) => ({ display: 'grid', gridTemplateColumns: `${pt(labelW)} 1fr`, fontSize: pt(s.fontSize), lineHeight: lineH, marginBottom: pt(1) });
   const f = model.footer;
-  const hasLeft = !!(f.bank?.length || footerSrc || f.receivedBy);
+  const hasLeft = !!((!banner && f.bank?.length) || footerSrc || f.receivedBy);
+  const bankBlock = !!f.bank?.length && (
+    <div style={{ marginBottom: pt(6) }}>
+      <div style={{ ...label, marginBottom: pt(2) }}>{model.labels.bank}</div>
+      {f.bank.map((b) => (
+        <div key={b.label} style={{ display: 'grid', gridTemplateColumns: `${pt(s.customerLabelWidth - 8)} 1fr`, fontSize: pt(s.smallSize), lineHeight: lineH, marginBottom: pt(1) }}>
+          <span style={{ color: c.muted }}>{b.label}</span>
+          <span style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{b.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+  const signatoryBlock = f.signatory && (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', marginLeft: 'auto' }}>
+      <div style={{ fontWeight: 600 }}>{f.signatory}</div>
+      {signatureSrc ? (
+        <img src={signatureSrc} alt="" style={{ display: 'block', maxWidth: pt(s.signatureLineWidth), maxHeight: pt(44), objectFit: 'contain', marginTop: pt(6), marginBottom: pt(3) }} />
+      ) : (
+        <div style={{ height: pt(26) }} />
+      )}
+      <div style={{ width: pt(s.signatureLineWidth), borderBottom: `0.5pt solid ${c.line}` }} />
+      <div style={{ fontSize: pt(s.smallSize), color: c.muted, marginTop: pt(3) }}>{model.labels.signatoryCaption}</div>
+    </div>
+  );
+  const receivedBlock = f.receivedBy && (
+    <div>
+      <div style={{ width: pt(s.signatureLineWidth), borderBottom: `0.5pt solid ${c.line}`, height: pt(26) }} />
+      <div style={{ fontSize: pt(s.smallSize), color: c.muted, marginTop: pt(3) }}>{model.labels.receivedBy}</div>
+    </div>
+  );
   const titleAlign = model.header.alignment === 'CENTER' ? 'center' : 'left';
 
   return (
@@ -70,7 +100,31 @@ export function InvoiceDocument({ model, images, print }: { model: InvoiceRender
         </div>
       )}
 
-      {s.headerLayout === 'SIDE' ? (
+      {banner ? (
+        /* Professional: small centred title (copy label at its right), then logo | company block | contact. */
+        <>
+          <div style={{ position: 'relative', marginBottom: pt(8) }}>
+            <div style={{ fontSize: pt(s.titleSize), fontWeight: 600, textTransform: 'uppercase', textAlign: 'center', lineHeight: lineH, padding: model.copyLabel ? `0 ${pt(70)}` : 0 }}>{model.title}</div>
+            {model.copyLabel && <div style={{ position: 'absolute', right: 0, top: pt((s.titleSize - s.smallSize) / 2), fontSize: pt(s.smallSize), fontWeight: 600, color: accent, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{model.copyLabel}</div>}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: pt(12) }}>
+            {logoSrc && <img src={logoSrc} alt="" style={{ maxWidth: pt(s.logoMaxWidth), maxHeight: pt(s.logoMaxHeight), objectFit: 'contain', display: 'block', flexShrink: 0 }} />}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {model.header.companyName && <div style={{ fontSize: pt(s.companySize), fontWeight: 600, lineHeight: lineH, marginBottom: pt(1) }}>{model.header.companyName}</div>}
+              {model.header.lines.map((l, i) => (
+                <div key={i} style={{ fontSize: pt(s.smallSize), color: c.muted, lineHeight: lineH }}>{l}</div>
+              ))}
+            </div>
+            {model.header.contact.length > 0 && (
+              <div style={{ flexShrink: 0, maxWidth: '32%', textAlign: 'right' }}>
+                {model.header.contact.map((l, i) => (
+                  <div key={i} style={{ fontSize: pt(s.smallSize), color: c.muted, lineHeight: lineH, overflowWrap: 'anywhere' }}>{l}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      ) : s.headerLayout === 'SIDE' ? (
         /* Studio letterhead: logo left, company block beside it, copy label + title opposite. No logo = no box. */
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: pt(12) }}>
           {logoSrc && <img src={logoSrc} alt="" style={{ maxWidth: pt(s.logoMaxWidth), maxHeight: pt(s.logoMaxHeight), objectFit: 'contain', display: 'block', flexShrink: 0 }} />}
@@ -101,7 +155,7 @@ export function InvoiceDocument({ model, images, print }: { model: InvoiceRender
           </div>
         </>
       )}
-      <div style={{ borderTop: `${s.preset === 'COMPACT' ? 0.5 : 1}pt solid ${accent}`, marginTop: pt(s.headerLayout === 'SIDE' ? 6 : 4), marginBottom: pt(s.sectionGap * 0.8) }} />
+      <div style={{ borderTop: `${s.preset === 'COMPACT' ? 0.5 : banner ? 0.8 : 1}pt solid ${accent}`, marginTop: pt(s.headerLayout === 'STACKED' ? 4 : 6), marginBottom: pt(s.sectionGap * 0.8) }} />
 
       {s.headerLayout === 'STACKED' && (
         <div style={{ position: 'relative', marginBottom: pt(4) }}>
@@ -129,9 +183,10 @@ export function InvoiceDocument({ model, images, print }: { model: InvoiceRender
 
       <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto', fontSize: pt(s.fontSize) }}>
         <thead style={{ display: 'table-header-group' }}>
-          <tr style={{ background: s.headerFill ? c.headFill : undefined, borderTop: `${grid ? 0.5 : 0.8}pt solid ${grid ? c.line : accent}`, borderBottom: `${grid ? 0.5 : 0.8}pt solid ${grid ? c.line : accent}` }}>
+          {/* Professional: an accent band with white headings — the one coloured area. printColorAdjust keeps it when printing. */}
+          <tr style={banner ? { background: accent, color: c.paper, WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' } : { background: s.headerFill ? c.headFill : undefined, borderTop: `${grid ? 0.5 : 0.8}pt solid ${grid ? c.line : accent}`, borderBottom: `${grid ? 0.5 : 0.8}pt solid ${grid ? c.line : accent}` }}>
             {model.columns.map((col) => (
-              <th key={col.key} style={{ ...cell(col), fontSize: pt(s.smallSize), fontWeight: 600 }}>{col.label}</th>
+              <th key={col.key} style={{ ...cell(col), fontSize: pt(s.smallSize), fontWeight: 600, ...(banner ? { background: accent } : {}) }}>{col.label}</th>
             ))}
           </tr>
         </thead>
@@ -171,10 +226,11 @@ export function InvoiceDocument({ model, images, print }: { model: InvoiceRender
               <div style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{model.amountInWords}</div>
             </div>
           )}
+          {banner && bankBlock && <div style={{ marginTop: model.amountInWords || model.gstSummary ? pt(8) : 0 }}>{bankBlock}</div>}
         </div>
         <div style={{ width: pt(totalsW), flexShrink: 0 }}>
           {model.totals.map((t) => (
-            <div key={t.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: pt(t.strong ? s.fontSize + 2 : s.fontSize), fontWeight: t.strong || t.bold ? 600 : 400, color: t.strong ? c.text : undefined, borderTop: t.strong ? `0.8pt solid ${accent}` : undefined, paddingTop: pt(t.strong ? 4 : 1), paddingBottom: pt(1), marginTop: t.strong ? pt(1) : 0 }}>
+            <div key={t.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: pt(t.strong ? s.fontSize + 2 : s.fontSize), fontWeight: t.strong || t.bold ? 600 : 400, color: t.strong ? c.text : undefined, borderTop: t.strong ? `0.8pt solid ${accent}` : undefined, borderBottom: t.strong && banner ? `0.8pt solid ${accent}` : undefined, paddingTop: pt(t.strong ? 4 : 1), paddingBottom: pt(t.strong && banner ? 3 : 1), marginTop: t.strong ? pt(1) : 0, marginBottom: t.strong && banner ? pt(3) : 0 }}>
               <span style={{ color: t.strong || t.bold ? c.text : c.muted }}>{t.label}</span>
               <span>{t.value}</span>
             </div>
@@ -203,41 +259,23 @@ export function InvoiceDocument({ model, images, print }: { model: InvoiceRender
         )}
         {f.thankYou && <div style={{ textAlign: 'center', whiteSpace: 'pre-wrap', marginBottom: pt(s.sectionGap * 0.6) }}>{f.thankYou}</div>}
 
+        {/* Professional sign-off: Received By | footer image | signatory, the two signature lines level. */}
+        {banner && (hasLeft || f.signatory) && (
+          <div style={{ breakInside: 'avoid', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: pt(24) }}>
+            <div style={{ flexShrink: 0 }}>{receivedBlock}</div>
+            {footerSrc && <img src={footerSrc} alt="" style={{ display: 'block', maxWidth: pt(Math.min(220, s.pageWidth - 2 * s.margin - 2 * s.signatureLineWidth - 48)), maxHeight: pt(70), objectFit: 'contain', alignSelf: 'flex-start', marginBottom: pt(6) }} />}
+            {signatoryBlock || <div />}
+          </div>
+        )}
         {/* Sign-off band: bank / footer image / Received By at the left, the signatory at the right. */}
-        {(hasLeft || f.signatory) && (
+        {!banner && (hasLeft || f.signatory) && (
           <div style={{ breakInside: 'avoid', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: pt(24) }}>
             <div style={{ minWidth: 0, maxWidth: '55%' }}>
-              {!!f.bank?.length && (
-                <div style={{ marginBottom: pt(6) }}>
-                  <div style={{ ...label, marginBottom: pt(2) }}>{model.labels.bank}</div>
-                  {f.bank.map((b) => (
-                    <div key={b.label} style={{ display: 'grid', gridTemplateColumns: `${pt(s.customerLabelWidth - 8)} 1fr`, fontSize: pt(s.smallSize), lineHeight: lineH, marginBottom: pt(1) }}>
-                      <span style={{ color: c.muted }}>{b.label}</span>
-                      <span style={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{b.value}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {bankBlock}
               {footerSrc && <img src={footerSrc} alt="" style={{ display: 'block', maxWidth: pt(220), maxHeight: pt(70), objectFit: 'contain', marginBottom: pt(6) }} />}
-              {f.receivedBy && (
-                <div>
-                  <div style={{ width: pt(s.signatureLineWidth), borderBottom: `0.5pt solid ${c.line}`, height: pt(26) }} />
-                  <div style={{ fontSize: pt(s.smallSize), color: c.muted, marginTop: pt(3) }}>{model.labels.receivedBy}</div>
-                </div>
-              )}
+              {receivedBlock}
             </div>
-            {f.signatory && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', marginLeft: 'auto' }}>
-                <div style={{ fontWeight: 600 }}>{f.signatory}</div>
-                {signatureSrc ? (
-                  <img src={signatureSrc} alt="" style={{ display: 'block', maxWidth: pt(s.signatureLineWidth), maxHeight: pt(44), objectFit: 'contain', marginTop: pt(6), marginBottom: pt(3) }} />
-                ) : (
-                  <div style={{ height: pt(26) }} />
-                )}
-                <div style={{ width: pt(s.signatureLineWidth), borderBottom: `0.5pt solid ${c.line}` }} />
-                <div style={{ fontSize: pt(s.smallSize), color: c.muted, marginTop: pt(3) }}>{model.labels.signatoryCaption}</div>
-              </div>
-            )}
+            {signatoryBlock}
           </div>
         )}
         {f.text && <div style={{ textAlign: 'center', whiteSpace: 'pre-wrap', fontSize: pt(s.smallSize), color: c.muted, marginTop: pt(s.sectionGap * 0.6) }}>{f.text}</div>}
