@@ -12,3 +12,4 @@ export * from './receivables.js';
 export * from './billReport.js';
 export * from './schemas/index.js';
 export * from './workflow.js';
+export * from './dashboard.js';

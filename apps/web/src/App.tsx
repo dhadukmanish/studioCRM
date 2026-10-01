@@ -5,9 +5,10 @@ import { Toaster } from '@/lib/toast';
 import { Spinner } from '@/components/ui';
 import AppShell from '@/components/layout/AppShell';
 import Login from '@/pages/auth/Login';
-import { ComingSoon, Dashboard, NotFound } from '@/pages/misc';
+import { ComingSoon, NotFound } from '@/pages/misc';
 
 // Lazy pages — each becomes its own chunk.
+const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'));
 const SettingsLayout = lazy(() => import('@/pages/settings/SettingsLayout'));
 const SettingsHub = lazy(() => import('@/pages/settings/SettingsLayout').then((m) => ({ default: m.SettingsHub })));
 const CompaniesPage = lazy(() => import('@/pages/settings/OrgPages').then((m) => ({ default: m.CompaniesPage })));
@@ -72,7 +73,7 @@ export default function App() {
           <Route element={<Protected />}>
             <Route element={<AppShell />}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/profile" element={<ProfilePage />} />
               {/* ---- Masters ---- */}
               <Route path="/modules/masters/items" element={<Guard permission="masters_items"><ItemsPage /></Guard>} />
