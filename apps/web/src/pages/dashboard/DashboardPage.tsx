@@ -21,11 +21,11 @@ import { useAuthStore } from '@/store/auth';
  * (themes.css), in fixed order. Every figure keeps its text label, so colour is never the only cue.
  */
 const SERIES = [
-  { chip: 'bg-series-1/15 text-series-1', edge: 'border-l-series-1', bar: 'bg-series-1' },
-  { chip: 'bg-series-2/15 text-series-2', edge: 'border-l-series-2', bar: 'bg-series-2' },
-  { chip: 'bg-series-3/15 text-series-3', edge: 'border-l-series-3', bar: 'bg-series-3' },
-  { chip: 'bg-series-4/15 text-series-4', edge: 'border-l-series-4', bar: 'bg-series-4' },
-  { chip: 'bg-series-5/15 text-series-5', edge: 'border-l-series-5', bar: 'bg-series-5' },
+  { chip: 'bg-series-1/20 text-series-1', edge: 'border-l-series-1', bar: 'bg-series-1' },
+  { chip: 'bg-series-2/20 text-series-2', edge: 'border-l-series-2', bar: 'bg-series-2' },
+  { chip: 'bg-series-3/20 text-series-3', edge: 'border-l-series-3', bar: 'bg-series-3' },
+  { chip: 'bg-series-4/20 text-series-4', edge: 'border-l-series-4', bar: 'bg-series-4' },
+  { chip: 'bg-series-5/20 text-series-5', edge: 'border-l-series-5', bar: 'bg-series-5' },
 ] as const;
 
 export default function DashboardPage() {

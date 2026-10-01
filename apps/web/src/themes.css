@@ -201,6 +201,43 @@
   --gray-1000: 0 0 0;
 }
 
+/* ---------- Mist (mid-tone light: soft grey page, off-white cards, firm borders and text — no glare,
+   between the white themes and Dusk) ---------- */
+[data-theme='mist'] {
+  color-scheme: light;
+  --primary: 30 88 160;
+  --primary-dark: 22 70 132;
+  --primary-lighter: 199 214 235;
+  --primary-50: 222 231 243;
+
+  --surface: 236 240 245;
+  --page: 214 220 229;
+  --head: 224 229 237;
+  --line: 190 199 212;
+  --input-border: 168 178 193;
+  --shadow: 20 28 40;
+
+  --gray-0: 236 240 245;
+  --gray-50: 228 233 240;
+  --gray-100: 220 226 234;
+  --gray-200: 205 212 222;
+  --gray-300: 190 198 210;
+  --gray-400: 120 129 143;
+  --gray-500: 78 87 101;
+  --gray-600: 58 66 79;
+  --gray-700: 42 49 60;
+  --gray-800: 28 33 42;
+  --gray-900: 16 20 27;
+  --gray-1000: 0 0 0;
+
+  /* deeper steps of the same hues: each mark clears 3:1 on the grey surface */
+  --series-1: 37 106 191;
+  --series-2: 194 80 31;
+  --series-3: 20 128 91;
+  --series-4: 163 107 0;
+  --series-5: 184 64 109;
+}
+
 /* ---------- Teal (white dominant, muted teal) ---------- */
 [data-theme='teal'] {
   color-scheme: light;
