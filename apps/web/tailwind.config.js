@@ -14,6 +14,7 @@ export default {
         gray: scale('gray', [0, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]),
         white: v('surface'),
         surface: v('surface'),
+        sidebar: v('sidebar'),
         muted: v('gray-200'),
         line: v('line'),
         page: v('page'),
@@ -27,7 +28,7 @@ export default {
       },
       fontSize: { xxs: ['11px', '14px'] },
       boxShadow: { card: '0 1px 2px 0 rgb(var(--shadow) / 0.06)', btn: '0 1px 2px 0 rgb(var(--primary) / 0.25)' },
-      borderRadius: { DEFAULT: '8px' },
+      borderRadius: { DEFAULT: 'var(--r-default)', sm: 'var(--r-sm)', md: 'var(--r-md)', lg: 'var(--r-lg)' }, // themes.css :root
     },
   },
   plugins: [],

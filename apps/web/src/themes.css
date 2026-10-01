@@ -5,6 +5,19 @@
  * ------------------------------------------------------------------------- */
 
 /* ---------- Light (default) ---------- */
+/* Shape and chrome tokens every theme shares unless it overrides them. Defaults = the original look. */
+:root {
+  --r-control: 8px;   /* inputs, selects, date fields, search */
+  --r-btn: 8px;       /* buttons, icon buttons, row actions */
+  --r-card: 8px;      /* cards and panels */
+  --r-modal: 8px;     /* dialogs */
+  --r-sm: 2px;        /* Tailwind rounded-sm */
+  --r-default: 8px;   /* Tailwind rounded */
+  --r-md: 6px;        /* Tailwind rounded-md */
+  --r-lg: 8px;        /* Tailwind rounded-lg */
+  --sidebar: var(--surface);
+}
+
 :root, [data-theme='light'] {
   color-scheme: light;
   --primary: 0 108 184;
@@ -237,6 +250,47 @@
   --series-4: 163 107 0;
   --series-5: 184 64 109;
 }
+
+/* ---------- Olive Professional (warm neutral base, olive only for actions and selection;
+   square, architectural controls) ---------- */
+[data-theme='olivepro'] {
+  color-scheme: light;
+  --primary: 79 103 46;          /* #4F672E — actions, selection */
+  --primary-dark: 62 82 35;
+  --primary-lighter: 226 231 213;
+  --primary-50: 242 244 236;
+
+  --surface: 255 255 255;        /* #FFFFFF */
+  --page: 240 241 236;           /* #F0F1EC */
+  --head: 242 243 238;           /* #F2F3EE */
+  --line: 213 216 207;           /* #D5D8CF */
+  --input-border: 196 201 188;   /* #C4C9BC */
+  --shadow: 40 44 30;
+  --sidebar: 248 249 246;        /* #F8F9F6 */
+
+  --gray-0: 255 255 255;
+  --gray-50: 247 247 243;        /* #F7F7F3 */
+  --gray-100: 239 240 234;
+  --gray-200: 226 228 220;
+  --gray-300: 203 207 195;
+  --gray-400: 128 133 118;
+  --gray-500: 88 93 80;
+  --gray-600: 66 70 59;
+  --gray-700: 49 52 44;
+  --gray-800: 34 37 29;
+  --gray-900: 23 25 19;
+  --gray-1000: 0 0 0;
+
+  --r-control: 2px;
+  --r-btn: 3px;
+  --r-card: 4px;
+  --r-modal: 5px;
+  --r-default: 2px;
+  --r-md: 2px;
+  --r-lg: 3px;
+}
+/* Selected navigation: a quiet olive tint with a firm accent edge. */
+[data-theme='olivepro'] aside a[aria-current='page'] { box-shadow: inset 3px 0 0 rgb(var(--primary)); }
 
 /* ---------- Teal (white dominant, muted teal) ---------- */
 [data-theme='teal'] {

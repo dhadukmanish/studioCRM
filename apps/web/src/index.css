@@ -13,26 +13,27 @@
 }
 
 @layer components {
-  .card { @apply bg-white border border-line rounded-lg shadow-card; }
+  .card { @apply bg-white border border-line rounded-[var(--r-card)] shadow-card; }
+  .card[role='dialog'] { border-radius: var(--r-modal); }
   .label { @apply block text-[13px] font-medium text-gray-600 mb-1; }
   .label-req::after { content: ' *'; @apply text-red-500; }
-  .input { @apply w-full h-10 rounded-lg border border-input bg-surface px-3 text-[14px] text-gray-800 placeholder:text-gray-400 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/40 disabled:bg-gray-50 disabled:text-gray-500; }
+  .input { @apply w-full h-10 rounded-[var(--r-control)] border border-input bg-surface px-3 text-[14px] text-gray-800 placeholder:text-gray-400 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/40 disabled:bg-gray-50 disabled:text-gray-500; }
   .input-sm { @apply h-8 text-[13px]; }
-  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-lg font-medium text-[14px] h-8 px-3 transition active:translate-y-px disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap; }
+  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-[var(--r-btn)] font-medium text-[14px] h-8 px-3 transition active:translate-y-px disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap; }
   .btn-lg { @apply h-10 px-5; }
   .btn-primary { @apply btn bg-primary text-white shadow-btn hover:bg-primary-dark; }
   .btn-outline { @apply btn bg-white border border-gray-200 text-gray-600 hover:bg-gray-50; }
   .btn-outline-primary { @apply btn bg-white border border-primary text-primary hover:bg-primary/5; }
   .btn-danger { @apply btn bg-red-600 text-white hover:bg-red-700; }
   .btn-ghost { @apply btn text-gray-600 hover:bg-gray-100; }
-  .icon-btn { @apply inline-flex items-center justify-center h-8 w-8 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition; }
+  .icon-btn { @apply inline-flex items-center justify-center h-8 w-8 rounded-[var(--r-btn)] border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition; }
   /* quiet in-row action — visible, but never competing with the page's primary button */
-  .row-action { @apply inline-flex items-center justify-center h-7 w-7 rounded-lg text-gray-500 transition duration-150 hover:bg-gray-100 hover:text-gray-900; }
+  .row-action { @apply inline-flex items-center justify-center h-7 w-7 rounded-[var(--r-btn)] text-gray-500 transition duration-150 hover:bg-gray-100 hover:text-gray-900; }
   .row-action-danger { @apply row-action hover:bg-red-50 hover:text-red-600; }
   /* A tinted accent action (a grid row's + Add): easy to find, still quiet. Theme tokens only. */
   /* The studio workflow's quiet "done" tick (WorkProgress). Semantic green, like the Paid badge; dark theme lifts it in themes.css. */
   .work-check { @apply text-green-600; }
-  .row-action-add { @apply inline-flex items-center justify-center h-7 w-7 rounded-lg transition duration-150 bg-primary-50 text-primary hover:bg-primary-lighter hover:text-primary-dark focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50; }
+  .row-action-add { @apply inline-flex items-center justify-center h-7 w-7 rounded-[var(--r-btn)] transition duration-150 bg-primary-50 text-primary hover:bg-primary-lighter hover:text-primary-dark focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-50; }
   .table-head { @apply text-[12px] font-bold uppercase tracking-[0.6px] text-gray-500 px-5 py-2.5 text-left whitespace-nowrap; }
   .table-cell { @apply px-5 py-3 text-[14px] text-gray-700 whitespace-nowrap; }
   .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-[12px] font-medium leading-4; }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, ChevronDown, ChevronRight, Boxes, Leaf, LogOut, Palette, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Search, CloudFog, Settings, Sun, Sunset, User } from 'lucide-react';
+import { Bell, ChevronDown, ChevronRight, Boxes, Leaf, LogOut, Palette, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Search, CloudFog, Settings, Sprout, Sun, Sunset, User } from 'lucide-react';
 import { THEMES, type ThemePref } from '@/lib/theme';
 import { Dropdown } from '@/components/ui';
 import { NAV, type NavItem } from '@erp/shared';
@@ -86,7 +86,7 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
   // product name from the build. They are different things and both are shown.
   const company = useCompanyProfile().data;
   return (
-    <aside className={cx('flex h-full flex-col border-r border-line bg-white transition-all', collapsed ? 'w-[68px]' : 'w-[260px]')}>
+    <aside className={cx('flex h-full flex-col border-r border-line bg-sidebar transition-all', collapsed ? 'w-[68px]' : 'w-[260px]')}>
       <Link to="/dashboard" className="flex h-16 items-center gap-2.5 border-b border-line px-4" title={collapsed ? company?.name ?? PRODUCT_NAME : undefined}>
         <BrandMark name={company?.name} companyId={company?.id} logoVersion={company?.logo?.version} />
         {!collapsed && (
@@ -115,7 +115,7 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
 /** Theme switcher — every theme in THEMES (lib/theme.ts), plus System */
 export function ThemeSwitcher() {
   const { theme, setTheme } = useUiStore();
-  const icons: Record<string, JSX.Element> = { light: <Sun className="h-4 w-4" />, dark: <Moon className="h-4 w-4" />, olive: <Leaf className="h-4 w-4" />, sky: <Palette className="h-4 w-4" />, slate: <Palette className="h-4 w-4" />, teal: <Palette className="h-4 w-4" />, lavender: <Palette className="h-4 w-4" />, mist: <CloudFog className="h-4 w-4" />, dusk: <Sunset className="h-4 w-4" />, system: <Monitor className="h-4 w-4" /> };
+  const icons: Record<string, JSX.Element> = { light: <Sun className="h-4 w-4" />, dark: <Moon className="h-4 w-4" />, olive: <Leaf className="h-4 w-4" />, sky: <Palette className="h-4 w-4" />, slate: <Palette className="h-4 w-4" />, teal: <Palette className="h-4 w-4" />, lavender: <Palette className="h-4 w-4" />, mist: <CloudFog className="h-4 w-4" />, olivepro: <Sprout className="h-4 w-4" />, dusk: <Sunset className="h-4 w-4" />, system: <Monitor className="h-4 w-4" /> };
   const items = [...THEMES.map((t) => ({ label: <span className="flex items-center gap-2">{icons[t.key]}<span className="flex-1">{t.label}</span><span className="h-3 w-3 rounded-full border border-line" style={{ background: t.swatch }} />{theme === t.key && <span className="text-primary">✓</span>}</span>, onClick: () => setTheme(t.key) })), { divider: true, label: '' }, { label: <span className="flex items-center gap-2">{icons.system}<span className="flex-1">System</span>{theme === 'system' && <span className="text-primary">✓</span>}</span>, onClick: () => setTheme('system' as ThemePref) }];
   return <Dropdown items={items} trigger={<button className="icon-btn rounded-full" title="Theme">{icons[theme] ?? icons.system}</button>} />;
 }

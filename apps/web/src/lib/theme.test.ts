@@ -25,7 +25,7 @@ const token = (b: string, name: string) => b.match(new RegExp(`${name}:\\s*([0-9
 
 describe('themes', () => {
   it('keeps Light, Dark and Olive and adds the professional set', () => {
-    expect(THEMES.map((t) => t.key)).toEqual(['light', 'dark', 'olive', 'sky', 'slate', 'teal', 'lavender', 'mist', 'dusk']);
+    expect(THEMES.map((t) => t.key)).toEqual(['light', 'dark', 'olive', 'sky', 'slate', 'teal', 'lavender', 'mist', 'olivepro', 'dusk']);
   });
 
   it.each(THEMES.map((t) => t.key))('%s defines every token', (key) => {
