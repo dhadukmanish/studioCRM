@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { THEMES } from './theme';
+import { DARK_THEMES, THEMES } from './theme';
 
 /**
  * Every theme the switcher offers must be a complete token set in themes.css — a missing block or
@@ -25,7 +25,7 @@ const token = (b: string, name: string) => b.match(new RegExp(`${name}:\\s*([0-9
 
 describe('themes', () => {
   it('keeps Light, Dark and Olive and adds the professional set', () => {
-    expect(THEMES.map((t) => t.key)).toEqual(['light', 'dark', 'olive', 'sky', 'slate', 'teal', 'lavender']);
+    expect(THEMES.map((t) => t.key)).toEqual(['light', 'dark', 'olive', 'sky', 'slate', 'teal', 'lavender', 'dusk']);
   });
 
   it.each(THEMES.map((t) => t.key))('%s defines every token', (key) => {
@@ -34,11 +34,24 @@ describe('themes', () => {
     for (const t of TOKENS) expect(b, `${key} ${t}`).toContain(`${t}:`);
   });
 
-  it.each(THEMES.filter((t) => t.key !== 'dark').map((t) => t.key))('%s: white button text on --primary meets 4.5:1', (key) => {
+  it.each(THEMES.filter((t) => !DARK_THEMES.includes(t.key)).map((t) => t.key))('%s: white button text on --primary meets 4.5:1', (key) => {
     const primary = token(block(key), '--primary');
     // A missing token must fail here, not read as black (which would "pass" at 21:1).
     expect(primary).toMatch(/^\d+ \d+ \d+$/);
     const ratio = (1 + 0.05) / (luminance(primary) + 0.05);
     expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // On a dark theme the primary button's text is the surface colour (text-white maps to --surface).
+  it.each([...DARK_THEMES])('%s: surface-coloured button text on --primary meets 4.5:1', (key) => {
+    const b = block(key);
+    const [p, s] = [luminance(token(b, '--primary')), luminance(token(b, '--surface'))];
+    expect((Math.max(p, s) + 0.05) / (Math.min(p, s) + 0.05)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(THEMES.map((t) => t.key))('%s: body text (gray-900) on the surface meets 7:1', (key) => {
+    const b = block(key);
+    const [t, s] = [luminance(token(b, '--gray-900')), luminance(token(b, '--surface'))];
+    expect((Math.max(t, s) + 0.05) / (Math.min(t, s) + 0.05)).toBeGreaterThanOrEqual(7);
   });
 });

@@ -17,6 +17,7 @@ export default {
         muted: v('gray-200'),
         line: v('line'),
         page: v('page'),
+        series: { 1: v('series-1'), 2: v('series-2'), 3: v('series-3'), 4: v('series-4'), 5: v('series-5') }, // figure marks only (themes.css)
         head: v('head'), // table header background
         input: v('input-border'),
       },

@@ -2,7 +2,7 @@
 // Theme registry + apply helper. Add a theme: define its tokens in themes.css
 // under [data-theme='<key>'] and add it to THEMES.
 // ---------------------------------------------------------------------------
-export type ThemeKey = 'light' | 'dark' | 'olive' | 'sky' | 'slate' | 'teal' | 'lavender';
+export type ThemeKey = 'light' | 'dark' | 'olive' | 'sky' | 'slate' | 'teal' | 'lavender' | 'dusk';
 export type ThemePref = ThemeKey | 'system';
 
 export const THEMES: { key: ThemeKey; label: string; swatch: string; description: string }[] = [
@@ -13,7 +13,11 @@ export const THEMES: { key: ThemeKey; label: string; swatch: string; description
   { key: 'slate', label: 'Slate', swatch: '#3D4C61', description: 'Cool neutral slate' },
   { key: 'teal', label: 'Teal', swatch: '#0F766E', description: 'Muted teal on white' },
   { key: 'lavender', label: 'Soft Lavender', swatch: '#67589C', description: 'Subtle muted lavender' },
+  { key: 'dusk', label: 'Dusk', swatch: '#272E3D', description: 'Soft dim slate — darker, low glare' },
 ];
+
+/** Themes drawn on a dark surface: the browser's own controls (scrollbars, date fields) follow them. */
+export const DARK_THEMES: readonly ThemeKey[] = ['dark', 'dusk'];
 
 export function resolveTheme(pref: ThemePref): ThemeKey {
   if (pref !== 'system') return pref;
@@ -23,7 +27,7 @@ export function resolveTheme(pref: ThemePref): ThemeKey {
 export function applyTheme(pref: ThemePref) {
   const key = resolveTheme(pref);
   document.documentElement.dataset.theme = key;
-  document.documentElement.style.colorScheme = key === 'dark' ? 'dark' : 'light';
+  document.documentElement.style.colorScheme = DARK_THEMES.includes(key) ? 'dark' : 'light';
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', THEMES.find((t) => t.key === key)?.swatch ?? '#ffffff');
 }

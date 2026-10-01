@@ -31,6 +31,15 @@
   --gray-800: 34 34 34;
   --gray-900: 17 17 17;
   --gray-1000: 0 0 0;
+
+  /* Series colours for small figure marks (dashboard icons, stage bars) — the validated reference
+     categorical palette, in fixed order. Shared by every light theme; dark themes step them below.
+     Marks only: text stays on the gray / primary tokens. */
+  --series-1: 42 120 214;   /* blue */
+  --series-2: 235 104 52;   /* orange */
+  --series-3: 27 175 122;   /* aqua */
+  --series-4: 237 161 0;    /* yellow */
+  --series-5: 232 123 164;  /* magenta */
 }
 
 /* ---------- Dark ---------- */
@@ -61,6 +70,48 @@
   --gray-800: 226 230 236;
   --gray-900: 241 243 247;
   --gray-1000: 255 255 255;
+
+  --series-1: 57 135 229;
+  --series-2: 217 89 38;
+  --series-3: 25 158 112;
+  --series-4: 201 133 0;
+  --series-5: 213 81 129;
+}
+
+/* ---------- Dusk (soft dim slate: darker than the light themes, gentler than Dark — no pure
+   white text, no pure black, low glare) ---------- */
+[data-theme='dusk'] {
+  color-scheme: dark;
+  --primary: 122 162 247;
+  --primary-dark: 98 138 226;
+  --primary-lighter: 49 64 102;
+  --primary-50: 43 54 82;
+
+  --surface: 39 46 61;
+  --page: 30 36 48;
+  --head: 46 54 71;
+  --line: 58 67 86;
+  --input-border: 74 84 106;
+  --shadow: 0 0 0;
+
+  --gray-0: 39 46 61;
+  --gray-50: 46 54 71;
+  --gray-100: 53 62 81;
+  --gray-200: 64 74 95;
+  --gray-300: 76 87 110;
+  --gray-400: 138 149 170;
+  --gray-500: 163 173 192;
+  --gray-600: 186 195 211;
+  --gray-700: 203 211 225;
+  --gray-800: 214 221 233;
+  --gray-900: 226 231 240;
+  --gray-1000: 240 243 248;
+
+  --series-1: 57 135 229;
+  --series-2: 217 89 38;
+  --series-3: 25 158 112;
+  --series-4: 201 133 0;
+  --series-5: 213 81 129;
 }
 
 /* ---------- Olive (warm, earthy light theme) ---------- */
@@ -209,11 +260,12 @@
 }
 
 /* dark-mode tweaks for semantic badge colours (Tailwind's green/red/amber stay readable on dark) */
-[data-theme='dark'] .badge.bg-green-50 { background: rgb(22 101 52 / 0.25); color: rgb(134 239 172); }
-[data-theme='dark'] .badge.bg-red-50 { background: rgb(153 27 27 / 0.25); color: rgb(252 165 165); }
-[data-theme='dark'] .badge.bg-amber-50 { background: rgb(146 64 14 / 0.25); color: rgb(252 211 77); }
-[data-theme='dark'] .badge.bg-purple-50 { background: rgb(88 28 135 / 0.3); color: rgb(216 180 254); }
-[data-theme='dark'] .bg-red-50 { background: rgb(153 27 27 / 0.2); }
-[data-theme='dark'] .bg-amber-50 { background: rgb(146 64 14 / 0.2); }
-[data-theme='dark'] .work-check { color: rgb(134 239 172); }
-[data-theme='dark'] input[type='date'], [data-theme='dark'] input[type='time'], [data-theme='dark'] input[type='datetime-local'] { color-scheme: dark; }
+[data-theme='dark'] .badge.bg-green-50, [data-theme='dusk'] .badge.bg-green-50 { background: rgb(22 101 52 / 0.25); color: rgb(134 239 172); }
+[data-theme='dark'] .badge.bg-red-50, [data-theme='dusk'] .badge.bg-red-50 { background: rgb(153 27 27 / 0.25); color: rgb(252 165 165); }
+[data-theme='dark'] .badge.bg-amber-50, [data-theme='dusk'] .badge.bg-amber-50 { background: rgb(146 64 14 / 0.25); color: rgb(252 211 77); }
+[data-theme='dark'] .badge.bg-purple-50, [data-theme='dusk'] .badge.bg-purple-50 { background: rgb(88 28 135 / 0.3); color: rgb(216 180 254); }
+[data-theme='dark'] .bg-red-50, [data-theme='dusk'] .bg-red-50 { background: rgb(153 27 27 / 0.2); }
+[data-theme='dark'] .bg-amber-50, [data-theme='dusk'] .bg-amber-50 { background: rgb(146 64 14 / 0.2); }
+[data-theme='dark'] .work-check, [data-theme='dusk'] .work-check { color: rgb(134 239 172); }
+[data-theme='dark'] input[type='date'], [data-theme='dark'] input[type='time'], [data-theme='dark'] input[type='datetime-local'], [data-theme='dusk'] input[type='date'], [data-theme='dusk'] input[type='time'], [data-theme='dusk'] input[type='datetime-local'] { color-scheme: dark; }
+[data-theme='dark'] .text-red-700, [data-theme='dusk'] .text-red-700 { color: rgb(248 113 113); }

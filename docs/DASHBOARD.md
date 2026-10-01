@@ -34,6 +34,14 @@ booked ahead and count to the period end. The Today figures ignore the period. M
 a bill dated after today is not yet counted, and Received is what active receipts dated up to
 today put on those bills.
 
+## Colour
+
+Section badges, the stage edges and stage bars use the theme's **series** tokens (`--series-1…5`,
+`bg-series-N` in Tailwind) — the validated reference categorical palette (colour-blind separation
+checked against light, Dark and Dusk surfaces), in fixed order, one step darker on dark themes.
+They colour marks only: every figure keeps its text label, numbers stay in the text colours, and red
+is reserved for something late (overdue counts above zero).
+
 ## API and RBAC
 
 `GET /api/dashboard?period=&from=&to=` — any signed-in user. Each section is decided on the

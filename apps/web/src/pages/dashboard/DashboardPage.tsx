@@ -16,6 +16,18 @@ import { useAuthStore } from '@/store/auth';
  *
  * The period lives in the URL (`?period=…&from=…&to=…`), so a view can be bookmarked or shared.
  */
+/**
+ * Colour for marks only (icon badges, stage edges and bars) — the theme's validated series palette
+ * (themes.css), in fixed order. Every figure keeps its text label, so colour is never the only cue.
+ */
+const SERIES = [
+  { chip: 'bg-series-1/15 text-series-1', edge: 'border-l-series-1', bar: 'bg-series-1' },
+  { chip: 'bg-series-2/15 text-series-2', edge: 'border-l-series-2', bar: 'bg-series-2' },
+  { chip: 'bg-series-3/15 text-series-3', edge: 'border-l-series-3', bar: 'bg-series-3' },
+  { chip: 'bg-series-4/15 text-series-4', edge: 'border-l-series-4', bar: 'bg-series-4' },
+  { chip: 'bg-series-5/15 text-series-5', edge: 'border-l-series-5', bar: 'bg-series-5' },
+] as const;
+
 export default function DashboardPage() {
   const { user, can } = useAuthStore();
   const fmt = useDateFormatters();
@@ -84,7 +96,7 @@ export default function DashboardPage() {
 
       <div className="grid gap-4 xl:grid-cols-2">
         {d?.inquiries && (
-          <Section title="Inquiries" icon={<CalendarDays />} hint="Appointments dated in the period" link={can('operations_appointments') ? { to: '/modules/appointments', label: 'Appointments' } : undefined}>
+          <Section title="Inquiries" tone={0} icon={<CalendarDays />} hint="Appointments dated in the period" link={can('operations_appointments') ? { to: '/modules/appointments', label: 'Appointments' } : undefined}>
             <Figures items={[
               { label: 'Total inquiries', value: d.inquiries.total, strong: true },
               { label: 'Pending', value: d.inquiries.pending },
@@ -93,7 +105,7 @@ export default function DashboardPage() {
           </Section>
         )}
         {d?.orders && (
-          <Section title="Orders" icon={<ClipboardList />} hint="Bills dated in the period · completed = delivered" link={can('operations_billing') ? { to: '/modules/billing', label: 'Bills' } : undefined}>
+          <Section title="Orders" tone={2} icon={<ClipboardList />} hint="Bills dated in the period · completed = delivered" link={can('operations_billing') ? { to: '/modules/billing', label: 'Bills' } : undefined}>
             <Figures items={[
               { label: 'Total orders', value: d.orders.total, strong: true },
               { label: 'Completed', value: d.orders.completed },
@@ -104,13 +116,13 @@ export default function DashboardPage() {
       </div>
 
       {d?.orders && (
-        <Section title="Order process status" icon={<Truck />} hint="Where the period's orders are now" link={can('operations_work') ? { to: '/modules/reports/delivery', label: 'Delivery report' } : undefined}>
+        <Section title="Order process status" tone={1} icon={<Truck />} hint="Where the period's orders are now" link={can('operations_work') ? { to: '/modules/reports/delivery', label: 'Delivery report' } : undefined}>
           <Pipeline counts={d.orders.byPosition} total={d.orders.total} />
         </Section>
       )}
 
       {d?.money && (
-        <Section title="Payments" icon={<IndianRupee />} hint="As of today — the same figures as Reports → Receivables" link={can('reports_receivables') ? { to: '/modules/reports/receivables', label: 'Receivables' } : undefined}>
+        <Section title="Payments" tone={3} icon={<IndianRupee />} hint="As of today — the same figures as Reports → Receivables" link={can('reports_receivables') ? { to: '/modules/reports/receivables', label: 'Receivables' } : undefined}>
           <Figures
             items={[
               { label: 'Billed in period', value: fmtMoney(d.money.billed) },
@@ -125,12 +137,12 @@ export default function DashboardPage() {
   );
 }
 
-function Section({ title, icon, hint, link, children }: { title: string; icon: ReactNode; hint: string; link?: { to: string; label: string }; children: ReactNode }) {
+function Section({ title, tone, icon, hint, link, children }: { title: string; tone: number; icon: ReactNode; hint: string; link?: { to: string; label: string }; children: ReactNode }) {
   return (
     <section className="card min-w-0 p-4" aria-label={title}>
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="text-primary [&>svg]:h-4 [&>svg]:w-4">{icon}</span>
+          <span className={cx('flex h-7 w-7 shrink-0 items-center justify-center rounded-md [&>svg]:h-4 [&>svg]:w-4', SERIES[tone].chip)} aria-hidden>{icon}</span>
           <h3 className="text-[14px] font-semibold text-gray-900">{title}</h3>
           <span className="hidden truncate text-[12px] text-gray-500 sm:inline">· {hint}</span>
         </div>
@@ -167,14 +179,14 @@ function Pipeline({ counts, total }: { counts: Record<(typeof WORK_POSITIONS)[nu
         const n = counts[p];
         const share = total ? n / total : 0;
         return (
-          <li key={p} className="min-w-0 rounded-md border border-line px-3 py-2.5">
+          <li key={p} className={cx('min-w-0 rounded-md border border-l-[3px] border-line px-3 py-2.5', SERIES[i].edge)}>
             <div className="flex items-center justify-between gap-2 text-[12px] text-gray-500">
               <span className="truncate">{i + 1 < WORK_POSITIONS.length ? `${i + 1}. ${p === 'DELIVERY' ? 'Delivery due' : WORK_POSITION_LABELS[p]}` : 'Completed'}</span>
-              {p === 'COMPLETE' && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />}
+              {p === 'COMPLETE' && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-series-5" aria-hidden />}
             </div>
             <div className="tabular-nums text-[18px] text-gray-900">{n}</div>
             <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-gray-100" aria-hidden>
-              <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round(share * 100)}%` }} />
+              <div className={cx('h-full rounded-full', SERIES[i].bar)} style={{ width: `${Math.round(share * 100)}%` }} />
             </div>
             <div className="mt-1 text-[11px] text-gray-500">{total ? `${Math.round(share * 100)}% of orders` : '—'}</div>
           </li>
@@ -187,18 +199,20 @@ function Pipeline({ counts, total }: { counts: Record<(typeof WORK_POSITIONS)[nu
 /** Today's to-dos and what is late — independent of the chosen period. Hidden when there is nothing. */
 function Attention({ d, canWork, canAppointments }: { d: DashboardSummary; canWork: boolean; canAppointments: boolean }) {
   const items = [
-    d.inquiries && { label: 'Appointments today', n: d.inquiries.pendingToday, icon: CalendarClock, to: canWork ? '/modules/work' : canAppointments ? '/modules/appointments' : undefined, late: false },
-    d.orders && { label: 'Deliveries due today', n: d.orders.dueToday, icon: Truck, to: canWork ? '/modules/work' : undefined, late: false },
-    d.orders && { label: 'Overdue deliveries', n: d.orders.overdue, icon: AlertTriangle, to: canWork ? '/modules/reports/delivery' : undefined, late: true },
-    d.inquiries && { label: 'Overdue appointments', n: d.inquiries.overdue, icon: AlertTriangle, to: canAppointments ? '/modules/appointments' : undefined, late: true },
-  ].filter((x): x is { label: string; n: number; icon: typeof Truck; to: string | undefined; late: boolean } => !!x);
+    d.inquiries && { tone: 0, label: 'Appointments today', n: d.inquiries.pendingToday, icon: CalendarClock, to: canWork ? '/modules/work' : canAppointments ? '/modules/appointments' : undefined, late: false },
+    d.orders && { tone: 2, label: 'Deliveries due today', n: d.orders.dueToday, icon: Truck, to: canWork ? '/modules/work' : undefined, late: false },
+    d.orders && { tone: -1, label: 'Overdue deliveries', n: d.orders.overdue, icon: AlertTriangle, to: canWork ? '/modules/reports/delivery' : undefined, late: true },
+    d.inquiries && { tone: -1, label: 'Overdue appointments', n: d.inquiries.overdue, icon: AlertTriangle, to: canAppointments ? '/modules/appointments' : undefined, late: true },
+  ].filter((x): x is { tone: number; label: string; n: number; icon: typeof Truck; to: string | undefined; late: boolean } => !!x);
   if (!items.length) return null;
   return (
     <section aria-label="Today" className="card grid grid-cols-2 gap-px overflow-hidden bg-line p-0 lg:grid-cols-4">
       {items.map((it) => {
         const body = (
           <>
-            <it.icon className={cx('h-4 w-4 shrink-0', it.late && it.n > 0 ? 'text-red-700' : 'text-gray-400')} aria-hidden />
+            <span className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-md', it.late && it.n > 0 ? 'bg-red-50 text-red-700' : it.tone < 0 ? 'bg-gray-100 text-gray-500' : SERIES[it.tone].chip)} aria-hidden>
+              <it.icon className="h-4 w-4" />
+            </span>
             <div className="min-w-0">
               <div className="truncate text-[12px] text-gray-500">{it.label}</div>
               <div className={cx('tabular-nums text-[18px]', it.late && it.n > 0 ? 'font-semibold text-red-700' : 'text-gray-900')}>{it.n}</div>
