@@ -86,7 +86,7 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
   // product name from the build. They are different things and both are shown.
   const company = useCompanyProfile().data;
   return (
-    <aside className={cx('flex h-full flex-col border-r border-line bg-sidebar transition-all', collapsed ? 'w-[68px]' : 'w-[260px]')}>
+    <aside className={cx('app-chrome flex h-full flex-col border-r border-line bg-sidebar transition-all', collapsed ? 'w-[68px]' : 'w-[260px]')}>
       <Link to="/dashboard" className="flex h-16 items-center gap-2.5 border-b border-line px-4" title={collapsed ? company?.name ?? PRODUCT_NAME : undefined}>
         <BrandMark name={company?.name} companyId={company?.id} logoVersion={company?.logo?.version} />
         {!collapsed && (
@@ -169,7 +169,7 @@ export default function AppShell() {
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center gap-3 border-b border-line bg-white px-4 sm:px-6">
+        <header className="app-chrome flex h-16 shrink-0 items-center gap-3 border-b border-line bg-sidebar px-4 sm:px-6">
           <button className="icon-btn lg:hidden" onClick={() => setMobileOpen(true)}><Menu className="h-4 w-4" /></button>
           <button className="icon-btn hidden lg:inline-flex" onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}</button>
           <div className="relative hidden md:block w-[320px]">

@@ -172,7 +172,7 @@ function ReceivePaymentForm({ onClose, p }: { onClose: () => void; p: ReceivePay
 
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Paid by" required>
-            <div role="radiogroup" aria-label="Paid by" className="inline-flex h-10 w-full rounded-lg border border-input bg-surface p-0.5">
+            <div role="radiogroup" aria-label="Paid by" className="inline-flex h-10 w-full rounded-lg border border-input bg-field p-0.5">
               {PAYMENT_MODES.map((m) => (
                 <button
                   key={m}

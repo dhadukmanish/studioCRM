@@ -15,7 +15,8 @@
   --r-default: 8px;   /* Tailwind rounded */
   --r-md: 6px;        /* Tailwind rounded-md */
   --r-lg: 8px;        /* Tailwind rounded-lg */
-  --sidebar: var(--surface);
+  --sidebar: var(--surface);  /* sidebar and header bar */
+  --input-bg: var(--surface); /* every .input field */
 }
 
 :root, [data-theme='light'] {
@@ -251,22 +252,24 @@
   --series-5: 184 64 109;
 }
 
-/* ---------- Olive Professional (warm neutral base, olive only for actions and selection;
-   square, architectural controls) ---------- */
-[data-theme='olivepro'] {
+/* ---------- Olive Professional (deep olive sidebar and header, white panels on a warm page,
+   softly filled inputs; square, architectural controls) ---------- */
+/* The second selector gives the header's dropdown menus the light palette back. */
+[data-theme='olivepro'], [data-theme='olivepro'] .app-chrome .card {
   color-scheme: light;
   --primary: 79 103 46;          /* #4F672E — actions, selection */
   --primary-dark: 62 82 35;
-  --primary-lighter: 226 231 213;
-  --primary-50: 242 244 236;
+  --primary-lighter: 222 229 205;
+  --primary-50: 240 243 231;
 
   --surface: 255 255 255;        /* #FFFFFF */
-  --page: 240 241 236;           /* #F0F1EC */
-  --head: 242 243 238;           /* #F2F3EE */
-  --line: 213 216 207;           /* #D5D8CF */
-  --input-border: 196 201 188;   /* #C4C9BC */
+  --page: 228 231 220;           /* #E4E7DC */
+  --head: 227 232 214;           /* #E3E8D6 — olive-tinted table header */
+  --line: 200 205 190;           /* #C8CDBE */
+  --input-border: 172 179 158;   /* #ACB39E */
+  --input-bg: 240 242 233;       /* #F0F2E9 — fields read as fields, apart from the panel */
   --shadow: 40 44 30;
-  --sidebar: 248 249 246;        /* #F8F9F6 */
+  --sidebar: 44 56 33;           /* #2C3821 — sidebar and header bar */
 
   --gray-0: 255 255 255;
   --gray-50: 247 247 243;        /* #F7F7F3 */
@@ -289,8 +292,34 @@
   --r-md: 2px;
   --r-lg: 3px;
 }
-/* Selected navigation: a quiet olive tint with a firm accent edge. */
-[data-theme='olivepro'] aside a[aria-current='page'] { box-shadow: inset 3px 0 0 rgb(var(--primary)); }
+/* Sidebar and header bar (.app-chrome, AppShell): light text and controls on deep olive. */
+[data-theme='olivepro'] .app-chrome {
+  color-scheme: dark;
+  --primary: 196 214 140;        /* #C4D68C — selection on the dark bar */
+  --primary-dark: 216 230 170;
+  --primary-lighter: 72 90 50;
+  --primary-50: 66 82 48;
+
+  --surface: 60 75 45;           /* raised: icon buttons, user pill */
+  --line: 72 88 56;
+  --input-border: 96 114 76;
+  --input-bg: 56 70 42;
+  --shadow: 0 0 0;
+
+  --gray-0: 60 75 45;
+  --gray-50: 56 70 42;
+  --gray-100: 66 82 50;
+  --gray-200: 84 102 66;
+  --gray-300: 104 122 84;
+  --gray-400: 172 184 152;
+  --gray-500: 192 202 174;
+  --gray-600: 216 223 202;
+  --gray-700: 229 235 219;
+  --gray-800: 239 243 231;
+  --gray-900: 250 252 245;
+}
+/* Selected navigation: a tint with a firm accent edge. */
+[data-theme='olivepro'] .app-chrome a[aria-current='page'] { box-shadow: inset 3px 0 0 rgb(var(--primary)); }
 
 /* ---------- Teal (white dominant, muted teal) ---------- */
 [data-theme='teal'] {

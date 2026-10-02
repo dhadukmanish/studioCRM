@@ -17,16 +17,19 @@ import { useAuthStore } from '@/store/auth';
  * The period lives in the URL (`?period=…&from=…&to=…`), so a view can be bookmarked or shared.
  */
 /**
- * Colour for marks only (icon badges, stage edges and bars) — the theme's validated series palette
- * (themes.css), in fixed order. Every figure keeps its text label, so colour is never the only cue.
+ * Colour for marks and box fills (icon badges, edges, bars, a light tint behind each figure) — the
+ * theme's validated series palette (themes.css), in fixed order. A box's colour says what it shows:
+ * blue = totals, aqua = done / received, yellow = pending, orange = outstanding. Text stays on the
+ * gray tokens and every figure keeps its label, so colour is never the only cue.
  */
 const SERIES = [
-  { chip: 'bg-series-1/20 text-series-1', edge: 'border-l-series-1', bar: 'bg-series-1' },
-  { chip: 'bg-series-2/20 text-series-2', edge: 'border-l-series-2', bar: 'bg-series-2' },
-  { chip: 'bg-series-3/20 text-series-3', edge: 'border-l-series-3', bar: 'bg-series-3' },
-  { chip: 'bg-series-4/20 text-series-4', edge: 'border-l-series-4', bar: 'bg-series-4' },
-  { chip: 'bg-series-5/20 text-series-5', edge: 'border-l-series-5', bar: 'bg-series-5' },
+  { chip: 'bg-series-1/20 text-series-1', edge: 'border-l-series-1', bar: 'bg-series-1', tint: 'bg-series-1/15' },
+  { chip: 'bg-series-2/20 text-series-2', edge: 'border-l-series-2', bar: 'bg-series-2', tint: 'bg-series-2/15' },
+  { chip: 'bg-series-3/20 text-series-3', edge: 'border-l-series-3', bar: 'bg-series-3', tint: 'bg-series-3/15' },
+  { chip: 'bg-series-4/20 text-series-4', edge: 'border-l-series-4', bar: 'bg-series-4', tint: 'bg-series-4/15' },
+  { chip: 'bg-series-5/20 text-series-5', edge: 'border-l-series-5', bar: 'bg-series-5', tint: 'bg-series-5/15' },
 ] as const;
+const TOTAL = 0, OUTSTANDING = 1, DONE = 2, PENDING = 3;
 
 export default function DashboardPage() {
   const { user, can } = useAuthStore();
@@ -98,18 +101,18 @@ export default function DashboardPage() {
         {d?.inquiries && (
           <Section title="Inquiries" tone={0} icon={<CalendarDays />} hint="Appointments dated in the period" link={can('operations_appointments') ? { to: '/modules/appointments', label: 'Appointments' } : undefined}>
             <Figures items={[
-              { label: 'Total inquiries', value: d.inquiries.total, strong: true },
-              { label: 'Pending', value: d.inquiries.pending },
-              { label: 'Done', value: d.inquiries.done },
+              { label: 'Total inquiries', value: d.inquiries.total, strong: true, tone: TOTAL },
+              { label: 'Pending', value: d.inquiries.pending, tone: PENDING },
+              { label: 'Done', value: d.inquiries.done, tone: DONE },
             ]} />
           </Section>
         )}
         {d?.orders && (
           <Section title="Orders" tone={2} icon={<ClipboardList />} hint="Bills dated in the period · completed = delivered" link={can('operations_billing') ? { to: '/modules/billing', label: 'Bills' } : undefined}>
             <Figures items={[
-              { label: 'Total orders', value: d.orders.total, strong: true },
-              { label: 'Completed', value: d.orders.completed },
-              { label: 'Pending', value: d.orders.pending },
+              { label: 'Total orders', value: d.orders.total, strong: true, tone: TOTAL },
+              { label: 'Completed', value: d.orders.completed, tone: DONE },
+              { label: 'Pending', value: d.orders.pending, tone: PENDING },
             ]} />
           </Section>
         )}
@@ -125,10 +128,10 @@ export default function DashboardPage() {
         <Section title="Payments" tone={3} icon={<IndianRupee />} hint="As of today — the same figures as Reports → Receivables" link={can('reports_receivables') ? { to: '/modules/reports/receivables', label: 'Receivables' } : undefined}>
           <Figures
             items={[
-              { label: 'Billed in period', value: fmtMoney(d.money.billed) },
-              { label: 'Received on these bills', value: fmtMoney(d.money.received) },
-              { label: 'Outstanding on these bills', value: fmtMoney(d.money.outstanding) },
-              { label: 'Total outstanding', value: fmtMoney(d.money.totalOutstanding), strong: true, sub: `${d.money.billsWithOutstanding} bill${d.money.billsWithOutstanding === 1 ? '' : 's'} · ${d.money.customersWithOutstanding} customer${d.money.customersWithOutstanding === 1 ? '' : 's'} · all periods` },
+              { label: 'Billed in period', value: fmtMoney(d.money.billed), tone: TOTAL },
+              { label: 'Received on these bills', value: fmtMoney(d.money.received), tone: DONE },
+              { label: 'Outstanding on these bills', value: fmtMoney(d.money.outstanding), tone: OUTSTANDING },
+              { label: 'Total outstanding', value: fmtMoney(d.money.totalOutstanding), strong: true, tone: OUTSTANDING, sub: `${d.money.billsWithOutstanding} bill${d.money.billsWithOutstanding === 1 ? '' : 's'} · ${d.money.customersWithOutstanding} customer${d.money.customersWithOutstanding === 1 ? '' : 's'} · all periods` },
             ]}
           />
         </Section>
@@ -157,11 +160,11 @@ function Section({ title, tone, icon, hint, link, children }: { title: string; t
   );
 }
 
-function Figures({ items }: { items: { label: string; value: number | string; strong?: boolean; sub?: string }[] }) {
+function Figures({ items }: { items: { label: string; value: number | string; strong?: boolean; sub?: string; tone: number }[] }) {
   return (
-    <div className={cx('grid gap-px overflow-hidden rounded-md bg-line', items.length === 4 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4' : 'grid-cols-3')}>
+    <div className={cx('grid gap-2', items.length === 4 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4' : 'grid-cols-3')}>
       {items.map((f) => (
-        <div key={f.label} className="min-w-0 bg-surface px-3 py-2.5">
+        <div key={f.label} className={cx('min-w-0 rounded-md border border-l-[3px] border-line px-3 py-2.5', SERIES[f.tone].edge, SERIES[f.tone].tint)}>
           <div className="truncate text-[12px] text-gray-500">{f.label}</div>
           <div className={cx('tabular-nums text-gray-900', f.strong ? 'text-[20px] font-semibold' : 'text-[18px]')}>{f.value}</div>
           {f.sub && <div className="truncate text-[11.5px] text-gray-500">{f.sub}</div>}
@@ -179,13 +182,13 @@ function Pipeline({ counts, total }: { counts: Record<(typeof WORK_POSITIONS)[nu
         const n = counts[p];
         const share = total ? n / total : 0;
         return (
-          <li key={p} className={cx('min-w-0 rounded-md border border-l-[3px] border-line px-3 py-2.5', SERIES[i].edge)}>
+          <li key={p} className={cx('min-w-0 rounded-md border border-l-[3px] border-line px-3 py-2.5', SERIES[i].edge, SERIES[i].tint)}>
             <div className="flex items-center justify-between gap-2 text-[12px] text-gray-500">
               <span className="truncate">{i + 1 < WORK_POSITIONS.length ? `${i + 1}. ${p === 'DELIVERY' ? 'Delivery due' : WORK_POSITION_LABELS[p]}` : 'Completed'}</span>
               {p === 'COMPLETE' && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-series-5" aria-hidden />}
             </div>
             <div className="tabular-nums text-[18px] text-gray-900">{n}</div>
-            <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-gray-100" aria-hidden>
+            <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface/70" aria-hidden>
               <div className={cx('h-full rounded-full', SERIES[i].bar)} style={{ width: `${Math.round(share * 100)}%` }} />
             </div>
             <div className="mt-1 text-[11px] text-gray-500">{total ? `${Math.round(share * 100)}% of orders` : '—'}</div>
@@ -199,14 +202,16 @@ function Pipeline({ counts, total }: { counts: Record<(typeof WORK_POSITIONS)[nu
 /** Today's to-dos and what is late — independent of the chosen period. Hidden when there is nothing. */
 function Attention({ d, canWork, canAppointments }: { d: DashboardSummary; canWork: boolean; canAppointments: boolean }) {
   const items = [
-    d.inquiries && { tone: 0, label: 'Appointments today', n: d.inquiries.pendingToday, icon: CalendarClock, to: canWork ? '/modules/work' : canAppointments ? '/modules/appointments' : undefined, late: false },
-    d.orders && { tone: 2, label: 'Deliveries due today', n: d.orders.dueToday, icon: Truck, to: canWork ? '/modules/work' : undefined, late: false },
+    d.inquiries && { tone: TOTAL, label: 'Appointments today', n: d.inquiries.pendingToday, icon: CalendarClock, to: canWork ? '/modules/work' : canAppointments ? '/modules/appointments' : undefined, late: false },
+    d.orders && { tone: DONE, label: 'Deliveries due today', n: d.orders.dueToday, icon: Truck, to: canWork ? '/modules/work' : undefined, late: false },
     d.orders && { tone: -1, label: 'Overdue deliveries', n: d.orders.overdue, icon: AlertTriangle, to: canWork ? '/modules/reports/delivery' : undefined, late: true },
     d.inquiries && { tone: -1, label: 'Overdue appointments', n: d.inquiries.overdue, icon: AlertTriangle, to: canAppointments ? '/modules/appointments' : undefined, late: true },
   ].filter((x): x is { tone: number; label: string; n: number; icon: typeof Truck; to: string | undefined; late: boolean } => !!x);
   if (!items.length) return null;
+  // A box's fill says what it holds: red when something is late, the figure's colour otherwise.
+  const fill = (it: (typeof items)[number]) => (it.late ? (it.n > 0 ? 'bg-red-50' : 'bg-surface') : SERIES[it.tone].tint);
   return (
-    <section aria-label="Today" className="card grid grid-cols-2 gap-px overflow-hidden bg-line p-0 lg:grid-cols-4">
+    <section aria-label="Today" className="card grid grid-cols-2 gap-2 p-2 lg:grid-cols-4">
       {items.map((it) => {
         const body = (
           <>
@@ -220,9 +225,9 @@ function Attention({ d, canWork, canAppointments }: { d: DashboardSummary; canWo
           </>
         );
         return it.to ? (
-          <Link key={it.label} to={it.to} className="flex items-center gap-3 bg-surface px-4 py-2.5 hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40">{body}</Link>
+          <Link key={it.label} to={it.to} className={cx('flex items-center gap-3 rounded-md border border-line px-4 py-2.5 transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40', fill(it))}>{body}</Link>
         ) : (
-          <div key={it.label} className="flex items-center gap-3 bg-surface px-4 py-2.5">{body}</div>
+          <div key={it.label} className={cx('flex items-center gap-3 rounded-md border border-line px-4 py-2.5', fill(it))}>{body}</div>
         );
       })}
     </section>

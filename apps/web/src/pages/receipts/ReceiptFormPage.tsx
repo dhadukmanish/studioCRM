@@ -262,7 +262,7 @@ function ReceiptForm() {
             )}
           </Field>
           <Field label="Payment Mode" required>
-            <div role="radiogroup" aria-label="Payment mode" className="inline-flex h-10 rounded-lg border border-input bg-surface p-0.5">
+            <div role="radiogroup" aria-label="Payment mode" className="inline-flex h-10 rounded-lg border border-input bg-field p-0.5">
               {PAYMENT_MODES.map((m) => (
                 <button
                   key={m}

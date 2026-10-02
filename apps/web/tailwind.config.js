@@ -15,6 +15,7 @@ export default {
         white: v('surface'),
         surface: v('surface'),
         sidebar: v('sidebar'),
+        field: v('input-bg'), // .input fill
         muted: v('gray-200'),
         line: v('line'),
         page: v('page'),

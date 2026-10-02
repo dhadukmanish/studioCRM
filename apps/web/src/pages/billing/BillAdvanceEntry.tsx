@@ -98,7 +98,7 @@ function AdvancePayment({ draft, onChange, errors, disabled }: { draft: AdvanceD
     <>
       <div className="flex items-center justify-between gap-3">
         <dt className="text-gray-500">Received via</dt>
-        <dd role="radiogroup" aria-label="Advance received via" className="inline-flex h-8 rounded-lg border border-input bg-surface p-0.5">
+        <dd role="radiogroup" aria-label="Advance received via" className="inline-flex h-8 rounded-lg border border-input bg-field p-0.5">
           {PAYMENT_MODES.map((m) => (
             <button
               key={m}

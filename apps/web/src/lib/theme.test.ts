@@ -9,9 +9,16 @@ import { DARK_THEMES, THEMES } from './theme';
  */
 const css = readFileSync(fileURLToPath(new URL('../themes.css', import.meta.url)), 'utf8');
 const TOKENS = ['--primary', '--primary-dark', '--primary-lighter', '--primary-50', '--surface', '--page', '--head', '--line', '--input-border', '--gray-500', '--gray-900'];
+/** A theme's own block: its selector may head a list (`[data-theme='x'], [data-theme='x'] .card {`). */
 const block = (key: string) => {
-  const start = css.indexOf(key === 'light' ? ":root, [data-theme='light'] {" : `[data-theme='${key}'] {`);
-  return start < 0 ? '' : css.slice(start, css.indexOf('}', start));
+  const head = key === 'light' ? ":root, [data-theme='light']" : `[data-theme='${key}']`;
+  const m = [`${head} {`, `${head}, `].map((h) => css.indexOf(h)).filter((i) => i >= 0);
+  return m.length ? css.slice(Math.min(...m), css.indexOf('}', Math.min(...m))) : '';
+};
+/** Contrast ratio of two "r g b" token values. */
+const contrast = (a: string, b: string) => {
+  const [x, y] = [luminance(a), luminance(b)];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 };
 /** WCAG relative luminance of an "r g b" token value. */
 const luminance = (rgb: string) => {
@@ -53,5 +60,18 @@ describe('themes', () => {
     const b = block(key);
     const [t, s] = [luminance(token(b, '--gray-900')), luminance(token(b, '--surface'))];
     expect((Math.max(t, s) + 0.05) / (Math.min(t, s) + 0.05)).toBeGreaterThanOrEqual(7);
+  });
+
+  // Olive Professional's dark sidebar and header (.app-chrome) re-map the text tokens; they must stay readable.
+  it('olivepro: sidebar and header text read clearly on the dark bar', () => {
+    const start = css.indexOf("[data-theme='olivepro'] .app-chrome {");
+    expect(start).toBeGreaterThan(0);
+    const chrome = css.slice(start, css.indexOf('}', start));
+    const bar = token(block('olivepro'), '--sidebar');
+    expect(bar).toMatch(/^\d+ \d+ \d+$/);
+    expect(contrast(token(chrome, '--gray-600'), bar), 'menu text').toBeGreaterThanOrEqual(7);
+    expect(contrast(token(chrome, '--gray-400'), bar), 'section labels').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(token(chrome, '--primary'), token(chrome, '--primary-lighter')), 'selected item').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(token(chrome, '--gray-800'), token(chrome, '--input-bg')), 'search text').toBeGreaterThanOrEqual(7);
   });
 });
