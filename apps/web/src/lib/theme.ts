@@ -2,7 +2,7 @@
 // Theme registry + apply helper. Add a theme: define its tokens in themes.css
 // under [data-theme='<key>'] and add it to THEMES.
 // ---------------------------------------------------------------------------
-export type ThemeKey = 'light' | 'dark' | 'olive' | 'sky' | 'slate' | 'teal' | 'lavender' | 'mist' | 'dusk' | 'olivepro';
+export type ThemeKey = 'light' | 'dark' | 'olive' | 'sky' | 'slate' | 'teal' | 'lavender' | 'mist' | 'dusk' | 'olivepro' | 'tealmint';
 export type ThemePref = ThemeKey | 'system';
 
 export const THEMES: { key: ThemeKey; label: string; swatch: string; description: string }[] = [
@@ -15,6 +15,7 @@ export const THEMES: { key: ThemeKey; label: string; swatch: string; description
   { key: 'lavender', label: 'Soft Lavender', swatch: '#67589C', description: 'Subtle muted lavender' },
   { key: 'mist', label: 'Mist', swatch: '#D6DCE5', description: 'Soft grey, no glare — between light and dark' },
   { key: 'olivepro', label: 'Olive Professional', swatch: '#4F672E', description: 'Warm neutral, olive accents, square controls' },
+  { key: 'tealmint', label: 'Deep Teal & Mint', swatch: '#0E4B47', description: 'Deep teal bar, fresh mint accents' },
   { key: 'dusk', label: 'Dusk', swatch: '#272E3D', description: 'Soft dim slate — darker, low glare' },
 ];
 

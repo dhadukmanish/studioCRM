@@ -32,7 +32,7 @@ const token = (b: string, name: string) => b.match(new RegExp(`${name}:\\s*([0-9
 
 describe('themes', () => {
   it('keeps Light, Dark and Olive and adds the professional set', () => {
-    expect(THEMES.map((t) => t.key)).toEqual(['light', 'dark', 'olive', 'sky', 'slate', 'teal', 'lavender', 'mist', 'olivepro', 'dusk']);
+    expect(THEMES.map((t) => t.key)).toEqual(['light', 'dark', 'olive', 'sky', 'slate', 'teal', 'lavender', 'mist', 'olivepro', 'tealmint', 'dusk']);
   });
 
   it.each(THEMES.map((t) => t.key))('%s defines every token', (key) => {
@@ -62,16 +62,25 @@ describe('themes', () => {
     expect((Math.max(t, s) + 0.05) / (Math.min(t, s) + 0.05)).toBeGreaterThanOrEqual(7);
   });
 
-  // Olive Professional's dark sidebar and header (.app-chrome) re-map the text tokens; they must stay readable.
-  it('olivepro: sidebar and header text read clearly on the dark bar', () => {
-    const start = css.indexOf("[data-theme='olivepro'] .app-chrome {");
-    expect(start).toBeGreaterThan(0);
-    const chrome = css.slice(start, css.indexOf('}', start));
-    const bar = token(block('olivepro'), '--sidebar');
-    expect(bar).toMatch(/^\d+ \d+ \d+$/);
-    expect(contrast(token(chrome, '--gray-600'), bar), 'menu text').toBeGreaterThanOrEqual(7);
-    expect(contrast(token(chrome, '--gray-400'), bar), 'section labels').toBeGreaterThanOrEqual(4.5);
-    expect(contrast(token(chrome, '--primary'), token(chrome, '--primary-lighter')), 'selected item').toBeGreaterThanOrEqual(4.5);
-    expect(contrast(token(chrome, '--gray-800'), token(chrome, '--input-bg')), 'search text').toBeGreaterThanOrEqual(7);
+  // Every light theme draws its sidebar and header as a dark bar (.app-chrome); dark themes are left out
+  // by a :not() list that must match DARK_THEMES, or a dark theme would get a light theme's bar.
+  const BAR = `:root${DARK_THEMES.map((k) => `:not([data-theme='${k}'])`).join('')}`;
+  it('the dark bar applies to exactly the light themes', () => {
+    expect(css).toContain(`${BAR} {`);
+    expect(css).toContain(`${BAR} .app-chrome {`);
+    expect(css).toContain(`${BAR} .app-chrome .card {`);
+  });
+
+  it.each(THEMES.filter((t) => !DARK_THEMES.includes(t.key)).map((t) => t.key))('%s: sidebar and header read clearly on the dark bar', (key) => {
+    const b = block(key);
+    const start = css.indexOf(`${BAR} .app-chrome {`);
+    const bar = css.slice(start, css.indexOf('}', start));
+    const [c1, c2, c3, accent] = ['--chrome', '--chrome-2', '--chrome-3', '--chrome-accent'].map((t) => token(b, t));
+    for (const v of [c1, c2, c3, accent]) expect(v, key).toMatch(/^\d+ \d+ \d+$/);
+    expect(contrast(token(bar, '--gray-600'), c1), 'menu text').toBeGreaterThanOrEqual(7);
+    expect(contrast(token(bar, '--gray-400'), c1), 'section labels').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(accent, c3), 'selected item').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(accent, c2), 'brand initials on the accent').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(token(bar, '--gray-800'), c2), 'search text').toBeGreaterThanOrEqual(7);
   });
 });
