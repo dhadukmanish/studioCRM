@@ -1,13 +1,16 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Ban, KeyRound, Pencil, Plus, Power } from 'lucide-react';
+import { ArrowLeft, Ban, Download, KeyRound, Pencil, Plus, Power } from 'lucide-react';
 import { PLAN_KIND_LABELS } from '@erp/shared';
 import { DataTable, type Column } from '@/components/data/DataTable';
 import { Badge, ConfirmDialog, EmptyState, Spinner } from '@/components/ui';
 import { ApiError } from '@/lib/api';
+import { saveFile } from '@/lib/invoice';
+import { platformApi } from '@/lib/platformApi';
+import { toast } from '@/lib/toast';
 import { fmtMoney } from '@/lib/format';
 import { useDateFormatters } from '@/lib/settings';
-import { PAYMENT_MODE_LABELS, usePlatformSave, useStudio, type Period, type StudioDetail } from './queries';
+import { PAYMENT_MODE_LABELS, usePlatformSave, usePlatformToday, useStudio, type Period, type StudioDetail } from './queries';
 import { daysLeftText, StatusBadge } from './StatusBadge';
 import { GrantDialog } from './GrantFields';
 import { CancelPeriodDialog, OwnerPasswordDialog, RenameDialog } from './StudioDialogs';
@@ -114,6 +117,7 @@ export default function StudioDetailPage() {
           <button type="button" className="btn-primary" onClick={() => setDialog('grant')}><Plus className="h-4 w-4" /> Add / renew</button>
           <button type="button" className="btn-outline" onClick={() => setDialog('rename')}><Pencil className="h-4 w-4" /> Rename</button>
           {s.owner && <button type="button" className="btn-outline" onClick={() => setDialog('password')}><KeyRound className="h-4 w-4" /> Reset owner password</button>}
+          <BackupButton studio={s} />
           <button type="button" className={suspended ? 'btn-outline-primary' : 'btn-outline'} onClick={() => setDialog('status')}><Power className="h-4 w-4" /> {suspended ? 'Activate' : 'Suspend'}</button>
         </div>
       </div>
@@ -145,5 +149,27 @@ export default function StudioDetailPage() {
         onConfirm={() => setStatus.mutate({ method: 'post', url: `/api/platform/studios/${s.id}/status`, body: { isActive: suspended } })}
       />
     </>
+  );
+}
+
+/** Downloads the studio's data backup (ZIP: a CSV per table + backup.json). The server logs it in the studio's activity log. */
+function BackupButton({ studio }: { studio: StudioDetail }) {
+  const today = usePlatformToday();
+  const [busy, setBusy] = useState(false);
+  const download = async () => {
+    setBusy(true);
+    try {
+      saveFile(await platformApi.blob(`/api/platform/studios/${studio.id}/backup`), `${studio.slug}-backup-${today}.zip`);
+      toast.success('Backup downloaded');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not download the backup');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button type="button" className="btn-outline" onClick={download} disabled={busy} title="Download this studio's data — Excel (CSV) files and a full JSON">
+      {busy ? <Spinner /> : <Download className="h-4 w-4" />} Download backup
+    </button>
   );
 }

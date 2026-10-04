@@ -362,6 +362,46 @@ describe.skipIf(!TEST_DB)('Platform panel API (integration, needs TEST_DATABASE_
     });
   });
 
+  describe('studio backup', () => {
+    it('zips only this studio’s data, without passwords or link hashes, and logs the download', async () => {
+      const { unzipSync, strFromU8 } = await import('fflate');
+      const mine = await newStudio('bk-mine');
+      const other = await newStudio('bk-other');
+      const tokenMine = (await studioLogin(mine.email)).json().data.accessToken;
+      const tokenOther = (await studioLogin(other.email)).json().data.accessToken;
+      await call('POST', '/api/masters/books', tokenMine, { bookNumber: `=MINE-${RUN}` });
+      await call('POST', '/api/masters/books', tokenOther, { bookNumber: `OTHER-${RUN}` });
+
+      const res = await call('GET', `/api/platform/studios/${mine.studio.id}/backup`, platformToken);
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toBe('application/zip');
+      expect(res.headers['content-disposition']).toMatch(/attachment; filename=".*-backup-\d{4}-\d{2}-\d{2}\.zip"/);
+      const files = unzipSync(new Uint8Array(res.rawPayload));
+      expect(Object.keys(files)).toEqual(expect.arrayContaining(['backup.json', 'README.txt', 'csv/books.csv', 'csv/users.csv', 'csv/bills.csv']));
+      expect(Object.keys(files).some((f) => f.includes('tenant_subscriptions') || f.includes('public_invoice_links'))).toBe(false);
+
+      const json = JSON.parse(strFromU8(files['backup.json']));
+      expect(json.studio.id).toBe(mine.studio.id);
+      const books = json.data.books as { book_number: string }[];
+      expect(books.map((b) => b.book_number)).toContain(`=MINE-${RUN}`);
+      expect(books.map((b) => b.book_number)).not.toContain(`OTHER-${RUN}`);
+      for (const rows of Object.values(json.data) as { tenant_id?: string }[][]) for (const r of rows) expect(r.tenant_id).toBe(mine.studio.id);
+      expect(json.data.users[0]).not.toHaveProperty('password_hash');
+      expect(strFromU8(files['csv/users.csv'])).not.toContain('password_hash');
+      // Text that starts like a formula is neutralised in the CSV, exact in the JSON.
+      expect(strFromU8(files['csv/books.csv'])).toContain(`'=MINE-${RUN}`);
+
+      const logs = await db.select().from(schema.activityLogs).where(eq(schema.activityLogs.tenantId, mine.studio.id));
+      expect(logs.some((l) => l.entityType === 'backup' && l.action === 'exported')).toBe(true);
+    });
+    it('is refused to a studio token and to no token', async () => {
+      const { studio, email } = await newStudio('bk-deny');
+      const token = (await studioLogin(email)).json().data.accessToken;
+      expect((await call('GET', `/api/platform/studios/${studio.id}/backup`, token)).statusCode).toBe(401);
+      expect((await call('GET', `/api/platform/studios/${studio.id}/backup`)).statusCode).toBe(401);
+    });
+  });
+
   describe('platform sessions', () => {
     it('refuses the token of a platform admin who has been deactivated', async () => {
       const bcrypt = (await import('bcryptjs')).default;

@@ -110,6 +110,24 @@ later hardening once existing data is confirmed clean.
 `POST studios/:id/owner-password` · `POST studios/:id/subscriptions` ·
 `POST studios/:id/subscriptions/:sid/cancel`.
 
+## Studio backups
+
+`GET /api/platform/studios/:id/backup` (platform token only; button **Download backup** on the
+studio's page) returns a ZIP of that one studio's data — studios ask the provider; they cannot
+download it themselves:
+
+- `csv/<table>.csv` — one per table, UTF-8 with BOM, opens in Excel, formula-injection guarded
+  (`lib/csv.ts`); JSON columns as JSON text, images as a "[binary …]" note.
+- `backup.json` — every table with exact values (numeric as strings, images as base64), plus the
+  studio and per-table row counts; `format: "studiocrm-backup", version: 1`.
+- `README.txt` — what is inside and the row counts.
+
+**Every table with a `tenant_id` is included automatically** (`services/studioBackup.ts`), so a new
+table needs no change, filtered strictly by that studio's id. Excluded: `tenant_subscriptions`
+(platform billing), `public_invoice_links` (token hashes), and `users.password_hash`. Each download
+is recorded in the studio's own activity log (`entity_type = 'backup'`, the admin's email). Built in
+memory — fine at today's sizes; stream it if a studio grows very large. There is no restore yet.
+
 ## Bootstrap
 
 ```
@@ -129,4 +147,4 @@ environment and is never printed.
 
 Online payment (Razorpay + webhook), public self-signup, plan feature limits, expiry reminders
 (WhatsApp / email), a platform audit log beyond `created_by` / `cancelled_by` on periods, invoices
-for the subscription itself.
+for the subscription itself, restoring a studio from a backup.

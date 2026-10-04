@@ -27,6 +27,7 @@ import {
   resetOwnerPassword,
   setStudioActive,
 } from '../services/subscriptions';
+import { buildStudioBackup } from '../services/studioBackup';
 
 /*
  * The platform panel API (docs/SUBSCRIPTIONS.md) — for the company that sells StudioCRM.
@@ -171,6 +172,26 @@ export async function platformRoutes(app: FastifyInstance) {
     const body = parse(studioStatusSchema, req.body);
     await setStudioActive(idParam(req), body.isActive);
     return ok(await getStudio(idParam(req)), body.isActive ? 'Studio activated' : 'Studio suspended');
+  });
+
+  /** ZIP of the studio's data (CSV per table + backup.json). Recorded in the studio's activity log. */
+  app.get('/api/platform/studios/:id/backup', guarded, async (req, reply) => {
+    const id = idParam(req);
+    const backup = await buildStudioBackup(id);
+    const admin = adminOf(req);
+    await db.insert(schema.activityLogs).values({
+      tenantId: id,
+      entityType: 'backup',
+      action: 'exported',
+      description: `Data backup downloaded by the StudioCRM provider (${admin.email})`,
+      meta: { tables: backup.counts, platformAdminId: admin.id },
+      ipAddress: req.ip,
+    });
+    return reply
+      .header('content-type', 'application/zip')
+      .header('content-disposition', `attachment; filename="${backup.fileName}"`)
+      .header('cache-control', 'no-store')
+      .send(backup.zip);
   });
 
   app.post('/api/platform/studios/:id/owner-password', guarded, async (req) => {
