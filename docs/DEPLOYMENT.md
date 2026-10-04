@@ -143,8 +143,8 @@ reproduce, most likely a signature. **Anything that treats 200 as success will w
 that never started**, which is exactly what happened on the first attempt. The script now reads the
 body and stops.
 
-Until the hook is wired into the repository's own webhook settings, a deploy is triggered by
-clicking **Deploy Now** in the panel.
+So the hook is wired into the repository's own webhook settings, and a push to `main` deploys
+itself — see **Automatic deploy** below. **Deploy Now** in the panel still works by hand.
 
 ## Environment variables
 
@@ -185,7 +185,68 @@ what has actually been proven to work here.
 
 As of the first StudioCRM deployment: 12 journal entries, 12 applied, nothing pending.
 
-## Deploying
+## Automatic deploy (GitHub Actions)
+
+Every push to `main` deploys itself; nobody presses **Deploy Now** or types the FTP password.
+Two pieces do it, and they split the work deliberately:
+
+| Piece | Does | Why this one |
+| --- | --- | --- |
+| **Repository webhook** (GitHub → Settings → Webhooks) pointing at the panel's deploy hook | starts the host's build on every push | the hook accepts only GitHub's own delivery — every hand-made request, including one from CI, gets `200` + `"state":"ERROR"` (see above) |
+| **`.github/workflows/deploy.yml`** → `deploy/ci-deploy.sh` | waits for the host, puts back `web.config`, fails unless the live build is the pushed commit | the host breaks `web.config` at the end of every deploy; this is `-FixWebConfig` + `-VerifyOnly`, timed by the host instead of by a person |
+
+What a run does (`deploy/ci-deploy.sh`):
+
+```
+(STUDIOCRM_DEPLOY_HOOK set? POST it, and stop if the body says ERROR)
+  -> one FTPS login (a refused login stops the job at once: retrying could lock the account)
+  -> loop until /api/health reports this commit, or 30 minutes:
+       find the host's node_app_automate_deploy_<id>.log written since the push
+         (SUCCESS = files extracted; a failure at its end stops the job)
+       download web.config; if it has no processPath= the host has just rewritten it
+         -> upload deploy/web.config (only ever AFTER the host's rewrite, so it is never clobbered,
+            and again if the host rewrites it again)
+  -> verify: db up (warning if not), SPA deep link is HTML, unknown /api path is a JSON 404
+```
+
+`concurrency: deploy-production` runs one deploy at a time — a second push waits rather than racing
+the first on `web.config`. The job log is public (the repository is public), so the script prints
+states and file names only: never a credential, the hook's response or the host's logs. Read those
+over FTPS (below).
+
+### One-time setup
+
+1. **GitHub secret `STUDIOCRM_FTP_PASSWORD`** — repository → Settings → Secrets and variables →
+   Actions → *New repository secret*. The value is the password of the FTP user in
+   `deploy.config.json` (`studiodev`), from the panel: Websites → `studio` → **FTP** (FTP accounts).
+   If the current password has been shared anywhere (chat, email), **change it there first** and
+   store only the new one.
+2. **Repository webhook** — repository → Settings → Webhooks → *Add webhook*:
+   Payload URL = the panel's **Deploy Hook** URL (Websites → `studio` → the Node app page →
+   *Create Deploy Hook*; regenerate it if it has ever been pasted anywhere), Content type
+   `application/json`, *Just the push event*, Active. After the next push, the webhook's
+   *Recent Deliveries* should show a response without `"state":"ERROR"`; if it shows ERROR, try
+   content type `application/x-www-form-urlencoded`, then *Redeliver*.
+3. **GitHub secret `STUDIOCRM_DEPLOY_HOOK`** — **leave it unset** while the webhook above is in
+   place: with both, every push builds twice. It exists only for a host that would accept a
+   direct call; today's hook refuses one, and the job then stops with that message.
+
+Nothing else is needed — the workflow reads the site URL, FTP host and user from
+`deploy/deploy.config.json`. No secret is in the workflow or in git.
+
+### Day to day
+
+- Push to `main` → the site is rebuilt and repaired; the run's summary names the live commit.
+  Expect a few minutes of 502 while the host extracts and before `web.config` is put back.
+- **Actions → Deploy → Run workflow** repairs and verifies without a push (e.g. after someone
+  pressed Deploy Now). It does not start a build — redeliver the webhook's last delivery, or press
+  Deploy Now, for that.
+- A red run means the live build is not the pushed commit. Its message says which step stopped;
+  the host's own log (`node_app_automate_deploy_<id>.log`) and `logs\node.log` say why.
+- Migrations are still never part of a deploy (Migration policy above): apply a pending one,
+  reviewed, **before** pushing the code that needs it.
+
+## Deploying by hand
 
 ```powershell
 # credentials: this shell only, or deploy/.env.deploy (gitignored)
