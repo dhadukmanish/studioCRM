@@ -1,37 +1,48 @@
 // ---------------------------------------------------------------------------
-// Sidebar + settings navigation. Items are hidden automatically when the user
-// lacks `permission` (read). Icons are lucide names registered in
+// Sidebar + settings navigation. The sidebar shows one icon per group; the open
+// group's pages are tabs above the page (AppShell). Items are hidden
+// automatically when the user lacks `permission` (read), and a group with no
+// visible item is hidden. Icons are lucide names registered in
 // apps/web/src/lib/icons.tsx.
 // ---------------------------------------------------------------------------
 
 export interface NavItem {
   label: string;
-  href?: string;
+  href: string;
   icon?: string;
   permission?: string;
-  children?: NavItem[];
 }
 export interface NavSection {
   title: string;
+  icon: string;
   items: NavItem[];
 }
 
 export const NAV: NavSection[] = [
   {
-    title: 'Overview',
+    title: 'Dashboard',
+    icon: 'LayoutDashboard',
     items: [{ label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard' }],
   },
   {
-    title: 'Operations',
+    title: 'Work',
+    icon: 'ListTodo',
     items: [
       { label: "Today's Work", href: '/modules/work', icon: 'ListTodo', permission: 'operations_work' },
       { label: 'Appointments', href: '/modules/appointments', icon: 'CalendarClock', permission: 'operations_appointments' },
-      { label: 'Billing', href: '/modules/billing', icon: 'ReceiptText', permission: 'operations_billing' },
+    ],
+  },
+  {
+    title: 'Billing',
+    icon: 'ReceiptText',
+    items: [
+      { label: 'Bills', href: '/modules/billing', icon: 'ReceiptText', permission: 'operations_billing' },
       { label: 'Receipts', href: '/modules/receipts', icon: 'HandCoins', permission: 'operations_receipts' },
     ],
   },
   {
     title: 'Reports',
+    icon: 'ChartColumn',
     items: [
       { label: 'Bill Summary', href: '/modules/reports/bills', icon: 'FileSpreadsheet', permission: 'reports_bills' },
       { label: 'Receivables', href: '/modules/reports/receivables', icon: 'ChartColumn', permission: 'reports_receivables' },
@@ -41,15 +52,21 @@ export const NAV: NavSection[] = [
   },
   {
     title: 'Masters',
+    icon: 'Database',
     items: [
-      { label: 'Item Master', href: '/modules/masters/items', icon: 'Package', permission: 'masters_items' },
-      { label: 'Sub Item Master', href: '/modules/masters/sub-items', icon: 'Boxes', permission: 'masters_sub_items' },
-      { label: 'Account Group Master', href: '/modules/masters/account-groups', icon: 'Layers', permission: 'masters_account_groups' },
-      { label: 'Account Master', href: '/modules/masters/accounts', icon: 'Wallet', permission: 'masters_accounts' },
-      { label: 'Book Master', href: '/modules/masters/books', icon: 'BookText', permission: 'masters_books' },
+      { label: 'Items', href: '/modules/masters/items', icon: 'Package', permission: 'masters_items' },
+      { label: 'Sub Items', href: '/modules/masters/sub-items', icon: 'Boxes', permission: 'masters_sub_items' },
+      { label: 'Account Groups', href: '/modules/masters/account-groups', icon: 'Layers', permission: 'masters_account_groups' },
+      { label: 'Accounts', href: '/modules/masters/accounts', icon: 'Wallet', permission: 'masters_accounts' },
+      { label: 'Books', href: '/modules/masters/books', icon: 'BookText', permission: 'masters_books' },
     ],
   },
 ];
+
+/** The group a path belongs to: the one with an item whose href is the path or a parent of it. */
+export function navSectionFor(sections: NavSection[], pathname: string): NavSection | undefined {
+  return sections.find((s) => s.items.some((it) => pathname === it.href || pathname.startsWith(it.href + '/')));
+}
 
 export interface SettingsGroup {
   title: string;

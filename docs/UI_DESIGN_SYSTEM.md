@@ -32,7 +32,10 @@ least one theme.
 | --- | --- |
 | `primary`, `primary-dark`, `primary-lighter`, `primary-50` | accent, hover, selected background |
 | `gray-0` … `gray-1000` | text and neutral surfaces (`gray-900` headings, `gray-600` body, `gray-500` meta, `gray-400` placeholder) |
-| `surface` | cards, inputs, sidebar |
+| `surface` | cards, panels |
+| `field` (`--input-bg`) | input fill — a soft tint in light themes so a field reads apart from its panel |
+| `sidebar` | the icon sidebar |
+| `topbar`, `topbar-raised`, `on-topbar` | the top bar: the theme's primary with surface-coloured text in light themes, a surface bar in dark ones |
 | `page` | app background |
 | `head` | table header background |
 | `line` | borders and separators |
@@ -119,7 +122,16 @@ action, which shows a spinner and disables while saving.
 ## Responsive
 
 Desktop-first, 1366px+ is the design target. Tables scroll horizontally on small screens; form
-grids collapse to one column at `sm`; the sidebar collapses. There is no separate mobile UI.
+grids collapse to one column at `sm`; the sidebar becomes a drawer opened from the top bar. There is no separate mobile UI.
+
+## Navigation
+
+A full-width top bar (company, search, theme, settings, user) over a narrow icon sidebar with one
+entry per group — Dashboard, Work, Billing, Reports, Masters (`NAV` in `packages/shared/src/nav.ts`).
+A group opens its first page; its other pages are tabs above the page, so a group never needs a
+submenu. A page or group the user may not read is not shown. Administration lives behind the
+Settings gear, not in the sidebar. A new screen joins an existing group as a tab unless it is a
+genuinely new area.
 
 ## Accessibility floor
 

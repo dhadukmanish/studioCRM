@@ -15,7 +15,10 @@
   --r-default: 8px;   /* Tailwind rounded */
   --r-md: 6px;        /* Tailwind rounded-md */
   --r-lg: 8px;        /* Tailwind rounded-lg */
-  --sidebar: var(--surface);  /* sidebar and header bar */
+  --sidebar: var(--surface);  /* icon sidebar */
+  --topbar: var(--surface);   /* top bar; light themes colour it below */
+  --on-topbar: var(--gray-700);
+  --topbar-raised: var(--gray-50); /* search box and hover on the bar */
   --input-bg: var(--surface); /* every .input field */
 }
 
@@ -55,12 +58,6 @@
   --series-3: 27 175 122;   /* aqua */
   --series-4: 237 161 0;    /* yellow */
   --series-5: 232 123 164;  /* magenta */
-
-  /* dark sidebar + header bar (navy) — see "Dark bar" below */
-  --chrome: 16 42 68;
-  --chrome-2: 26 58 90;
-  --chrome-3: 30 64 98;
-  --chrome-accent: 140 200 248;
 }
 
 /* ---------- Dark ---------- */
@@ -165,12 +162,6 @@
   --gray-800: 40 45 28;
   --gray-900: 26 30 16;
   --gray-1000: 0 0 0;
-
-  /* dark sidebar + header bar (dark olive) — see "Dark bar" below */
-  --chrome: 40 52 22;
-  --chrome-2: 54 69 31;
-  --chrome-3: 60 77 34;
-  --chrome-accent: 200 222 130;
 }
 
 /* ---------- Sky (white, light sky-blue accents, blue-gray surfaces) ---------- */
@@ -201,12 +192,6 @@
   --gray-800: 33 42 56;
   --gray-900: 17 24 36;
   --gray-1000: 0 0 0;
-
-  /* dark sidebar + header bar (deep sky) — see "Dark bar" below */
-  --chrome: 10 52 82;
-  --chrome-2: 18 68 104;
-  --chrome-3: 22 74 112;
-  --chrome-accent: 128 206 245;
 }
 
 /* ---------- Slate (white / slate, cool neutral accents) ---------- */
@@ -237,12 +222,6 @@
   --gray-800: 34 40 49;
   --gray-900: 17 21 28;
   --gray-1000: 0 0 0;
-
-  /* dark sidebar + header bar (deep slate) — see "Dark bar" below */
-  --chrome: 30 38 50;
-  --chrome-2: 44 54 70;
-  --chrome-3: 50 62 80;
-  --chrome-accent: 170 196 232;
 }
 
 /* ---------- Mist (mid-tone light: soft grey page, off-white cards, firm borders and text — no glare,
@@ -281,15 +260,9 @@
   --series-3: 20 128 91;
   --series-4: 163 107 0;
   --series-5: 184 64 109;
-
-  /* dark sidebar + header bar (deep blue-grey) — see "Dark bar" below */
-  --chrome: 26 44 72;
-  --chrome-2: 38 60 94;
-  --chrome-3: 42 66 104;
-  --chrome-accent: 150 196 245;
 }
 
-/* ---------- Olive Professional (deep olive sidebar and header, white panels on a warm page,
+/* ---------- Olive Professional (olive top bar, white panels on a warm page,
    softly filled inputs; square, architectural controls) ---------- */
 /* The second selector gives the header's dropdown menus the light palette back. */
 [data-theme='olivepro'] {
@@ -327,15 +300,9 @@
   --r-default: 2px;
   --r-md: 2px;
   --r-lg: 3px;
-
-  /* dark sidebar + header bar (deep olive) — see "Dark bar" below */
-  --chrome: 44 56 33;
-  --chrome-2: 60 75 45;
-  --chrome-3: 66 83 48;
-  --chrome-accent: 196 214 140;
 }
 
-/* ---------- Deep Teal & Mint (deep teal bar, fresh mint selection, mint-grey page) ---------- */
+/* ---------- Deep Teal & Mint (deep teal top bar and actions, mint selection, mint-grey page) ---------- */
 [data-theme='tealmint'] {
   color-scheme: light;
   --primary: 15 82 77;           /* #0F524D — white text on it: 8.9:1 */
@@ -363,12 +330,6 @@
   --gray-800: 26 40 39;
   --gray-900: 15 42 42;          /* #0F2A2A */
   --gray-1000: 0 0 0;
-
-  /* dark sidebar + header bar (deep teal #0E4B47, mint) — see "Dark bar" below */
-  --chrome: 14 75 71;
-  --chrome-2: 18 84 79;
-  --chrome-3: 22 88 83;
-  --chrome-accent: 118 226 196;
 }
 
 /* ---------- Teal (white dominant, muted teal) ---------- */
@@ -399,12 +360,6 @@
   --gray-800: 33 41 40;
   --gray-900: 17 23 22;
   --gray-1000: 0 0 0;
-
-  /* dark sidebar + header bar (deep teal) — see "Dark bar" below */
-  --chrome: 12 70 66;
-  --chrome-2: 20 86 81;
-  --chrome-3: 24 92 87;
-  --chrome-accent: 110 222 190;
 }
 
 /* ---------- Soft Lavender (white dominant, very subtle muted lavender) ---------- */
@@ -435,91 +390,17 @@
   --gray-800: 38 36 49;
   --gray-900: 20 18 29;
   --gray-1000: 0 0 0;
-
-  /* dark sidebar + header bar (deep purple) — see "Dark bar" below */
-  --chrome: 46 38 78;
-  --chrome-2: 62 52 102;
-  --chrome-3: 68 58 112;
-  --chrome-accent: 200 186 250;
 }
 
 /* dark-mode tweaks for semantic badge colours (Tailwind's green/red/amber stay readable on dark) */
-/* ---------- Dark bar: the sidebar and header (.app-chrome, AppShell) of every LIGHT theme ----------
-   Each light theme sets --chrome (bar), --chrome-2 (raised / hover), --chrome-3 (selected / borders)
-   and --chrome-accent (selection). Inside the bar the text tokens turn light. Dark themes keep their
-   own sidebar. Keep the :not() list in step with DARK_THEMES (lib/theme.ts; theme.test.ts checks). */
+/* ---------- Top bar: every LIGHT theme colours it with its own primary, white text on it (the same
+   pair as a primary button, so theme.test.ts already holds it to 4.5:1). Dark themes keep a surface
+   bar. Keep the :not() list in step with DARK_THEMES (lib/theme.ts; theme.test.ts checks). */
 :root:not([data-theme='dark']):not([data-theme='dusk']) {
-  --sidebar: var(--chrome);
-  /* the page palette, kept so the header's dropdown menus can be drawn light again */
-  --page-surface: var(--surface);
-  --page-primary: var(--primary);
-  --page-primary-dark: var(--primary-dark);
-  --page-primary-lighter: var(--primary-lighter);
-  --page-primary-50: var(--primary-50);
-  --page-line: var(--line);
-  --page-input-border: var(--input-border);
-  --page-input-bg: var(--input-bg);
-  --page-shadow: var(--shadow);
-  --page-gray-0: var(--gray-0);
-  --page-gray-50: var(--gray-50);
-  --page-gray-100: var(--gray-100);
-  --page-gray-200: var(--gray-200);
-  --page-gray-300: var(--gray-300);
-  --page-gray-400: var(--gray-400);
-  --page-gray-500: var(--gray-500);
-  --page-gray-600: var(--gray-600);
-  --page-gray-700: var(--gray-700);
-  --page-gray-800: var(--gray-800);
-  --page-gray-900: var(--gray-900);
+  --topbar: var(--primary);
+  --on-topbar: var(--surface);
+  --topbar-raised: var(--primary-dark);
 }
-:root:not([data-theme='dark']):not([data-theme='dusk']) .app-chrome {
-  color-scheme: dark;
-  --surface: var(--chrome-2);
-  --primary: var(--chrome-accent);
-  --primary-dark: var(--chrome-accent);
-  --primary-lighter: var(--chrome-3);
-  --primary-50: var(--chrome-2);
-  --line: var(--chrome-3);
-  --input-border: var(--chrome-3);
-  --input-bg: var(--chrome-2);
-  --shadow: 0 0 0;
-  --gray-0: var(--chrome-2);
-  --gray-50: var(--chrome-2);
-  --gray-100: var(--chrome-2);
-  --gray-200: var(--chrome-3);
-  --gray-300: var(--chrome-3);
-  --gray-400: 178 190 190;
-  --gray-500: 198 208 208;
-  --gray-600: 222 229 229;
-  --gray-700: 234 239 239;
-  --gray-800: 242 246 246;
-  --gray-900: 252 253 253;
-}
-:root:not([data-theme='dark']):not([data-theme='dusk']) .app-chrome .card {
-  color-scheme: light;
-  --surface: var(--page-surface);
-  --primary: var(--page-primary);
-  --primary-dark: var(--page-primary-dark);
-  --primary-lighter: var(--page-primary-lighter);
-  --primary-50: var(--page-primary-50);
-  --line: var(--page-line);
-  --input-border: var(--page-input-border);
-  --input-bg: var(--page-input-bg);
-  --shadow: var(--page-shadow);
-  --gray-0: var(--page-gray-0);
-  --gray-50: var(--page-gray-50);
-  --gray-100: var(--page-gray-100);
-  --gray-200: var(--page-gray-200);
-  --gray-300: var(--page-gray-300);
-  --gray-400: var(--page-gray-400);
-  --gray-500: var(--page-gray-500);
-  --gray-600: var(--page-gray-600);
-  --gray-700: var(--page-gray-700);
-  --gray-800: var(--page-gray-800);
-  --gray-900: var(--page-gray-900);
-}
-/* Selected navigation: a tint with a firm accent edge. */
-:root:not([data-theme='dark']):not([data-theme='dusk']) .app-chrome a[aria-current='page'] { box-shadow: inset 3px 0 0 rgb(var(--primary)); }
 
 [data-theme='dark'] .badge.bg-green-50, [data-theme='dusk'] .badge.bg-green-50 { background: rgb(22 101 52 / 0.25); color: rgb(134 239 172); }
 [data-theme='dark'] .badge.bg-red-50, [data-theme='dusk'] .badge.bg-red-50 { background: rgb(153 27 27 / 0.25); color: rgb(252 165 165); }

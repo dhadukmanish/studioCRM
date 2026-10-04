@@ -15,6 +15,8 @@ export default {
         white: v('surface'),
         surface: v('surface'),
         sidebar: v('sidebar'),
+        topbar: { DEFAULT: v('topbar'), raised: v('topbar-raised') }, // top bar (themes.css)
+        'on-topbar': v('on-topbar'),
         field: v('input-bg'), // .input fill
         muted: v('gray-200'),
         line: v('line'),

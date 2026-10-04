@@ -62,25 +62,21 @@ describe('themes', () => {
     expect((Math.max(t, s) + 0.05) / (Math.min(t, s) + 0.05)).toBeGreaterThanOrEqual(7);
   });
 
-  // Every light theme draws its sidebar and header as a dark bar (.app-chrome); dark themes are left out
-  // by a :not() list that must match DARK_THEMES, or a dark theme would get a light theme's bar.
+  // Every light theme colours the top bar with its primary and writes on it in the surface colour; dark
+  // themes are left out by a :not() list that must match DARK_THEMES, or a dark theme would get a light bar.
   const BAR = `:root${DARK_THEMES.map((k) => `:not([data-theme='${k}'])`).join('')}`;
-  it('the dark bar applies to exactly the light themes', () => {
-    expect(css).toContain(`${BAR} {`);
-    expect(css).toContain(`${BAR} .app-chrome {`);
-    expect(css).toContain(`${BAR} .app-chrome .card {`);
+  it('the coloured top bar applies to exactly the light themes', () => {
+    const start = css.indexOf(`${BAR} {`);
+    expect(start).toBeGreaterThan(0);
+    const rule = css.slice(start, css.indexOf('}', start));
+    expect(rule).toContain('--topbar: var(--primary);');
+    expect(rule).toContain('--on-topbar: var(--surface);');
+    expect(rule).toContain('--topbar-raised: var(--primary-dark);');
   });
 
-  it.each(THEMES.filter((t) => !DARK_THEMES.includes(t.key)).map((t) => t.key))('%s: sidebar and header read clearly on the dark bar', (key) => {
+  it.each(THEMES.filter((t) => !DARK_THEMES.includes(t.key)).map((t) => t.key))('%s: top bar text reads clearly', (key) => {
     const b = block(key);
-    const start = css.indexOf(`${BAR} .app-chrome {`);
-    const bar = css.slice(start, css.indexOf('}', start));
-    const [c1, c2, c3, accent] = ['--chrome', '--chrome-2', '--chrome-3', '--chrome-accent'].map((t) => token(b, t));
-    for (const v of [c1, c2, c3, accent]) expect(v, key).toMatch(/^\d+ \d+ \d+$/);
-    expect(contrast(token(bar, '--gray-600'), c1), 'menu text').toBeGreaterThanOrEqual(7);
-    expect(contrast(token(bar, '--gray-400'), c1), 'section labels').toBeGreaterThanOrEqual(4.5);
-    expect(contrast(accent, c3), 'selected item').toBeGreaterThanOrEqual(4.5);
-    expect(contrast(accent, c2), 'brand initials on the accent').toBeGreaterThanOrEqual(4.5);
-    expect(contrast(token(bar, '--gray-800'), c2), 'search text').toBeGreaterThanOrEqual(7);
+    expect(contrast(token(b, '--surface'), token(b, '--primary')), 'bar text').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(token(b, '--surface'), token(b, '--primary-dark')), 'search text').toBeGreaterThanOrEqual(4.5);
   });
 });

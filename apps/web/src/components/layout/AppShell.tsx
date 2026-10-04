@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, ChevronDown, ChevronRight, Boxes, Leaf, LogOut, Palette, Menu, Monitor, Moon, PanelLeftClose, PanelLeftOpen, Search, CloudFog, Settings, Sprout, Sun, Sunset, User, Waves } from 'lucide-react';
+import { Bell, ChevronDown, ChevronRight, Boxes, Leaf, LogOut, Palette, Menu, Monitor, Moon, Search, CloudFog, Settings, Sprout, Sun, Sunset, User, Waves } from 'lucide-react';
 import { THEMES, type ThemePref } from '@/lib/theme';
 import { Dropdown } from '@/components/ui';
-import { NAV, type NavItem } from '@erp/shared';
+import { NAV, navSectionFor, type NavSection } from '@erp/shared';
 import { useAuthStore } from '@/store/auth';
 import { useUiStore } from '@/store/ui';
 import { cx } from '@/lib/format';
@@ -11,50 +11,12 @@ import { api } from '@/lib/api';
 import { Icon } from '@/lib/icons';
 import { useCompanyLogo, useCompanyProfile } from '@/lib/settings';
 
-function useVisibleNav() {
+/** NAV with the items this user may read; a group left with none is hidden. */
+function useVisibleNav(): NavSection[] {
   const can = useAuthStore((s) => s.can);
   return useMemo(
-    () =>
-      NAV.map((sec) => ({
-        ...sec,
-        items: sec.items
-          .map((it) => (it.children ? { ...it, children: it.children.filter((c) => !c.permission || can(c.permission)) } : it))
-          .filter((it) => (it.children ? it.children.length > 0 : !it.permission || can(it.permission))),
-      })).filter((s) => s.items.length > 0),
+    () => NAV.map((sec) => ({ ...sec, items: sec.items.filter((it) => !it.permission || can(it.permission)) })).filter((s) => s.items.length > 0),
     [can],
-  );
-}
-
-function SidebarItem({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
-  const { pathname } = useLocation();
-  const { openGroups, toggleGroup } = useUiStore();
-  const isChildActive = item.children?.some((c) => c.href && pathname.startsWith(c.href));
-  const open = openGroups[item.label] ?? isChildActive;
-  if (item.children) {
-    return (
-      <div>
-        <button type="button" onClick={() => toggleGroup(item.label)} className={cx('group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[14px] font-medium transition', isChildActive ? 'text-primary' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900')} title={collapsed ? item.label : undefined}>
-          <Icon name={item.icon} className="h-[18px] w-[18px] shrink-0" />
-          {!collapsed && <span className="flex-1 text-left truncate">{item.label}</span>}
-          {!collapsed && <ChevronDown className={cx('h-4 w-4 transition', open ? '' : '-rotate-90')} />}
-        </button>
-        {!collapsed && open && (
-          <div className="ml-[15px] mt-0.5 border-l border-line pl-3 space-y-0.5">
-            {item.children.map((c) => (
-              <NavLink key={c.href} to={c.href!} className={({ isActive }) => cx('block rounded-lg px-3 py-1.5 text-[13.5px] transition truncate', isActive ? 'bg-primary-lighter/60 text-primary font-medium' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900')}>
-                {c.label}
-              </NavLink>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-  return (
-    <NavLink to={item.href!} end={item.href === '/modules/accounting'} className={({ isActive }) => cx('flex items-center gap-3 rounded-lg px-3 py-2 text-[14px] font-medium transition', isActive ? 'bg-primary-lighter/60 text-primary' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900')} title={collapsed ? item.label : undefined}>
-      <Icon name={item.icon} className="h-[18px] w-[18px] shrink-0" />
-      {!collapsed && <span className="truncate">{item.label}</span>}
-    </NavLink>
   );
 }
 
@@ -74,50 +36,74 @@ function BrandMark({ name, companyId, logoVersion }: { name?: string; companyId?
     return <img src={logo.data} alt="" onError={() => setBroken(logo.data!)} className="h-9 w-9 shrink-0 rounded-lg border border-line bg-white object-contain p-0.5" />;
   }
   return (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-[13px] font-semibold text-white">
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-on-topbar text-[13px] font-semibold text-topbar">
       {name ? initialsOf(name) : <Boxes className="h-5 w-5" strokeWidth={1.5} />}
     </span>
   );
 }
 
-function Sidebar({ collapsed }: { collapsed: boolean }) {
-  const nav = useVisibleNav();
-  // Company name and logo come from the tenant's company profile (Settings -> Companies), the
-  // product name from the build. They are different things and both are shown.
-  const company = useCompanyProfile().data;
+/**
+ * The icon sidebar: one entry per group (Dashboard, Work, Billing, Reports, Masters). It opens the
+ * group's first page; the group's other pages are the tabs above the page (SectionTabs).
+ */
+function Rail({ nav, current, collapsed }: { nav: NavSection[]; current?: NavSection; collapsed: boolean }) {
   return (
-    <aside className={cx('app-chrome flex h-full flex-col border-r border-line bg-sidebar transition-all', collapsed ? 'w-[68px]' : 'w-[260px]')}>
-      <Link to="/dashboard" className="flex h-16 items-center gap-2.5 border-b border-line px-4" title={collapsed ? company?.name ?? PRODUCT_NAME : undefined}>
-        <BrandMark name={company?.name} companyId={company?.id} logoVersion={company?.logo?.version} />
-        {!collapsed && (
-          <div className="min-w-0">
-            <div className="truncate font-heading text-[15px] font-semibold leading-tight text-gray-900">{company?.name ?? PRODUCT_NAME}</div>
-            <div className="truncate text-[11px] text-gray-500">{PRODUCT_NAME}</div>
-          </div>
-        )}
-      </Link>
-      <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
-        {nav.map((sec) => (
-          <div key={sec.title}>
-            {!collapsed && <div className="mb-1.5 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-400">{sec.title}</div>}
-            <div className="space-y-0.5">
-              {sec.items.map((it) => (
-                <SidebarItem key={it.label} item={it} collapsed={collapsed} />
-              ))}
-            </div>
-          </div>
-        ))}
-      </nav>
-    </aside>
+    <nav aria-label="Main" className={cx('flex h-full flex-col gap-1 overflow-y-auto border-r border-line bg-sidebar py-3 transition-all', collapsed ? 'w-[64px] px-1.5' : 'w-[88px] px-2')}>
+      {nav.map((sec) => {
+        const active = current?.title === sec.title;
+        return (
+          <Link
+            key={sec.title}
+            to={sec.items[0].href}
+            aria-current={active ? 'true' : undefined}
+            title={sec.title}
+            className={cx(
+              'relative flex flex-col items-center gap-1 rounded-[var(--r-card)] px-1 py-2.5 text-[12px] font-medium leading-tight transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+              active ? 'bg-primary-50 text-primary before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-primary' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+            )}
+          >
+            <Icon name={sec.icon} className="h-5 w-5 shrink-0" />
+            {collapsed ? <span className="sr-only">{sec.title}</span> : <span className="max-w-full truncate">{sec.title}</span>}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
+
+/** The open group's pages as tabs — only when it has more than one page this user may see. */
+function SectionTabs({ section }: { section?: NavSection }) {
+  if (!section || section.items.length < 2) return null;
+  return (
+    <nav aria-label={`${section.title} pages`} className="-mx-4 mb-4 flex gap-1 overflow-x-auto border-b border-line px-4 sm:-mx-6 sm:px-6">
+      {section.items.map((it) => (
+        <NavLink
+          key={it.href}
+          to={it.href}
+          className={({ isActive }) =>
+            cx(
+              '-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-[13.5px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40',
+              isActive ? 'border-primary text-primary' : 'border-transparent text-gray-600 hover:border-line hover:text-gray-900',
+            )
+          }
+        >
+          <Icon name={it.icon} className="h-4 w-4" />
+          {it.label}
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
+/** A round button on the top bar. */
+const barBtn = 'inline-flex h-9 w-9 items-center justify-center rounded-full text-on-topbar transition hover:bg-topbar-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-on-topbar/60';
 
 /** Theme switcher — every theme in THEMES (lib/theme.ts), plus System */
 export function ThemeSwitcher() {
   const { theme, setTheme } = useUiStore();
   const icons: Record<string, JSX.Element> = { light: <Sun className="h-4 w-4" />, dark: <Moon className="h-4 w-4" />, olive: <Leaf className="h-4 w-4" />, sky: <Palette className="h-4 w-4" />, slate: <Palette className="h-4 w-4" />, teal: <Palette className="h-4 w-4" />, lavender: <Palette className="h-4 w-4" />, mist: <CloudFog className="h-4 w-4" />, olivepro: <Sprout className="h-4 w-4" />, tealmint: <Waves className="h-4 w-4" />, dusk: <Sunset className="h-4 w-4" />, system: <Monitor className="h-4 w-4" /> };
   const items = [...THEMES.map((t) => ({ label: <span className="flex items-center gap-2">{icons[t.key]}<span className="flex-1">{t.label}</span><span className="h-3 w-3 rounded-full border border-line" style={{ background: t.swatch }} />{theme === t.key && <span className="text-primary">✓</span>}</span>, onClick: () => setTheme(t.key) })), { divider: true, label: '' }, { label: <span className="flex items-center gap-2">{icons.system}<span className="flex-1">System</span>{theme === 'system' && <span className="text-primary">✓</span>}</span>, onClick: () => setTheme('system' as ThemePref) }];
-  return <Dropdown items={items} trigger={<button className="icon-btn rounded-full" title="Theme">{icons[theme] ?? icons.system}</button>} />;
+  return <Dropdown items={items} trigger={<button className={barBtn} title="Theme">{icons[theme] ?? icons.system}</button>} />;
 }
 
 function UserMenu() {
@@ -133,10 +119,10 @@ function UserMenu() {
   const initials = (user?.name ?? '?').split(' ').map((s) => s[0]).slice(0, 2).join('').toUpperCase();
   return (
     <div ref={ref} className="relative">
-      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-2 rounded-full border border-line bg-white py-1 pl-1 pr-2 hover:bg-gray-50">
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-lighter text-[12px] font-semibold text-primary-dark">{initials}</span>
-        <span className="hidden text-[13px] font-medium text-gray-700 sm:block max-w-[140px] truncate">{user?.name}</span>
-        <ChevronDown className="h-4 w-4 text-gray-500" />
+      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-2 rounded-full py-1 pl-1 pr-2 text-on-topbar transition hover:bg-topbar-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-on-topbar/60">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-on-topbar text-[12px] font-semibold text-topbar">{initials}</span>
+        <span className="hidden text-[13px] font-medium sm:block max-w-[140px] truncate">{user?.name}</span>
+        <ChevronDown className="h-4 w-4" />
       </button>
       {open && (
         <div className="absolute right-0 z-50 mt-2 w-60 card shadow-lg py-1">
@@ -158,32 +144,45 @@ function UserMenu() {
 export default function AppShell() {
   const { sidebarCollapsed, toggleSidebar, mobileOpen, setMobileOpen } = useUiStore();
   const { pathname } = useLocation();
+  const nav = useVisibleNav();
+  const current = navSectionFor(nav, pathname);
+  // Company name and logo come from the tenant's company profile (Settings -> Companies), the
+  // product name from the build. They are different things and both are shown.
+  const company = useCompanyProfile().data;
   useEffect(() => setMobileOpen(false), [pathname, setMobileOpen]);
   return (
-    <div className="flex h-screen overflow-hidden">
-      <div className="hidden lg:block shrink-0 h-full"><Sidebar collapsed={sidebarCollapsed} /></div>
-      {mobileOpen && (
-        <div className="fixed inset-0 z-[70] lg:hidden">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-          <div className="absolute left-0 top-0 h-full"><Sidebar collapsed={false} /></div>
+    <div className="flex h-screen flex-col overflow-hidden">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-topbar px-2 text-on-topbar sm:gap-3 sm:px-4">
+        <button className={cx(barBtn, 'lg:hidden')} onClick={() => setMobileOpen(true)} title="Menu"><Menu className="h-5 w-5" /></button>
+        <button className={cx(barBtn, 'hidden lg:inline-flex')} onClick={toggleSidebar} title={sidebarCollapsed ? 'Show menu labels' : 'Hide menu labels'}><Menu className="h-5 w-5" /></button>
+        <Link to="/dashboard" className="flex min-w-0 items-center gap-2.5 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-on-topbar/60">
+          <BrandMark name={company?.name} companyId={company?.id} logoVersion={company?.logo?.version} />
+          <span className="min-w-0">
+            <span className="block truncate font-heading text-[15px] font-semibold leading-tight">{company?.name ?? PRODUCT_NAME}</span>
+            <span className="block truncate text-[11px] leading-tight opacity-80">{PRODUCT_NAME}</span>
+          </span>
+        </Link>
+        <div className="relative ml-auto hidden w-[300px] md:block">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-80" />
+          <input placeholder="Search anything..." className="h-9 w-full rounded-[var(--r-control)] border border-on-topbar/25 bg-topbar-raised pl-9 pr-3 text-[13px] text-on-topbar outline-none transition placeholder:text-on-topbar/75 focus:ring-2 focus:ring-on-topbar/50" />
         </div>
-      )}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="app-chrome flex h-16 shrink-0 items-center gap-3 border-b border-line bg-sidebar px-4 sm:px-6">
-          <button className="icon-btn lg:hidden" onClick={() => setMobileOpen(true)}><Menu className="h-4 w-4" /></button>
-          <button className="icon-btn hidden lg:inline-flex" onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}</button>
-          <div className="relative hidden md:block w-[320px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input placeholder="Search anything..." className="input input-sm pl-9 bg-gray-50" />
+        <div className="ml-auto flex items-center gap-1 md:ml-0">
+          <ThemeSwitcher />
+          <Link to="/modules/settings" className={barBtn} title="Settings"><Settings className="h-4 w-4" /></Link>
+          <button className={barBtn} title="Notifications"><Bell className="h-4 w-4" /></button>
+          <UserMenu />
+        </div>
+      </header>
+      <div className="flex min-h-0 flex-1">
+        <div className="hidden lg:block shrink-0 h-full"><Rail nav={nav} current={current} collapsed={sidebarCollapsed} /></div>
+        {mobileOpen && (
+          <div className="fixed inset-0 z-[70] lg:hidden">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
+            <div className="absolute left-0 top-0 h-full"><Rail nav={nav} current={current} collapsed={false} /></div>
           </div>
-          <div className="ml-auto flex items-center gap-2">
-            <ThemeSwitcher />
-            <Link to="/modules/settings" className="icon-btn rounded-full" title="Settings"><Settings className="h-4 w-4" /></Link>
-            <button className="icon-btn rounded-full" title="Notifications"><Bell className="h-4 w-4" /></button>
-            <UserMenu />
-          </div>
-        </header>
-        <main className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+        )}
+        <main className="min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+          <SectionTabs section={current} />
           <Outlet />
         </main>
       </div>
