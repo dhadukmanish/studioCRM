@@ -1,7 +1,8 @@
 # Deploys main to https://studio.kriviinfotech.com — docs/DEPLOYMENT.md, "Automatic deploy".
-# The host builds from its own git clone; this job starts it (optionally), waits for it, puts back
-# the web.config the host breaks, and fails unless the live build becomes this commit.
-# No secret is in this file: both come from the repository's Actions secrets.
+# The host builds from its own git clone, started by the repository webhook on the same push (the
+# panel hook refuses any other caller). This job waits for that build, puts back the web.config the
+# host breaks, and fails unless the live build becomes this commit.
+# No secret is in this file: the FTP password comes from the repository's Actions secrets.
 name: Deploy
 
 on:
@@ -26,7 +27,6 @@ jobs:
 
       - name: Deploy, repair web.config, verify
         env:
-          STUDIOCRM_DEPLOY_HOOK: ${{ secrets.STUDIOCRM_DEPLOY_HOOK }}
           STUDIOCRM_FTP_PASSWORD: ${{ secrets.STUDIOCRM_FTP_PASSWORD }}
           # When GitHub delivered the push (and its webhook started the host): used to find this
           # run's host deploy log. Empty on a manual run, where the script uses its own start time.

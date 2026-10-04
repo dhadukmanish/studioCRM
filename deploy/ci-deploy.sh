@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------------------------
 # StudioCRM deploy, CI form — what deploy/Deploy-StudioCRM.ps1 does after a push, run by
-# .github/workflows/deploy.yml: optionally trigger the host, wait for it to finish, put back the
-# web.config it breaks, and prove the live build is this commit. See docs/DEPLOYMENT.md.
+# .github/workflows/deploy.yml: wait for the host's build (started by GitHub's repository webhook —
+# the panel hook refuses any other caller), put back the web.config it breaks, and prove the live
+# build is this commit. See docs/DEPLOYMENT.md.
 #
-# Secrets arrive only as environment variables (GitHub Actions secrets) and are never echoed:
-#   STUDIOCRM_FTP_PASSWORD  required  FTPS password of the site's FTP user (deploy.config.json)
-#   STUDIOCRM_DEPLOY_HOOK   optional  panel deploy hook; empty = GitHub's webhook starts the build
+# The one secret arrives as an environment variable (a GitHub Actions secret) and is never echoed:
+#   STUDIOCRM_FTP_PASSWORD  FTPS password of the site's FTP user (deploy.config.json)
 # Other inputs: GITHUB_SHA (the commit to expect), DEPLOY_T0 (epoch the build was started, for
 # finding the host's log), DEADLINE_MIN (default 30).
 #
 # The repository is public, so this job's log is too: it prints states and file NAMES only —
-# never a credential, a hook response body or the host's own logs.
+# never a credential or the host's own logs.
 # ---------------------------------------------------------------------------------------------
 set -euo pipefail
 
@@ -55,24 +55,7 @@ live_version() { curl -s -m 10 "$HEALTH_URL" | jq -r '.data.version // empty' 2>
 # The build stamps `git rev-parse --short HEAD`, so the live version is a prefix of the full SHA.
 is_live() { local v; v=$(live_version); [[ ${#v} -ge 7 && $SHA == "$v"* ]]; }
 
-# ------------------------------------------------------------------- 1. trigger
-trigger() {
-  if [[ -z ${STUDIOCRM_DEPLOY_HOOK:-} ]]; then
-    log "STUDIOCRM_DEPLOY_HOOK is empty: not triggering — GitHub's repository webhook (or the panel) starts the build on push"
-    return
-  fi
-  log "triggering the host rebuild through the deploy hook"
-  local body
-  body=$(curl -sS -m 60 -X POST -H 'Content-Type: application/json' -H 'X-GitHub-Event: push' \
-    --data-binary "@${GITHUB_EVENT_PATH:-/dev/null}" "$STUDIOCRM_DEPLOY_HOOK" 2>/dev/null) || fail "the deploy hook did not answer."
-  # It answers HTTP 200 even when it refuses, and says so only in the body.
-  if grep -q '"state" *: *"ERROR"' <<<"$body"; then
-    fail "the deploy hook refused the request (HTTP 200 with state ERROR — it only accepts GitHub's own signed delivery). Empty the STUDIOCRM_DEPLOY_HOOK secret and register the hook URL as a repository webhook instead (docs/DEPLOYMENT.md)."
-  fi
-  log "deploy hook accepted the request"
-}
-
-# ------------------------------------------------------------------- 2. host progress
+# ------------------------------------------------------------------- 1. host progress
 # The host's deploy log for THIS run: the newest node_app_automate_deploy_*.log written since T0.
 find_deploy_log() {
   local name t best='' best_t=0
@@ -86,7 +69,7 @@ find_deploy_log() {
   echo "$best"
 }
 
-# 3. The host rewrites web.config at the very END of its run, into a file with no <httpPlatform>
+# 2. The host rewrites web.config at the very END of its run, into a file with no <httpPlatform>
 # (a 502 everywhere). Uploading only when the remote file is the host's version means the upload
 # always lands AFTER the rewrite — never clobbered by it — and is repeated if it happens again.
 webconfig_broken() {
@@ -97,7 +80,6 @@ webconfig_broken() {
 # ------------------------------------------------------------------- run
 log "deploying ${SHA:0:7} to $APP_URL"
 summary "### StudioCRM deploy \`${SHA:0:7}\`"
-trigger
 
 if is_live; then
   log "the live build is already ${SHA:0:7}"
@@ -135,7 +117,7 @@ else
   log "live build is ${SHA:0:7} (web.config repairs: $repairs)"
 fi
 
-# ------------------------------------------------------------------- 4. verify (as -VerifyOnly)
+# ------------------------------------------------------------------- 3. verify (as -VerifyOnly)
 db=$(curl -s -m 20 "$HEALTH_URL" | jq -r '.data.db // empty' | tr -d '\r')
 [[ $db == up ]] || echo "::warning::health reports db=${db:-missing} — DATABASE_URL in the site-root .env is missing or wrong."
 spa=$(curl -s -o /dev/null -m 20 -w '%{content_type}' "$APP_URL/modules/billing/new")

@@ -198,8 +198,7 @@ Two pieces do it, and they split the work deliberately:
 What a run does (`deploy/ci-deploy.sh`):
 
 ```
-(STUDIOCRM_DEPLOY_HOOK set? POST it, and stop if the body says ERROR)
-  -> one FTPS login (a refused login stops the job at once: retrying could lock the account)
+one FTPS login (a refused login stops the job at once: retrying could lock the account)
   -> loop until /api/health reports this commit, or 30 minutes:
        find the host's node_app_automate_deploy_<id>.log written since the push
          (SUCCESS = files extracted; a failure at its end stops the job)
@@ -227,12 +226,13 @@ over FTPS (below).
    `application/json`, *Just the push event*, Active. After the next push, the webhook's
    *Recent Deliveries* should show a response without `"state":"ERROR"`; if it shows ERROR, try
    content type `application/x-www-form-urlencoded`, then *Redeliver*.
-3. **GitHub secret `STUDIOCRM_DEPLOY_HOOK`** — **leave it unset** while the webhook above is in
-   place: with both, every push builds twice. It exists only for a host that would accept a
-   direct call; today's hook refuses one, and the job then stops with that message.
+3. **Check the first run**: push anything to `main`, then watch *Actions → Deploy*. It should log
+   the host deploy log it found, `host reports SUCCESS`, the `web.config` re-upload, and end with
+   the live commit. The webhook's *Recent Deliveries* shows whether GitHub's delivery was accepted.
 
 Nothing else is needed — the workflow reads the site URL, FTP host and user from
-`deploy/deploy.config.json`. No secret is in the workflow or in git.
+`deploy/deploy.config.json`. One secret, one webhook; no secret is in the workflow or in git.
+CI never calls the hook itself: it refuses every caller but GitHub's own delivery.
 
 ### Day to day
 
