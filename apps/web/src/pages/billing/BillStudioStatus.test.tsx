@@ -92,8 +92,8 @@ describe('Studio Status on the bill', () => {
   it('a recorded step is corrected from its own menu — who/when, then Mark pending', async () => {
     await render();
     await click(chip('Selection: done'));
-    expect(host.textContent).toContain('Done 2026-09-26 · Asha');
-    const markPending = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('Mark Selection pending'));
+    expect(document.body.textContent).toContain('Done 2026-09-26 · Asha');
+    const markPending = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('Mark Selection pending'));
     await click(markPending!);
     expect(mutate).toHaveBeenCalledWith({ type: 'reopen', billId: 'b1', stage: 'SELECTION' });
   });
@@ -103,7 +103,7 @@ describe('Studio Status on the bill', () => {
     await render();
     expect(host.textContent).toContain('Delivered 2026-09-27');
     await click(chip('Delivery: done'));
-    await click([...host.querySelectorAll('button')].find((b) => b.textContent?.includes('Mark Delivery pending'))!);
+    await click([...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('Mark Delivery pending'))!);
     expect(mutate).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('Mark delivery pending?');
   });

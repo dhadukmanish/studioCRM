@@ -297,17 +297,47 @@ export function Tabs({ value, onChange, tabs, className }: { value: string; onCh
 export interface MenuItem { label: ReactNode; onClick?: () => void; icon?: ReactNode; danger?: boolean; disabled?: boolean; divider?: boolean }
 export function Dropdown({ trigger, items, align = 'right', className }: { trigger?: ReactNode; items: MenuItem[]; align?: 'left' | 'right'; className?: string }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; right: number; up: boolean; max: number }>({ top: 0, left: 0, right: 0, up: false, max: 0 });
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // The menu is portalled to <body> with fixed coordinates (as Combobox), so a table's scroll box or
+  // any other overflow container can never clip it; it opens upward when there is no room below.
+  const place = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const need = menuRef.current?.scrollHeight ?? items.length * 36 + 8;
+    const below = window.innerHeight - r.bottom - 8;
+    const up = below < need && r.top - 8 > below;
+    // Never taller than the room on its side; it scrolls only when the screen itself is too short.
+    setPos({ top: up ? r.top : r.bottom, left: r.left, right: window.innerWidth - r.right, up, max: Math.max(up ? r.top - 8 : below, 120) });
+  };
   useEffect(() => {
-    const h = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    if (!open) return;
+    place();
+    const h = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && (e.stopPropagation(), setOpen(false));
     document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, []);
+    document.addEventListener('keydown', esc, true);
+    window.addEventListener('resize', place);
+    document.addEventListener('scroll', place, true);
+    return () => {
+      document.removeEventListener('mousedown', h);
+      document.removeEventListener('keydown', esc, true);
+      window.removeEventListener('resize', place);
+      document.removeEventListener('scroll', place, true);
+    };
+  }, [open]);
+  // Re-measure once the menu exists, so the up/down choice uses its real height.
+  useEffect(() => { if (open) place(); }, [open, items.length]);
   return (
     <div ref={ref} className={cx('relative inline-block', className)}>
       <span onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}>{trigger ?? <button type="button" className="icon-btn"><MoreVertical className="h-4 w-4" /></button>}</span>
-      {open && (
-        <div className={cx('absolute z-50 mt-1 min-w-[180px] card shadow-lg py-1', align === 'right' ? 'right-0' : 'left-0')}>
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: 'fixed', maxHeight: pos.max || undefined, ...(align === 'right' ? { right: pos.right } : { left: pos.left }), ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }) }}
+          className="z-[100] min-w-[180px] overflow-y-auto card shadow-lg py-1"
+        >
           {items.map((it, i) =>
             it.divider ? (
               <div key={i} className="my-1 border-t border-line" />
@@ -318,7 +348,8 @@ export function Dropdown({ trigger, items, align = 'right', className }: { trigg
               </button>
             ),
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

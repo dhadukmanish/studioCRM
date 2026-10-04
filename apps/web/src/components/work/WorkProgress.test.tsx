@@ -77,7 +77,7 @@ describe('studio workflow on screen', () => {
   it('uncommon actions live in ••• — Skip the current step, Mark the previous one pending', async () => {
     await render(<NextWorkAction billId="b1" position="EDITING" canUpdate />);
     await act(async () => (host.querySelector('[aria-label="More actions"]') as HTMLButtonElement).click());
-    const items = host.textContent ?? '';
+    const items = document.body.textContent ?? '';
     expect(items).toContain('Skip Editing');
     expect(items).toContain('Mark Selection pending');
   });
@@ -86,6 +86,6 @@ describe('studio workflow on screen', () => {
     await render(<NextWorkAction billId="b1" position="COMPLETE" canUpdate />);
     expect(primaries()).toHaveLength(0);
     await act(async () => (host.querySelector('[aria-label="More actions"]') as HTMLButtonElement).click());
-    expect(host.textContent).toContain('Mark Delivery pending');
+    expect(document.body.textContent).toContain('Mark Delivery pending');
   });
 });
