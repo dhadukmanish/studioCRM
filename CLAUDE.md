@@ -20,7 +20,7 @@ Delivery recorded one click at a time, position derived, never a status dropdown
 Pending until one-click Done; Today's Work shows each job's one next step with one button (`docs/STUDIO_WORKFLOW.md`). Money
 received beyond a bill — or before any bill — is an advance that reduces nothing until explicitly
 applied (`docs/ADVANCE_PAYMENTS.md`). Settings → Print & Invoice holds branding images, bank details, terms, accent and the copy label; the "Legacy Studio" template reprints the old studio bill and "Professional Studio" is a modern tax-invoice layout with no Bill To / Ship To (`docs/INVOICE_TEMPLATES.md`). The Dashboard shows inquiries (appointments), orders and their workflow status, payments and today's attention items — read-only, each section by permission, no admin shortcuts (`docs/DASHBOARD.md`). Reports → Bill Summary lists a period's bills (Summary / Detailed
-tabs over one scope; Advance = received against the bill) (`docs/BILL_SUMMARY_REPORT.md`). StudioCRM is sold as SaaS: a separate platform panel (`/platform`, served on control.kriviinfotech.com, its own
+tabs over one scope; Advance = received against the bill) (`docs/BILL_SUMMARY_REPORT.md`). StudioCRM is sold as SaaS: a separate platform panel (`/platform`; control.kriviinfotech.com redirects there; its own
 sign-in) creates studios and grants Trial / Day-wise / Monthly / Yearly periods with manual payments;
 expiry is derived, a lapsed studio turns read-only after 3 grace days, a suspended one is blocked
 (`docs/SUBSCRIPTIONS.md`). The ledger / GL, a customer master and

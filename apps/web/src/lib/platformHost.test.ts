@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { isDevHost, isPlatformHost } from './platformHost';
+import { isPlatformHost } from './platformHost';
 
-/** control.<domain> is the platform panel; every other host is the studio app; localhost runs both. */
+/** A control.<domain> host serving the build shows only the panel; /platform exists on every host. */
 describe('isPlatformHost', () => {
   it('is true only for a control. subdomain', () => {
     expect(isPlatformHost('control.studiocrm.in')).toBe(true);
@@ -11,12 +11,5 @@ describe('isPlatformHost', () => {
     // "control" elsewhere in the name is a studio host, not the panel.
     expect(isPlatformHost('mycontrol.studiocrm.in')).toBe(false);
     expect(isPlatformHost('studio.control.in')).toBe(false);
-  });
-
-  it('treats localhost and 127.0.0.1 as development hosts', () => {
-    expect(isDevHost('localhost')).toBe(true);
-    expect(isDevHost('127.0.0.1')).toBe(true);
-    expect(isDevHost('studiocrm.in')).toBe(false);
-    expect(isDevHost('control.studiocrm.in')).toBe(false);
   });
 });

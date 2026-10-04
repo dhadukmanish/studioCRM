@@ -18,10 +18,13 @@ A platform token is refused by every studio route (`plugins/auth.ts`), and a stu
 including a studio's own *Super Admin* — is refused by every platform route (`routes/platform.ts`).
 The studio "Super Admin" role is the studio owner, not the platform.
 
-The panel is the same web build, under `/platform/*`. On a host whose name starts with `control.` (live: `control.kriviinfotech.com`)
-only the panel is served; on any other host the panel routes do not exist, except on localhost
-(dev), where `http://localhost:5173/platform` works. This is routing convenience only — the
-security boundary is the token kind, never the Host header.
+The panel is the same web build, at `/platform/*` on every host. Live it is reached as
+**control.kriviinfotech.com**, a separate hosting site whose only content is
+`deploy/control-redirect/web.config` (+ an `index.html` fallback), redirecting every request to
+`https://studio.kriviinfotech.com/platform` — the host refuses to bind a second domain to a
+subdomain site. If a `control.*` host ever serves the build itself, it shows only the panel
+(`isPlatformHost`). This is routing convenience only — the security boundary is the token kind,
+never the Host header.
 
 ## Plans
 

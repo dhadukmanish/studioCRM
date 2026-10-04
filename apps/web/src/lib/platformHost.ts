@@ -1,17 +1,12 @@
 /**
- * The platform panel (the company that sells StudioCRM) and the studio app are ONE web build.
- * Which of them a browser gets is decided by the host name:
- *
- *   control.<domain>      -> platform panel only (no studio sign-in there)
- *   any other host        -> studio app only (no /platform routes)
- *   localhost, 127.0.0.1  -> both, so `http://localhost:5173/platform` works in development
+ * The platform panel (the company that sells StudioCRM) and the studio app are ONE web build. The
+ * panel lives at /platform/* on every host. A host whose name starts with `control.` and serves
+ * this build itself shows ONLY the panel. Live, control.kriviinfotech.com is a separate hosting
+ * site that redirects to https://studio.kriviinfotech.com/platform (deploy/control-redirect/web.config),
+ * because the host cannot bind a second domain to a subdomain site.
  *
  * This is presentation only — the API refuses a studio token on platform routes and vice versa.
  */
 export function isPlatformHost(hostname: string = window.location.hostname): boolean {
   return hostname.startsWith('control.');
-}
-
-export function isDevHost(hostname: string = window.location.hostname): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1';
 }

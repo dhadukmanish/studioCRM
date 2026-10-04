@@ -6,7 +6,7 @@ import { Spinner } from '@/components/ui';
 import AppShell from '@/components/layout/AppShell';
 import Login from '@/pages/auth/Login';
 import { ComingSoon, NotFound } from '@/pages/misc';
-import { isDevHost, isPlatformHost } from '@/lib/platformHost';
+import { isPlatformHost } from '@/lib/platformHost';
 
 // Lazy pages — each becomes its own chunk.
 const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'));
@@ -67,15 +67,15 @@ const Forbidden = () => (
 const Fallback = () => <div className="flex justify-center py-20"><Spinner className="h-6 w-6 text-primary" /></div>;
 
 export default function App() {
-  // control.<domain> serves only the platform panel; other hosts only the studio app; localhost both.
+  // /platform/* exists on every host (live, control.<domain> redirects to studio.<domain>/platform);
+  // a control.* host that serves the build itself shows only the panel.
   const platformHost = isPlatformHost();
-  const withPlatform = platformHost || isDevHost();
   return (
     <>
       <Toaster />
       <Suspense fallback={<Fallback />}>
         <Routes>
-          {withPlatform && <Route path="/platform/*" element={<PlatformApp />} />}
+          <Route path="/platform/*" element={<PlatformApp />} />
           {platformHost && <Route path="*" element={<Navigate to="/platform" replace />} />}
           {!platformHost && (<>
           <Route path="/signin" element={<Login />} />
