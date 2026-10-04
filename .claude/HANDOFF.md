@@ -993,8 +993,8 @@ assumes one and will throw. Guard the login step when reusing it.
   `tenant_subscriptions`, so the code may ship. The DB password was rotated on the host and
   `apps/api/.env` was updated to match (`#` percent-encoded). After deploy: run `platform:setup` once
   with `PLATFORM_ADMIN_*` env vars, create the plans in the panel (none are seeded — the owner sets
-  name / type / days / price), and bind an `admin.` subdomain to the same IIS site (the panel shows only
-  on hosts starting with `admin.`). Existing studios stay UNMANAGED (unrestricted) until granted a
+  name / type / days / price), and bind `control.kriviinfotech.com` to the same IIS site (the panel shows only
+  on hosts starting with `control.`). Existing studios stay UNMANAGED (unrestricted) until granted a
   period. Verified: 1428 API tests + 146 web tests on a throwaway DB, and a browser run (create studio
   → trial → renew → expired banner + 402 → suspend → signed out). Open: Razorpay, self-signup, plan
   feature limits, expiry reminders, suspended studio's public invoice links still open.

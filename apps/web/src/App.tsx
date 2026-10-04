@@ -67,7 +67,7 @@ const Forbidden = () => (
 const Fallback = () => <div className="flex justify-center py-20"><Spinner className="h-6 w-6 text-primary" /></div>;
 
 export default function App() {
-  // admin.<domain> serves only the platform panel; other hosts only the studio app; localhost both.
+  // control.<domain> serves only the platform panel; other hosts only the studio app; localhost both.
   const platformHost = isPlatformHost();
   const withPlatform = platformHost || isDevHost();
   return (
