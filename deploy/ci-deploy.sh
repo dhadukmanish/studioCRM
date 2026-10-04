@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------------------------
-# StudioCRM deploy, CI form — what deploy/Deploy-StudioCRM.ps1 does after a push, run by
-# .github/workflows/deploy.yml: wait for the host's build (started by GitHub's repository webhook —
-# the panel hook refuses any other caller), put back the web.config it breaks, and prove the live
-# build is this commit. See docs/DEPLOYMENT.md.
+# StudioCRM deploy, CI form — run by .github/workflows/deploy.yml after it has tested and built
+# this commit. It uploads the built server (apps/api/dist: one self-contained bundle + the web
+# build, no node_modules) to the site over FTPS, then deploy/web.config, which makes IIS restart
+# Node on the new bundle, and fails unless /api/health reports this commit. The host's own git
+# pipeline is not used: it takes ~7 minutes and breaks web.config every time. See
+# docs/DEPLOYMENT.md, "Automatic deploy".
 #
 # The one secret arrives as an environment variable (a GitHub Actions secret) and is never echoed:
 #   STUDIOCRM_FTP_PASSWORD  FTPS password of the site's FTP user (deploy.config.json)
-# Other inputs: GITHUB_SHA (the commit to expect), DEPLOY_T0 (epoch the build was started, for
-# finding the host's log), DEADLINE_MIN (default 30).
-#
-# The repository is public, so this job's log is too: it prints states and file NAMES only —
-# never a credential or the host's own logs.
+# The repository is public, so this job's log is too: it prints file names and states only.
 # ---------------------------------------------------------------------------------------------
 set -euo pipefail
 
@@ -23,15 +21,16 @@ FTP_HOST=$(cfg .logs.host)
 FTP_USER=$(cfg .logs.username)
 FTP="ftp://$FTP_HOST"
 SHA=${GITHUB_SHA:?GITHUB_SHA is required}
-DEADLINE_MIN=${DEADLINE_MIN:-30}
-T0=${DEPLOY_T0:-}
-[[ $T0 =~ ^[0-9]+$ ]] || T0=$(date +%s)
+SHORT=${SHA:0:7}
+DIST=apps/api/dist
 
 log()  { echo "==> $*"; }
-fail() { echo "::error::$*"; summary "**Failed:** $*"; exit 1; }
 summary() { [[ -n ${GITHUB_STEP_SUMMARY:-} ]] && echo "$*" >> "$GITHUB_STEP_SUMMARY" || true; }
+fail() { echo "::error::$*"; summary "**Failed:** $*"; exit 1; }
 
-[[ -n ${STUDIOCRM_FTP_PASSWORD:-} ]] || fail "secret STUDIOCRM_FTP_PASSWORD is not set, so web.config cannot be repaired after the host's deploy (docs/DEPLOYMENT.md, Automatic deploy)."
+[[ -n ${STUDIOCRM_FTP_PASSWORD:-} ]] || fail "secret STUDIOCRM_FTP_PASSWORD is not set (docs/DEPLOYMENT.md, Automatic deploy)."
+[[ -f $DIST/server.js && -f $DIST/public/index.html ]] || fail "$DIST is not built — the Build step must run first."
+grep -qF "VERSION = { commit: \"$SHORT\"" "$DIST/server.js" || fail "$DIST/server.js was not built from $SHORT (BUILD_COMMIT) — refusing to upload a bundle that would report another version."
 
 # FTPS credentials go into a private curl config file — never onto a command line.
 WORK=$(mktemp -d)
@@ -39,85 +38,51 @@ trap 'rm -rf "$WORK"' EXIT
 CURLCFG="$WORK/ftp.curlrc"
 umask 077
 pw=${STUDIOCRM_FTP_PASSWORD//\\/\\\\}; pw=${pw//\"/\\\"}
-printf 'user = "%s:%s"\nssl-reqd\nsilent\nshow-error\nconnect-timeout = 20\nmax-time = 90\n' "$FTP_USER" "$pw" > "$CURLCFG"
+printf 'user = "%s:%s"\nssl-reqd\nsilent\nshow-error\nconnect-timeout = 20\nmax-time = 180\nftp-create-dirs\n' "$FTP_USER" "$pw" > "$CURLCFG"
 unset pw
-# Explicit TLS on port 21, as the server's FEAT advertises. A refused login (curl 67) stops the job at
-# once: retrying a wrong password every 20 seconds for half an hour could get the FTP account locked.
+# Explicit TLS on port 21, as the server's FEAT advertises. A refused login (curl 67) stops at once:
+# retrying a wrong password could get the FTP account locked.
 ftp() {
   local rc=0
   curl -K "$CURLCFG" "$@" || rc=$?
   (( rc != 67 )) || fail "the FTP server refused the login for $FTP_USER — check the STUDIOCRM_FTP_PASSWORD secret."
   return $rc
 }
+put() { ftp -T "$1" "$FTP/$2" || fail "uploading $2 failed — the site still runs the previous build (nothing restarts it until web.config is uploaded)."; }
 
-# ------------------------------------------------------------------- live state
 live_version() { curl -s -m 10 "$HEALTH_URL" | jq -r '.data.version // empty' 2>/dev/null | tr -d '\r' || true; }
-# The build stamps `git rev-parse --short HEAD`, so the live version is a prefix of the full SHA.
-is_live() { local v; v=$(live_version); [[ ${#v} -ge 7 && $SHA == "$v"* ]]; }
 
-# ------------------------------------------------------------------- 1. host progress
-# The host's deploy log for THIS run: the newest node_app_automate_deploy_*.log written since T0.
-find_deploy_log() {
-  local name t best='' best_t=0
-  while IFS= read -r name; do
-    name=${name%$'\r'}
-    [[ $name == node_app_automate_deploy_*.log ]] || continue
-    t=$(ftp -I "$FTP/$name" 2>/dev/null | tr -d '\r' | sed -n 's/^[Ll]ast-[Mm]odified: //p')
-    t=$(date -u -d "$t" +%s 2>/dev/null || echo 0)
-    if (( t >= T0 - 120 && t > best_t )); then best=$name; best_t=$t; fi
-  done < <(ftp --list-only "$FTP/" 2>/dev/null || true)
-  echo "$best"
-}
+log "deploying $SHORT to $APP_URL"
+summary "### StudioCRM deploy \`$SHORT\`"
 
-# 2. The host rewrites web.config at the very END of its run, into a file with no <httpPlatform>
-# (a 502 everywhere). Uploading only when the remote file is the host's version means the upload
-# always lands AFTER the rewrite — never clobbered by it — and is repeated if it happens again.
-webconfig_broken() {
-  ftp -o "$WORK/web.config.remote" "$FTP/web.config" 2>/dev/null || return 1   # unreadable: decide next round
-  ! grep -q 'processPath=' "$WORK/web.config.remote"
-}
+# 1. Files the running build does not use yet: the new fingerprinted web assets, fonts, the shaper.
+#    Old assets stay, so a page already open keeps loading. Nothing restarts during this.
+n=0
+while IFS= read -r f; do put "$DIST/$f" "$DIST/$f"; n=$((n + 1)); done < <(cd "$DIST" && find public fonts -type f ! -path public/index.html | sort)
+put "$DIST/harfbuzz.wasm" "$DIST/harfbuzz.wasm"
+log "uploaded $((n + 1)) asset files"
 
-# ------------------------------------------------------------------- run
-log "deploying ${SHA:0:7} to $APP_URL"
-summary "### StudioCRM deploy \`${SHA:0:7}\`"
+# 2. The new server and the page that points at the new assets.
+put "$DIST/server.js" "$DIST/server.js"
+put "$DIST/public/index.html" "$DIST/public/index.html"
+log "uploaded server.js and index.html"
 
-if is_live; then
-  log "the live build is already ${SHA:0:7}"
-else
-  # One login up front, in this shell, so a wrong password stops the job after a single attempt.
-  ftp --list-only "$FTP/" > /dev/null || fail "could not reach the FTP server $FTP_HOST."
-  deadline=$(( $(date +%s) + DEADLINE_MIN * 60 ))
-  host_log=''; host_done=0; repairs=0; last=''
-  until is_live; do
-    (( $(date +%s) < deadline )) || fail "the live build did not become ${SHA:0:7} within $DEADLINE_MIN minutes (host log: ${host_log:-none found}, host SUCCESS: $host_done, web.config repairs: $repairs). Read the host's deploy log and logs/node.log over FTPS (docs/DEPLOYMENT.md)."
+# 3. web.config last: writing it makes IIS restart Node, which loads the new server.js.
+put deploy/web.config web.config
+log "uploaded web.config — IIS restarts the app"
 
-    if [[ -z $host_log ]]; then
-      host_log=$(find_deploy_log)
-      [[ -n $host_log ]] && log "host deploy log: $host_log"
-    fi
-    if [[ -n $host_log && $host_done == 0 ]] && ftp -o "$WORK/deploy.log" "$FTP/$host_log" 2>/dev/null; then
-      if grep -q 'SUCCESS' "$WORK/deploy.log"; then
-        host_done=1; log "host reports SUCCESS — files extracted"
-      elif tail -n 5 "$WORK/deploy.log" | grep -qiE '\b(failed|failure)\b'; then
-        fail "the host's deploy log $host_log ends in a failure — read it over FTPS. The previous build is still on the server."
-      fi
-    fi
+# 4. Wait for the new build to answer (normally well under a minute). If IIS has not restarted
+#    after 90 s, touch web.config once more.
+deadline=$(( $(date +%s) + 300 )); again=$(( $(date +%s) + 90 )); last=''
+until [[ $(live_version) == "$SHORT" ]]; do
+  (( $(date +%s) < deadline )) || fail "the site did not start answering as $SHORT within 5 minutes (it reports: $(live_version || true)). Read logs/node.log in the site root over FTPS."
+  if (( $(date +%s) > again )); then log "still the old build — uploading web.config again"; put deploy/web.config web.config; again=$(( $(date +%s) + 600 )); fi
+  v=$(live_version); [[ $v != "$last" ]] && { log "live build is ${v:-not answering yet} ..."; last=$v; }
+  sleep 5
+done
+log "live build is $SHORT"
 
-    if webconfig_broken; then
-      log "host has rewritten web.config without <httpPlatform> — uploading deploy/web.config"
-      ftp -T deploy/web.config "$FTP/web.config" || fail "uploading web.config failed."
-      repairs=$((repairs + 1))
-      sleep 15
-      continue
-    fi
-
-    v=$(live_version); [[ $v != "$last" ]] && { log "live build is ${v:-not answering} ..."; last=$v; }
-    sleep 20
-  done
-  log "live build is ${SHA:0:7} (web.config repairs: $repairs)"
-fi
-
-# ------------------------------------------------------------------- 3. verify (as -VerifyOnly)
+# 5. Verify, as Deploy-StudioCRM.ps1 -VerifyOnly.
 db=$(curl -s -m 20 "$HEALTH_URL" | jq -r '.data.db // empty' | tr -d '\r')
 [[ $db == up ]] || echo "::warning::health reports db=${db:-missing} — DATABASE_URL in the site-root .env is missing or wrong."
 spa=$(curl -s -o /dev/null -m 20 -w '%{content_type}' "$APP_URL/modules/billing/new")
@@ -125,4 +90,4 @@ spa=$(curl -s -o /dev/null -m 20 -w '%{content_type}' "$APP_URL/modules/billing/
 api=$(curl -s -o /dev/null -m 20 -w '%{http_code} %{content_type}' "$APP_URL/api/no-such-route")
 [[ $api == "404 application/json"* ]] || fail "an unknown /api path answered '$api' — it must be a JSON 404."
 log "verified: health up, SPA deep link, JSON 404"
-summary "Live at $APP_URL — build \`${SHA:0:7}\`, db \`$db\`."
+summary "Live at $APP_URL — build \`$SHORT\`, db \`$db\`."

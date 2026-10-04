@@ -1,7 +1,7 @@
 # Deploys main to https://studio.kriviinfotech.com — docs/DEPLOYMENT.md, "Automatic deploy".
-# The host builds from its own git clone, started by the repository webhook on the same push (the
-# panel hook refuses any other caller). This job waits for that build, puts back the web.config the
-# host breaks, and fails unless the live build becomes this commit.
+# Every push to main: install, typecheck, test, build HERE, then upload the built server over FTPS
+# and restart it (deploy/ci-deploy.sh). The host's own git build is not used — it is slow and
+# breaks web.config. A failing typecheck or test stops the deploy; the site keeps the old build.
 # No secret is in this file: the FTP password comes from the repository's Actions secrets.
 name: Deploy
 
@@ -10,7 +10,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# One deploy at a time; a newer push waits for the running one instead of racing it on web.config.
+# One deploy at a time; a newer push waits for the running one instead of uploading over it.
 concurrency:
   group: deploy-production
   cancel-in-progress: false
@@ -21,15 +21,27 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Deploy, repair web.config, verify
+      - uses: pnpm/action-setup@v4   # version from package.json "packageManager"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck and test
+        run: pnpm typecheck && pnpm test
+
+      - name: Build
+        run: BUILD_COMMIT="${GITHUB_SHA::7}" pnpm build
+
+      - name: Upload to the site, restart, verify
         env:
           STUDIOCRM_FTP_PASSWORD: ${{ secrets.STUDIOCRM_FTP_PASSWORD }}
-          # When GitHub delivered the push (and its webhook started the host): used to find this
-          # run's host deploy log. Empty on a manual run, where the script uses its own start time.
-          DEPLOY_T0: ${{ github.event.repository.pushed_at }}
-          DEADLINE_MIN: '30'
         run: bash deploy/ci-deploy.sh
