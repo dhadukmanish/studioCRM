@@ -987,11 +987,13 @@ assumes one and will throw. Guard the login step when reusing it.
 
 ## Known pending work
 
-- **SaaS subscriptions / platform panel (2026-10-04) — built, uncommitted, undeployed**
-  (`docs/SUBSCRIPTIONS.md`). Migration `0025` (3 new tables, additive) is **NOT on the shared DB** —
-  apply it (reviewed, approved) before the code ships, because every studio request now reads
-  `tenant_subscriptions`. Then run `platform:setup` once with `PLATFORM_ADMIN_*` env vars, set real
-  plan prices in the panel, and bind an `admin.` subdomain to the same IIS site (the panel shows only
+- **SaaS subscriptions / platform panel (2026-10-04) — committed on `feature/saas-subscriptions`,
+  not pushed / merged / deployed** (`docs/SUBSCRIPTIONS.md`). Migration `0025` (3 new tables) **IS
+  applied on the shared DB** (2026-10-04, approved, 26/26) — every studio request now reads
+  `tenant_subscriptions`, so the code may ship. The DB password was rotated on the host and
+  `apps/api/.env` was updated to match (`#` percent-encoded). After deploy: run `platform:setup` once
+  with `PLATFORM_ADMIN_*` env vars, create the plans in the panel (none are seeded — the owner sets
+  name / type / days / price), and bind an `admin.` subdomain to the same IIS site (the panel shows only
   on hosts starting with `admin.`). Existing studios stay UNMANAGED (unrestricted) until granted a
   period. Verified: 1428 API tests + 146 web tests on a throwaway DB, and a browser run (create studio
   → trial → renew → expired banner + 402 → suspend → signed out). Open: Razorpay, self-signup, plan
