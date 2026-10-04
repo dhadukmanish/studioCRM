@@ -12,3 +12,4 @@ export * from './invoiceTemplates';
 export * from './publicInvoiceLinks';
 export * from './receipts';
 export * from './work';
+export * from './platform';

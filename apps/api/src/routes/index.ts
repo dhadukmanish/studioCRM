@@ -21,6 +21,7 @@ import { receivableRoutes } from './receivables';
 import { billReportRoutes } from './billReport';
 import { workRoutes } from './work';
 import { dashboardRoutes } from './dashboard';
+import { platformRoutes } from './platform';
 
 /** Register every route module here. Feature modules: add one line. */
 export async function registerRoutes(app: FastifyInstance) {
@@ -45,6 +46,8 @@ export async function registerRoutes(app: FastifyInstance) {
   await app.register(billReportRoutes);
   await app.register(workRoutes);
   await app.register(dashboardRoutes);
+  // The platform (SaaS) panel — its own sign-in, never a studio session.
+  await app.register(platformRoutes);
   // The one anonymous invoice route (`/i/:token`) — token-scoped, no ERP session.
   await app.register(publicInvoiceRoutes);
 }

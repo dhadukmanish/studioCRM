@@ -4,12 +4,13 @@ import { Bell, ChevronDown, ChevronRight, Boxes, Leaf, LogOut, Palette, Menu, Mo
 import { THEMES, type ThemePref } from '@/lib/theme';
 import { Dropdown } from '@/components/ui';
 import { NAV, navSectionFor, type NavSection } from '@erp/shared';
-import { useAuthStore } from '@/store/auth';
+import { useAuthStore, type AuthUser } from '@/store/auth';
 import { useUiStore } from '@/store/ui';
 import { cx } from '@/lib/format';
 import { api } from '@/lib/api';
 import { Icon } from '@/lib/icons';
 import { useCompanyLogo, useCompanyProfile } from '@/lib/settings';
+import { SubscriptionBanner } from './SubscriptionBanner';
 
 /** NAV with the items this user may read; a group left with none is hidden. */
 function useVisibleNav(): NavSection[] {
@@ -150,6 +151,15 @@ export default function AppShell() {
   // product name from the build. They are different things and both are shown.
   const company = useCompanyProfile().data;
   useEffect(() => setMobileOpen(false), [pathname, setMobileOpen]);
+  // The stored user is a sign-in snapshot; refresh it once per app load so the subscription banner
+  // (and anything else on the user) reflects today, merged over what sign-in stored.
+  const subscription = useAuthStore((s) => s.user?.subscription);
+  useEffect(() => {
+    api.get<Partial<AuthUser>>('/api/auth/me').then((me) => {
+      const current = useAuthStore.getState().user;
+      if (me && current) useAuthStore.getState().setUser({ ...current, ...me });
+    }).catch(() => {}); // a failed refresh keeps the snapshot; a suspension (SUB_003) signs out in lib/api
+  }, []);
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-topbar px-2 text-on-topbar sm:gap-3 sm:px-4">
@@ -173,6 +183,7 @@ export default function AppShell() {
           <UserMenu />
         </div>
       </header>
+      <SubscriptionBanner access={subscription} />
       <div className="flex min-h-0 flex-1">
         <div className="hidden lg:block shrink-0 h-full"><Rail nav={nav} current={current} collapsed={sidebarCollapsed} /></div>
         {mobileOpen && (

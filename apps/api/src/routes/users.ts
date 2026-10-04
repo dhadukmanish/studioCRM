@@ -9,6 +9,7 @@ import { ok } from '../lib/respond';
 import { parseListQuery } from '../lib/list';
 import { filterWhere, sortBy, tableColumns } from '../lib/filters';
 import { logActivity } from '../services/activity';
+import { assertLoginIdentityFree } from '../services/subscriptions';
 
 export function publicUser(u: typeof schema.users.$inferSelect & { roleName?: string; roleKey?: string | null }) {
   const { passwordHash: _p, ...rest } = u;
@@ -46,7 +47,11 @@ export async function userRoutes(app: FastifyInstance) {
     if (!body.password) throw validation('Password is required');
     await assertRole(req.user.tenantId, body.roleId, req.user.isSuperAdmin);
     const { password, ...rest } = body;
-    const [u] = await db.insert(schema.users).values({ ...rest, username: rest.username || null, email: rest.email.toLowerCase(), tenantId: req.user.tenantId, passwordHash: await bcrypt.hash(password, 10) }).returning();
+    const passwordHash = await bcrypt.hash(password, 10);
+    const [u] = await db.transaction(async (tx) => {
+      await assertLoginIdentityFree(tx, { email: rest.email, username: rest.username || null });
+      return tx.insert(schema.users).values({ ...rest, username: rest.username?.toLowerCase() || null, email: rest.email.toLowerCase(), tenantId: req.user.tenantId, passwordHash }).returning();
+    });
     await logActivity(req, 'user', u.id, 'created', `User "${u.email}" created`);
     return ok(publicUser(u), 'User created successfully');
   });
@@ -58,10 +63,13 @@ export async function userRoutes(app: FastifyInstance) {
     const { password, ...rest } = body;
     const patch: any = { ...rest, updatedAt: new Date() };
     if (rest.email) patch.email = rest.email.toLowerCase();
-    if (rest.username !== undefined) patch.username = rest.username || null;
+    if (rest.username !== undefined) patch.username = rest.username?.toLowerCase() || null;
     if (password) patch.passwordHash = await bcrypt.hash(password, 10);
     if (id === req.user.id && body.isActive === false) throw validation('You cannot deactivate your own account');
-    const [u] = await db.update(schema.users).set(patch).where(and(eq(schema.users.id, id), eq(schema.users.tenantId, req.user.tenantId))).returning();
+    const [u] = await db.transaction(async (tx) => {
+      await assertLoginIdentityFree(tx, { email: rest.email, username: rest.username || null }, id);
+      return tx.update(schema.users).set(patch).where(and(eq(schema.users.id, id), eq(schema.users.tenantId, req.user.tenantId))).returning();
+    });
     if (!u) throw notFound('User');
     await logActivity(req, 'user', u.id, 'updated', `User "${u.email}" updated`);
     return ok(publicUser(u), 'User updated successfully');

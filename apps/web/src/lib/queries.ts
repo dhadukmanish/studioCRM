@@ -73,7 +73,7 @@ export interface AppointmentLookup {
 }
 /** Active Account Group rows, for the Account Master group picker and the list's group filter. */
 export const useAccountGroupsLookup = () => useQuery({ queryKey: ['lookup', 'account-groups'], queryFn: () => api.get<{ id: string; groupName: string; headGroup: HeadGroup }[]>('/api/common/lookups/account-groups'), staleTime: 60_000 });
-export const useSettings = () => useQuery({ queryKey: ['settings'], queryFn: () => api.get<Record<string, any>>('/api/settings'), staleTime: 60_000 });
+export const useSettings = (enabled = true) => useQuery({ queryKey: ['settings'], queryFn: () => api.get<Record<string, any>>('/api/settings'), staleTime: 60_000, enabled });
 export const useCustomFields = (moduleName: string) => useQuery({ queryKey: ['custom-fields', moduleName], queryFn: () => api.get<{ fields: any[] }>(`/api/custom-fields/${moduleName}`), staleTime: 60_000, select: (d) => d.fields });
 
 /** Mutation helper with toast + invalidation */

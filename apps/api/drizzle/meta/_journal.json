@@ -176,6 +176,13 @@
       "when": 1790494309389,
       "tag": "0024_unusual_leo",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791104974455,
+      "tag": "0025_pink_stranger",
+      "breakpoints": true
     }
   ]
 }

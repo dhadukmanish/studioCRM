@@ -12,6 +12,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "platform:setup": "tsx src/db/platform-setup.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "fonts:invoice": "node scripts/build-invoice-fonts.mjs"

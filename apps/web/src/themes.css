@@ -411,3 +411,4 @@
 [data-theme='dark'] .work-check, [data-theme='dusk'] .work-check { color: rgb(134 239 172); }
 [data-theme='dark'] input[type='date'], [data-theme='dark'] input[type='time'], [data-theme='dark'] input[type='datetime-local'], [data-theme='dusk'] input[type='date'], [data-theme='dusk'] input[type='time'], [data-theme='dusk'] input[type='datetime-local'] { color-scheme: dark; }
 [data-theme='dark'] .text-red-700, [data-theme='dusk'] .text-red-700 { color: rgb(248 113 113); }
+[data-theme='dark'] .text-amber-800, [data-theme='dusk'] .text-amber-800 { color: rgb(252 211 77); }

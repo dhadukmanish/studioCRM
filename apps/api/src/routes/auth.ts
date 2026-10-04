@@ -9,6 +9,14 @@ import { AppError, validation } from '../lib/errors';
 import { ok } from '../lib/respond';
 import { loadAuthUser } from '../plugins/auth';
 import { getSettings } from '../services/settings';
+import { getTenantAccess } from '../services/subscriptions';
+
+/** A suspended studio cannot sign in or refresh; anything else signs in (an expired one read-only). */
+async function accessForSignIn(tenantId: string) {
+  const access = await getTenantAccess(tenantId);
+  if (access.blocked) throw new AppError('SUB_003', 'This studio account is suspended. Please contact support.', 403);
+  return access;
+}
 
 const REFRESH_DAYS = 30;
 
@@ -19,6 +27,7 @@ export async function authRoutes(app: FastifyInstance) {
     const [u] = await db.select().from(schema.users).where(or(eq(schema.users.email, ident), eq(schema.users.username, ident))).limit(1);
     if (!u || !(await bcrypt.compare(body.password, u.passwordHash))) throw new AppError('AUTH_001', 'Invalid email or password', 401);
     if (!u.isActive) throw new AppError('AUTH_004', 'This account is inactive', 403);
+    const subscription = await accessForSignIn(u.tenantId);
     const settings = await getSettings(u.tenantId);
     const accessToken = app.jwt.sign({ sub: u.id, tenantId: u.tenantId }, { expiresIn: `${settings.sessionHours}h` });
     const refreshToken = randomBytes(48).toString('hex');
@@ -26,7 +35,7 @@ export async function authRoutes(app: FastifyInstance) {
     await db.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, u.id));
     const user = await loadAuthUser(u.id);
     const [tenant] = await db.select().from(schema.tenants).where(eq(schema.tenants.id, u.tenantId));
-    return ok({ accessToken, refreshToken, user: { ...user, tenantName: tenant?.name, avatarUrl: u.avatarUrl } }, 'Login successful');
+    return ok({ accessToken, refreshToken, user: { ...user, tenantName: tenant?.name, avatarUrl: u.avatarUrl, subscription } }, 'Login successful');
   });
 
   app.post('/api/auth/refresh', async (req) => {
@@ -36,9 +45,10 @@ export async function authRoutes(app: FastifyInstance) {
     if (!rt) throw new AppError('AUTH_003', 'Refresh token expired', 401);
     const user = await loadAuthUser(rt.userId);
     if (!user) throw new AppError('AUTH_004', 'Account is inactive', 403);
+    const subscription = await accessForSignIn(user.tenantId);
     const settings = await getSettings(user.tenantId);
     const accessToken = app.jwt.sign({ sub: user.id, tenantId: user.tenantId }, { expiresIn: `${settings.sessionHours}h` });
-    return ok({ accessToken, user });
+    return ok({ accessToken, user: { ...user, subscription } });
   });
 
   app.post('/api/auth/logout', { preHandler: app.authenticate }, async (req) => {
@@ -50,7 +60,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/api/auth/me', { preHandler: app.authenticate }, async (req) => {
     const [tenant] = await db.select().from(schema.tenants).where(eq(schema.tenants.id, req.user.tenantId));
     const [u] = await db.select({ avatarUrl: schema.users.avatarUrl, mobile: schema.users.mobile, firstName: schema.users.firstName, lastName: schema.users.lastName }).from(schema.users).where(eq(schema.users.id, req.user.id));
-    return ok({ ...req.user, ...u, tenantName: tenant?.name });
+    return ok({ ...req.user, ...u, tenantName: tenant?.name, subscription: req.tenantAccess ?? (await getTenantAccess(req.user.tenantId)) });
   });
 
   /** Effective permissions of the current user (super admin → everything). */

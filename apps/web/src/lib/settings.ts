@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { createContext, useContext, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { formatClockTime, formatDateOnly, formatTimestamp, toDateFormat, toPrintSettings, toTimeFormat, type CompanyProfile, type DateFormat, type PrintAssetKind, type PrintSettings, type TimeFormat } from '@erp/shared';
 import { api } from '@/lib/api';
@@ -12,9 +12,22 @@ import { useSettings } from '@/lib/queries';
  * See docs/SETTINGS.md.
  */
 
+type DisplayFormats = { dateFormat: DateFormat; timeFormat: TimeFormat };
+
+/**
+ * Fixed display formats for a subtree that has no tenant — the platform panel. Inside it every
+ * date helper (useDateFormatters, DateInput) uses these and never asks for /api/settings.
+ */
+const FixedDisplayFormats = createContext<DisplayFormats | null>(null);
+export const FixedDisplayFormatsProvider = FixedDisplayFormats.Provider;
+/** The product defaults (dd-MM-yyyy, 12-hour clock). */
+export const DEFAULT_DISPLAY_FORMATS: DisplayFormats = { dateFormat: toDateFormat(undefined), timeFormat: toTimeFormat(undefined) };
+
 /** The tenant's display formats, falling back to the defaults while settings load or if a stored value is unknown. */
-export function useDisplayFormats(): { dateFormat: DateFormat; timeFormat: TimeFormat } {
-  const q = useSettings();
+export function useDisplayFormats(): DisplayFormats {
+  const fixed = useContext(FixedDisplayFormats);
+  const q = useSettings(!fixed);
+  if (fixed) return fixed;
   return { dateFormat: toDateFormat(q.data?.dateFormat), timeFormat: toTimeFormat(q.data?.timeFormat) };
 }
 

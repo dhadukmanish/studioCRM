@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { hasPermission, type PermissionAction, type PermissionGrants } from '@erp/shared';
+import { hasPermission, type PermissionAction, type PermissionGrants, type SubscriptionAccess } from '@erp/shared';
 
 const PERSIST_KEY = 'erp-auth';
 const REMEMBER_KEY = 'erp-auth-remember';
@@ -64,6 +64,8 @@ export interface AuthUser {
   grants: PermissionGrants;
   companyIds: string[];
   branchIds: string[];
+  /** The studio's subscription position (login/refresh may omit planName; /api/auth/me carries it). */
+  subscription?: SubscriptionAccess & { planName?: string | null };
 }
 
 interface AuthState {

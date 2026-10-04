@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { hasPermission, mergeGrants, type PermissionAction, type PermissionGrants } from '@erp/shared';
 import { db, schema } from '../db/client';
 import { AppError } from '../lib/errors';
+import { getTenantAccess, type TenantAccess } from '../services/subscriptions';
 
 /** What every authenticated request carries on `req.user`. */
 export interface AuthUser {
@@ -22,11 +23,16 @@ export interface AuthUser {
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
-    payload: { sub: string; tenantId: string };
+    /** `kind: 'platform'` marks a platform-panel token, which no studio route accepts (and vice versa). */
+    payload: { sub: string; tenantId: string; kind?: 'platform' };
     user: AuthUser;
   }
 }
 declare module 'fastify' {
+  interface FastifyRequest {
+    /** The studio's subscription access, computed once by the gate in authenticate. */
+    tenantAccess?: TenantAccess;
+  }
   interface FastifyInstance {
     authenticate: (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
     requirePermission: (subModule: string, action?: PermissionAction) => (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -63,6 +69,23 @@ export async function loadAuthUser(userId: string): Promise<AuthUser | null> {
   };
 }
 
+/** Writes a studio may still make once its subscription has expired: its own session and screen preferences. */
+const READ_ONLY_ALLOWED = ['/api/auth/', '/api/column-preferences', '/api/filter-groups'];
+
+/**
+ * Subscription gate (docs/SUBSCRIPTIONS.md): a suspended studio can do nothing; an expired one can
+ * read and print but not write. Enforced here so every studio route is covered.
+ */
+async function assertSubscriptionAllows(req: FastifyRequest, tenantId: string) {
+  const access = await getTenantAccess(tenantId);
+  req.tenantAccess = access;
+  if (access.blocked) throw new AppError('SUB_003', 'This studio account is suspended. Please contact support.', 403);
+  if (!access.readOnly || req.method === 'GET' || req.method === 'HEAD') return;
+  const url = req.routeOptions.url ?? req.url;
+  if (READ_ONLY_ALLOWED.some((p) => url.startsWith(p))) return;
+  throw new AppError('SUB_001', 'Your subscription has expired — the account is read-only. Renew to continue.', 402);
+}
+
 export default fp(async (app: FastifyInstance) => {
   app.decorate('authenticate', async (req: FastifyRequest) => {
     try {
@@ -70,10 +93,12 @@ export default fp(async (app: FastifyInstance) => {
     } catch {
       throw new AppError('AUTH_002', 'Invalid or expired token', 401);
     }
-    const payload = req.user as unknown as { sub: string };
+    const payload = req.user as unknown as { sub: string; kind?: string };
+    if (payload.kind === 'platform') throw new AppError('AUTH_002', 'Invalid or expired token', 401);
     const user = await loadAuthUser(payload.sub);
     if (!user) throw new AppError('AUTH_004', 'Account is inactive', 403);
     (req as any).user = user;
+    await assertSubscriptionAllows(req, user.tenantId);
   });
 
   app.decorate('requirePermission', (subModule: string, action: PermissionAction = 'read') => async (req: FastifyRequest, reply: FastifyReply) => {
