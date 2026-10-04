@@ -41,6 +41,23 @@ jobs:
       - name: Build
         run: BUILD_COMMIT="${GITHUB_SHA::7}" pnpm build
 
+      # Tests run the TypeScript source; this starts the BUNDLE that will be uploaded. A bundle that
+      # cannot start (19f1cbf: a duplicate top-level import) would otherwise take the live site down.
+      - name: Start the built server
+        run: |
+          PORT=4999 NODE_ENV=production JWT_SECRET=ci-smoke-only DATABASE_URL=postgres://ci:ci@127.0.0.1:1/none \
+            node apps/api/dist/server.js > smoke.log 2>&1 &
+          pid=$!
+          for i in $(seq 1 30); do
+            if curl -s -m 2 http://127.0.0.1:4999/api/health | grep -qF "\"version\":\"${GITHUB_SHA::7}\""; then
+              echo "built server starts and answers as ${GITHUB_SHA::7}"; kill $pid; exit 0
+            fi
+            kill -0 $pid 2>/dev/null || break
+            sleep 1
+          done
+          echo "::error::the built server did not start, so nothing was uploaded; the site keeps the previous build"
+          tail -n 30 smoke.log; exit 1
+
       - name: Upload to the site, restart, verify
         env:
           STUDIOCRM_FTP_PASSWORD: ${{ secrets.STUDIOCRM_FTP_PASSWORD }}

@@ -48,8 +48,10 @@ for (const entry of ['src/server.ts', 'src/db/migrate.ts', 'src/db/seed.ts']) {
       'process.env.BUILD_TIME': JSON.stringify(new Date().toISOString()),
     },
     // Some dependencies (Fastify's plugin loader among them) reach for CommonJS `require`
-    // at runtime; ESM output has none, so one is created from the module URL.
-    banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
+    // at runtime; ESM output has none, so one is created from the module URL. The import is
+    // aliased: a bundled dependency may import `createRequire` itself (fflate does), and two
+    // top-level declarations of one name are a SyntaxError that stops server.js before it listens.
+    banner: { js: "import { createRequire as __bundleCreateRequire } from 'node:module'; const require = __bundleCreateRequire(import.meta.url);" },
   });
 }
 // The invoice PDF's fonts (services/invoicePdfText.ts reads `dist/fonts/*.ttf` beside server.js).
