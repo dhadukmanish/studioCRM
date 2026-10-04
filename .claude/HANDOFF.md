@@ -987,6 +987,12 @@ assumes one and will throw. Guard the login step when reusing it.
 
 ## Known pending work
 
+- **Studio backup + restore (2026-10-04)** — platform panel only (docs/SUBSCRIPTIONS.md → Studio backups,
+  Restore). Backup (19f1cbf) needs no migration. Restore needs migration `0026` (studio_restore_snapshots,
+  additive) on the shared DB BEFORE its code ships. Branch feature/studio-restore contains both.
+  Reviewed (1 HIGH + 4 MEDIUM fixed with tests). Not built: streaming for very large studios, batched
+  deferred-FK updates (one UPDATE per linked appointment).
+
 - **SaaS subscriptions / platform panel (2026-10-04) — committed on `feature/saas-subscriptions`,
   not pushed / merged / deployed** (`docs/SUBSCRIPTIONS.md`). Migration `0025` (3 new tables) **IS
   applied on the shared DB** (2026-10-04, approved, 26/26) — every studio request now reads

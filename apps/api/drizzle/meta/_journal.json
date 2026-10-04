@@ -183,6 +183,13 @@
       "when": 1791104974455,
       "tag": "0025_pink_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791111166586,
+      "tag": "0026_silent_puff_adder",
+      "breakpoints": true
     }
   ]
 }

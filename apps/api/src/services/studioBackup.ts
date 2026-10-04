@@ -1,7 +1,7 @@
 import { strToU8, zipSync } from 'fflate';
 import { asc, eq, is } from 'drizzle-orm';
 import { getTableConfig, PgTable, type PgColumn } from 'drizzle-orm/pg-core';
-import { db, schema } from '../db/client';
+import { db, schema, type Db } from '../db/client';
 import { toCsv, type CsvValue } from '../lib/csv';
 import { notFound } from '../lib/errors';
 import { platformToday } from './subscriptions';
@@ -15,21 +15,23 @@ import { platformToday } from './subscriptions';
  * values (numbers as strings, binary as base64) for a future restore.
  */
 
-/** Not the studio's business data, or secret: platform billing, invoice-link token hashes. */
-const EXCLUDED_TABLES = new Set(['tenant_subscriptions', 'public_invoice_links']);
+/** Not the studio's business data, or secret: platform billing, invoice-link token hashes, restore snapshots (backups themselves). */
+export const EXCLUDED_TABLES = new Set(['tenant_subscriptions', 'public_invoice_links', 'studio_restore_snapshots']);
 /** Never leaves the server, in any backup. */
-const EXCLUDED_COLUMNS: Record<string, string[]> = { users: ['password_hash'] };
+export const EXCLUDED_COLUMNS: Record<string, string[]> = { users: ['password_hash'] };
 
-interface TenantTable {
+export interface TenantTable {
   name: string;
   table: PgTable;
   tenantCol: PgColumn;
   columns: { key: string; name: string }[];
+  /** Every column, including excluded ones — the restore needs them. */
+  allColumns: { key: string; name: string; column: PgColumn }[];
   orderCol?: PgColumn;
 }
 
 /** Every schema table scoped by tenant_id, found once. */
-const tenantTables: TenantTable[] = (Object.values(schema) as unknown[])
+export const tenantTables: TenantTable[] = (Object.values(schema) as unknown[])
   .filter((v): v is PgTable => is(v, PgTable))
   .flatMap((table): TenantTable[] => {
     const cfg = getTableConfig(table);
@@ -42,6 +44,7 @@ const tenantTables: TenantTable[] = (Object.values(schema) as unknown[])
       table,
       tenantCol: tenant[1],
       columns: cols.filter(([, c]) => !hidden.includes(c.name)).map(([key, c]) => ({ key, name: c.name })),
+      allColumns: cols.map(([key, column]) => ({ key, name: column.name, column })),
       orderCol: cols.find(([, c]) => c.name === 'created_at')?.[1],
     }];
   })
@@ -62,7 +65,19 @@ function csvValue(v: unknown): CsvValue {
   return String(v);
 }
 
-export async function buildStudioBackup(tenantId: string) {
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+
+/**
+ * Reads every table in ONE repeatable-read snapshot, so a bill can never land in the backup without
+ * its lines (or a receipt without its allocations) because it was written between two reads. The
+ * restore passes its own transaction instead, to snapshot under its lock.
+ */
+export function buildStudioBackup(tenantId: string, exec?: Tx) {
+  if (exec) return build(tenantId, exec);
+  return db.transaction((tx) => build(tenantId, tx), { isolationLevel: 'repeatable read', accessMode: 'read only' });
+}
+
+async function build(tenantId: string, db: Tx) {
   const [tenant] = await db.select().from(schema.tenants).where(eq(schema.tenants.id, tenantId));
   if (!tenant) throw notFound('Studio');
 

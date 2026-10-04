@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Ban, Download, KeyRound, Pencil, Plus, Power } from 'lucide-react';
+import { ArrowLeft, Ban, Download, KeyRound, Pencil, Plus, Power, RotateCcw } from 'lucide-react';
 import { PLAN_KIND_LABELS } from '@erp/shared';
 import { DataTable, type Column } from '@/components/data/DataTable';
 import { Badge, ConfirmDialog, EmptyState, Spinner } from '@/components/ui';
@@ -14,6 +14,7 @@ import { PAYMENT_MODE_LABELS, usePlatformSave, usePlatformToday, useStudio, type
 import { daysLeftText, StatusBadge } from './StatusBadge';
 import { GrantDialog } from './GrantFields';
 import { CancelPeriodDialog, OwnerPasswordDialog, RenameDialog } from './StudioDialogs';
+import { RestoreDialog } from './RestoreDialog';
 
 /**
  * Only the latest ACTIVE period can be cancelled (an earlier one is refused, 409 SUB_004): the one
@@ -81,7 +82,7 @@ function History({ studio, onCancel }: { studio: StudioDetail; onCancel: (p: Per
   );
 }
 
-type DialogName = 'grant' | 'rename' | 'password' | 'status';
+type DialogName = 'grant' | 'rename' | 'password' | 'status' | 'restore';
 
 export default function StudioDetailPage() {
   const { id = '' } = useParams();
@@ -118,6 +119,7 @@ export default function StudioDetailPage() {
           <button type="button" className="btn-outline" onClick={() => setDialog('rename')}><Pencil className="h-4 w-4" /> Rename</button>
           {s.owner && <button type="button" className="btn-outline" onClick={() => setDialog('password')}><KeyRound className="h-4 w-4" /> Reset owner password</button>}
           <BackupButton studio={s} />
+          <button type="button" className="btn-outline" onClick={() => setDialog('restore')}><RotateCcw className="h-4 w-4" /> Restore</button>
           <button type="button" className={suspended ? 'btn-outline-primary' : 'btn-outline'} onClick={() => setDialog('status')}><Power className="h-4 w-4" /> {suspended ? 'Activate' : 'Suspend'}</button>
         </div>
       </div>
@@ -136,6 +138,7 @@ export default function StudioDetailPage() {
       <GrantDialog studio={s} open={dialog === 'grant'} onClose={close} />
       <RenameDialog studio={s} open={dialog === 'rename'} onClose={close} />
       <OwnerPasswordDialog studio={s} open={dialog === 'password'} onClose={close} />
+      <RestoreDialog studio={s} open={dialog === 'restore'} onClose={close} />
       <CancelPeriodDialog studio={s} period={cancelling} onClose={() => setCancelling(null)} />
       <ConfirmDialog
         open={dialog === 'status'}

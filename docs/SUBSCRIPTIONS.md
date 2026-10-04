@@ -122,11 +122,46 @@ download it themselves:
   studio and per-table row counts; `format: "studiocrm-backup", version: 1`.
 - `README.txt` — what is inside and the row counts.
 
+All tables are read in one repeatable-read, read-only transaction, so a bill is never captured
+without its lines (or a receipt without its allocations) because it was written between two reads.
+
 **Every table with a `tenant_id` is included automatically** (`services/studioBackup.ts`), so a new
 table needs no change, filtered strictly by that studio's id. Excluded: `tenant_subscriptions`
 (platform billing), `public_invoice_links` (token hashes), and `users.password_hash`. Each download
 is recorded in the studio's own activity log (`entity_type = 'backup'`, the admin's email). Built in
-memory — fine at today's sizes; stream it if a studio grows very large. There is no restore yet.
+memory — fine at today's sizes; stream it if a studio grows very large. Restore: below.
+
+## Restore
+
+`POST /api/platform/studios/:id/restore` (multipart, the backup ZIP, 20 MB max; button **Restore**
+on the studio's page, confirmed by typing the studio's name) **replaces** the studio's current data
+with the backup's (`services/studioRestore.ts`):
+
+- **Same studio only** — `backup.studio.id` must equal `:id`, and every row's `tenant_id` too.
+- **Self-contained** — every foreign key in the file must point at a row inside the same file
+  (a tampered backup could otherwise attach a restored user to another studio's role, a log to
+  another studio's user, an appointment to another studio's bill). Every table the file's `tables`
+  counts list must be present with that many rows; a table neither listed nor present is newer than
+  the backup and is restored empty. Only `backup.json` is inflated, capped at 200 MB (zip bombs).
+- **Suspended only** (`409 SUB_006`), re-checked under the tenant's `FOR UPDATE` lock, so no studio
+  request writes during the swap. Activate it again afterwards.
+- **Snapshot first** — the current data is saved as a full backup ZIP in `studio_restore_snapshots`
+  inside the restore's (repeatable-read) transaction, after the lock (`GET …/restore-snapshots`, `GET …/restore-snapshots/:sid`).
+  Restoring a snapshot undoes that restore.
+- One transaction: every table the backup service covers is emptied (children first) and refilled
+  with the backup rows, **ids kept**, parents first. The bills ↔ appointments cycle is broken at a
+  nullable FK (inserted NULL, filled after every row exists). Bill counters (`books`,
+  `document_counters`) return to the backup's values — bills issued after the backup are gone and
+  their numbers will be issued again.
+- **Passwords** are not in backups: a user who still exists keeps the current password; any other
+  restored user gets an unusable one (`usersWithoutPassword` in the reply; reset from the panel).
+  A backup user whose email/username another studio now uses is refused (same check and advisory
+  lock as creating a user, run after this studio's users are removed).
+- A constraint failure (an id now used elsewhere, a backup older than a NOT NULL column) rolls back
+  and answers 400 naming the table.
+- Untouched: `tenant_subscriptions`, snapshots. Public invoice links go with their bills (cascade),
+  which is the revocation rule anyway. Tables that did not exist when the backup was taken are
+  emptied. Recorded in the studio's activity log (`entity_type = 'backup'`, `action = 'restored'`).
 
 ## Bootstrap
 
@@ -147,4 +182,4 @@ environment and is never printed.
 
 Online payment (Razorpay + webhook), public self-signup, plan feature limits, expiry reminders
 (WhatsApp / email), a platform audit log beyond `created_by` / `cancelled_by` on periods, invoices
-for the subscription itself, restoring a studio from a backup.
+for the subscription itself.

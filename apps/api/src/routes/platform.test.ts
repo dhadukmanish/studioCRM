@@ -103,6 +103,7 @@ describe.skipIf(!TEST_DB)('Platform panel API (integration, needs TEST_DATABASE_
   let sqlClient: typeof import('../db/client').sql;
   let schema: typeof import('../db/client').schema;
   let eq: typeof import('drizzle-orm').eq;
+  let and: typeof import('drizzle-orm').and;
   let inArray: typeof import('drizzle-orm').inArray;
   let platformToday: () => string;
 
@@ -144,7 +145,7 @@ describe.skipIf(!TEST_DB)('Platform panel API (integration, needs TEST_DATABASE_
   beforeAll(async () => {
     process.env.DATABASE_URL = TEST_DB;
     process.env.PORT = '0';
-    ({ eq, inArray } = await import('drizzle-orm'));
+    ({ eq, inArray, and } = await import('drizzle-orm'));
     const client = await import('../db/client');
     await (await import('../test-support/dbGuard')).assertTestDatabase(client, TEST_DB);
     db = client.db;
@@ -223,16 +224,18 @@ describe.skipIf(!TEST_DB)('Platform panel API (integration, needs TEST_DATABASE_
       const b = await newStudio('xb');
       const tokenB = (await studioLogin(b.email)).json().data.accessToken;
       const [role] = await db.select().from(schema.roles).where(eq(schema.roles.tenantId, b.studio.id)).limit(1);
-      const res = await call('POST', '/api/admin/users', tokenB, { firstName: 'Clash', email: a.email, password: 'whatever123', roleId: role.id });
+      const res = await call('POST', '/api/admin/users', tokenB, { firstName: 'Clash', lastName: 'User', email: a.email, password: 'whatever123', roleId: role.id });
       expect(res.statusCode).toBe(400);
+      expect(res.json().error.message).toBe('This email is already used by another account');
     });
     it('refuses a username equal to another studio user’s email (sign-in matches both columns)', async () => {
       const a = await newStudio('ua');
       const b = await newStudio('ub');
       const tokenB = (await studioLogin(b.email)).json().data.accessToken;
       const [role] = await db.select().from(schema.roles).where(eq(schema.roles.tenantId, b.studio.id)).limit(1);
-      const res = await call('POST', '/api/admin/users', tokenB, { firstName: 'Clash', email: `other-${RUN}@test.local`, username: a.email.toUpperCase(), password: 'whatever123', roleId: role.id });
+      const res = await call('POST', '/api/admin/users', tokenB, { firstName: 'Clash', lastName: 'User', email: `other-${RUN}@test.local`, username: a.email.toUpperCase(), password: 'whatever123', roleId: role.id });
       expect(res.statusCode).toBe(400);
+      expect(res.json().error.message).toBe('This username is already used by another account');
     });
     it('creates only one studio when the same owner is submitted twice at once', async () => {
       const email = `twice-${RUN}@test.local`;
@@ -399,6 +402,206 @@ describe.skipIf(!TEST_DB)('Platform panel API (integration, needs TEST_DATABASE_
       const token = (await studioLogin(email)).json().data.accessToken;
       expect((await call('GET', `/api/platform/studios/${studio.id}/backup`, token)).statusCode).toBe(401);
       expect((await call('GET', `/api/platform/studios/${studio.id}/backup`)).statusCode).toBe(401);
+    });
+  });
+
+  describe('studio restore', () => {
+    const today = () => platformToday();
+    const upload = (studioId: string, zip: Buffer, token = platformToken) => {
+      const boundary = '----restore' + Math.random().toString(36).slice(2);
+      const body = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="backup.zip"\r\nContent-Type: application/zip\r\n\r\n`),
+        zip,
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]);
+      return app.inject({ method: 'POST', url: `/api/platform/studios/${studioId}/restore`, headers: { ...auth(token), 'content-type': `multipart/form-data; boundary=${boundary}` }, payload: body });
+    };
+    const backupOf = async (studioId: string) => {
+      const res = await call('GET', `/api/platform/studios/${studioId}/backup`, platformToken);
+      expect(res.statusCode).toBe(200);
+      return res.rawPayload;
+    };
+    const setActive = (studioId: string, isActive: boolean) => call('POST', `/api/platform/studios/${studioId}/status`, platformToken, { isActive });
+
+    /** A studio with masters, an appointment linked to a bill (both directions), a receipt and an advance. */
+    async function richStudio(label: string) {
+      const { studio, email } = await newStudio(label);
+      const token = (await studioLogin(email)).json().data.accessToken;
+      const tenantId = studio.id;
+      const [item] = await db.insert(schema.items).values({ tenantId, itemName: `Item-${label}`, hsnCode: '9983', gstRate: '0.00' }).returning();
+      const [subItem] = await db.insert(schema.subItems).values({ tenantId, itemId: item.id, productName: `Prod-${label}`, rate: '100.00' }).returning();
+      const [cashG] = await db.insert(schema.accountGroups).values({ tenantId, groupName: 'CASH', headGroup: 'CASH' }).returning();
+      const [cash] = await db.insert(schema.accounts).values({ tenantId, accountGroupId: cashG.id, accountName: 'CASH IN HAND' }).returning();
+      const [book] = await db.insert(schema.books).values({ tenantId, bookNumber: `RS${label}`, seriesStartsAt: 1, nextBillNumber: 1, seriesType: 'WITHOUT_GST' }).returning();
+      const appt = await call('POST', '/api/appointments', token, { appointmentDate: today(), customerName: 'Rita Shah', mobileNumber: '9811111111' });
+      expect(appt.statusCode, appt.body).toBe(200);
+      const billBody = (overrides: Record<string, unknown>) => ({ bookId: book.id, billDate: today(), customerName: 'Rita Shah', mobileNumber: '9811111111', taxMode: 'WITHOUT_GST', items: [{ itemId: item.id, subItemId: subItem.id, quantity: 1, rate: 1000 }], ...overrides });
+      const bill = await call('POST', '/api/bills', token, billBody({ appointmentId: appt.json().data.id, nextVisitDate: addDays(today(), 30) }));
+      expect(bill.statusCode, bill.body).toBe(200);
+      const receipt = await call('POST', '/api/receipts', token, { receiptDate: today(), customerMobile: '9811111111', customerName: 'Rita Shah', paymentMode: 'CASH', accountId: cash.id, amount: 700, allocations: [{ billId: bill.json().data.id, amount: 400 }] });
+      expect(receipt.statusCode, receipt.body).toBe(200);
+      return { studio, email, token, tenantId, book, billId: bill.json().data.id as string, billBody };
+    }
+
+    /** Everything the restore must bring back, read straight from the database. */
+    async function stateOf(tenantId: string) {
+      const bills = await db.select({ id: schema.bills.id, n: schema.bills.billNumber, name: schema.bills.customerName, appt: schema.bills.appointmentId, total: schema.bills.grandTotal }).from(schema.bills).where(eq(schema.bills.tenantId, tenantId));
+      const appts = await db.select({ id: schema.appointments.id, src: schema.appointments.sourceBillId }).from(schema.appointments).where(eq(schema.appointments.tenantId, tenantId));
+      const allocs = await db.select({ bill: schema.receiptAllocations.billId, amount: schema.receiptAllocations.amount }).from(schema.receiptAllocations).where(eq(schema.receiptAllocations.tenantId, tenantId));
+      const books = await db.select({ next: schema.books.nextBillNumber }).from(schema.books).where(eq(schema.books.tenantId, tenantId));
+      const users = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.tenantId, tenantId));
+      const counters = await db.select().from(schema.documentCounters).where(eq(schema.documentCounters.tenantId, tenantId));
+      const sort = (xs: unknown[]) => xs.map((x) => JSON.stringify(x)).sort();
+      return { bills: sort(bills), appts: sort(appts), allocs: sort(allocs), books: sort(books), users: sort(users), counters: sort(counters) };
+    }
+
+    it('replaces the studio’s data with the backup — links, payments and counters intact — and can be undone', async () => {
+      const r = await richStudio('rs-main');
+      const before = await stateOf(r.tenantId);
+      expect(before.appts.some((a) => a.includes(r.billId))).toBe(true); // appointment -> bill
+      expect(before.bills.some((b) => !b.includes('"appt":null'))).toBe(true); // bill -> appointment
+      const zip = await backupOf(r.tenantId);
+
+      // Life goes on after the backup: a second bill, a renamed customer, a new user.
+      expect((await call('POST', '/api/bills', r.token, r.billBody({ customerName: 'After Backup' }))).statusCode).toBe(200);
+      await db.update(schema.bills).set({ customerName: 'Renamed Later' }).where(eq(schema.bills.id, r.billId));
+      const [role] = await db.select().from(schema.roles).where(eq(schema.roles.tenantId, r.tenantId)).limit(1);
+      expect((await call('POST', '/api/admin/users', r.token, { firstName: 'Late', lastName: 'User', email: `late-${RUN}@test.local`, password: 'whatever123', roleId: role.id })).statusCode).toBe(200);
+      const changed = await stateOf(r.tenantId);
+      expect(changed).not.toEqual(before);
+
+      // Refused while the studio is active.
+      const active = await upload(r.tenantId, zip);
+      expect(active.statusCode).toBe(409);
+      expect(active.json().error.code).toBe('SUB_006');
+
+      await setActive(r.tenantId, false);
+      const res = await upload(r.tenantId, zip);
+      expect(res.statusCode, res.body).toBe(200);
+      expect(res.json().data.usersWithoutPassword).toBe(0);
+      expect(await stateOf(r.tenantId)).toEqual(before);
+
+      // The owner keeps the current password; the activity log says what happened.
+      await setActive(r.tenantId, true);
+      expect((await studioLogin(r.email)).statusCode).toBe(200);
+      const logs = await db.select().from(schema.activityLogs).where(eq(schema.activityLogs.tenantId, r.tenantId));
+      expect(logs.some((l) => l.entityType === 'backup' && l.action === 'restored')).toBe(true);
+      // The subscription is the platform's — a restore never touches it.
+      expect((await call('GET', `/api/platform/studios/${r.tenantId}`, platformToken)).json().data.access.status).toBe('TRIAL');
+
+      // Undo: the pre-restore snapshot holds the "changed" state.
+      const snaps = (await call('GET', `/api/platform/studios/${r.tenantId}/restore-snapshots`, platformToken)).json().data as { id: string }[];
+      expect(snaps).toHaveLength(1);
+      const snapRes = await call('GET', `/api/platform/studios/${r.tenantId}/restore-snapshots/${snaps[0].id}`, platformToken);
+      expect(snapRes.headers['content-type']).toBe('application/zip');
+      await setActive(r.tenantId, false);
+      expect((await upload(r.tenantId, snapRes.rawPayload)).statusCode).toBe(200);
+      expect(await stateOf(r.tenantId)).toEqual(changed);
+      await setActive(r.tenantId, true);
+    });
+
+    it('refuses another studio’s backup, a tampered backup, a non-ZIP, and a studio token', async () => {
+      const a = await richStudio('rs-a');
+      const b = await newStudio('rs-b');
+      const zipA = await backupOf(a.tenantId);
+      const tokenB = (await studioLogin(b.email)).json().data.accessToken;
+      await setActive(b.studio.id, false);
+      const wrong = await upload(b.studio.id, zipA);
+      expect(wrong.statusCode).toBe(400);
+      expect(wrong.json().error.message).toMatch(/another studio/);
+
+      const { unzipSync, zipSync, strFromU8, strToU8 } = await import('fflate');
+      const files = unzipSync(new Uint8Array(zipA));
+      const json = JSON.parse(strFromU8(files['backup.json']));
+      json.data.books[0].tenant_id = b.studio.id;
+      const tampered = Buffer.from(zipSync({ 'backup.json': strToU8(JSON.stringify(json)) }));
+      await setActive(a.tenantId, false);
+      expect((await upload(a.tenantId, tampered)).statusCode).toBe(400);
+      expect((await upload(a.tenantId, Buffer.from('not a zip'))).statusCode).toBe(400);
+      expect((await upload(a.tenantId, zipA, tokenB)).statusCode).toBe(401);
+      expect((await upload(a.tenantId, zipA)).statusCode).toBe(200);
+      await setActive(a.tenantId, true);
+      await setActive(b.studio.id, true);
+    });
+
+    /** Rewrites backup.json inside a backup ZIP. */
+    const edit = async (zip: Buffer, change: (json: { tables: Record<string, number>; data: Record<string, Record<string, unknown>[]> }) => void) => {
+      const { unzipSync, zipSync, strFromU8, strToU8 } = await import('fflate');
+      const json = JSON.parse(strFromU8(unzipSync(new Uint8Array(zip))['backup.json']));
+      change(json);
+      return Buffer.from(zipSync({ 'backup.json': strToU8(JSON.stringify(json)) }));
+    };
+
+    it('refuses a backup whose rows point at another studio’s rows, and changes nothing', async () => {
+      const a = await richStudio('rs-fk-a');
+      const b = await richStudio('rs-fk-b');
+      const before = await stateOf(a.tenantId);
+      const [roleB] = await db.select().from(schema.roles).where(eq(schema.roles.tenantId, b.tenantId)).limit(1);
+      const [userB] = await db.select().from(schema.users).where(eq(schema.users.tenantId, b.tenantId)).limit(1);
+      const zip = await backupOf(a.tenantId);
+      await setActive(a.tenantId, false);
+      for (const tamper of [
+        (j: Parameters<Parameters<typeof edit>[1]>[0]) => { j.data.users[0].role_id = roleB.id; },
+        (j: Parameters<Parameters<typeof edit>[1]>[0]) => { j.data.activity_logs.push({ ...j.data.activity_logs[0], id: crypto.randomUUID(), user_id: userB.id }); j.tables.activity_logs += 1; },
+        (j: Parameters<Parameters<typeof edit>[1]>[0]) => { j.data.appointments[0].source_bill_id = b.billId; },
+      ]) {
+        const res = await upload(a.tenantId, await edit(zip, tamper));
+        expect(res.statusCode, res.body).toBe(400);
+        expect(res.json().error.message).toMatch(/not in this backup/);
+      }
+      expect(await stateOf(a.tenantId)).toEqual(before);
+      await setActive(a.tenantId, true);
+    });
+
+    it('refuses a backup with a table removed instead of emptying that table', async () => {
+      const r = await richStudio('rs-missing');
+      const before = await stateOf(r.tenantId);
+      const zip = await edit(await backupOf(r.tenantId), (j) => { delete j.data.bills; });
+      await setActive(r.tenantId, false);
+      const res = await upload(r.tenantId, zip);
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.message).toMatch(/"bills" is missing or incomplete/);
+      expect(await stateOf(r.tenantId)).toEqual(before);
+      await setActive(r.tenantId, true);
+    });
+
+    it('gives a restored user who no longer exists an unusable password, and refuses a sign-in another studio took', async () => {
+      const r = await richStudio('rs-users');
+      const [role] = await db.select().from(schema.roles).where(eq(schema.roles.tenantId, r.tenantId)).limit(1);
+      const staffEmail = `staff-${RUN}@test.local`;
+      expect((await call('POST', '/api/admin/users', r.token, { firstName: 'Staff', lastName: 'User', email: staffEmail, password: 'staff-pass-1', roleId: role.id })).statusCode).toBe(200);
+      const zip = await backupOf(r.tenantId);
+      await db.delete(schema.users).where(and(eq(schema.users.tenantId, r.tenantId), eq(schema.users.email, staffEmail)));
+
+      // While another studio holds that email, the restore is refused.
+      const other = await newStudio('rs-users-other');
+      const tokenOther = (await studioLogin(other.email)).json().data.accessToken;
+      const [roleOther] = await db.select().from(schema.roles).where(eq(schema.roles.tenantId, other.studio.id)).limit(1);
+      const taken = await call('POST', '/api/admin/users', tokenOther, { firstName: 'Taken', lastName: 'User', email: staffEmail, password: 'whatever123', roleId: roleOther.id });
+      expect(taken.statusCode).toBe(200);
+      await setActive(r.tenantId, false);
+      const clash = await upload(r.tenantId, zip);
+      expect(clash.statusCode).toBe(400);
+      expect(clash.json().error.message).toBe('This email is already used by another account');
+
+      // Once it is free again, the staff user comes back — without a usable password.
+      await db.delete(schema.users).where(eq(schema.users.id, taken.json().data.id));
+      const res = await upload(r.tenantId, zip);
+      expect(res.statusCode, res.body).toBe(200);
+      expect(res.json().data.usersWithoutPassword).toBe(1);
+      await setActive(r.tenantId, true);
+      expect((await call('POST', '/api/auth/login', undefined, { email: staffEmail, password: 'staff-pass-1' })).statusCode).toBe(401);
+      expect((await studioLogin(r.email)).statusCode).toBe(200);
+    });
+
+    it('leaves restore snapshots out of backups', async () => {
+      const { unzipSync } = await import('fflate');
+      const r = await richStudio('rs-snap');
+      await setActive(r.tenantId, false);
+      await upload(r.tenantId, await backupOf(r.tenantId));
+      const files = unzipSync(new Uint8Array(await backupOf(r.tenantId)));
+      expect(Object.keys(files).some((f) => f.includes('studio_restore_snapshots'))).toBe(false);
+      await setActive(r.tenantId, true);
     });
   });
 

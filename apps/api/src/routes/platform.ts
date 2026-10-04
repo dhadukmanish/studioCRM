@@ -28,6 +28,7 @@ import {
   setStudioActive,
 } from '../services/subscriptions';
 import { buildStudioBackup } from '../services/studioBackup';
+import { getRestoreSnapshot, listRestoreSnapshots, restoreStudio } from '../services/studioRestore';
 
 /*
  * The platform panel API (docs/SUBSCRIPTIONS.md) — for the company that sells StudioCRM.
@@ -37,6 +38,7 @@ import { buildStudioBackup } from '../services/studioBackup';
  */
 
 const SESSION_HOURS = 12;
+const RESTORE_MAX_BYTES = 20 * 1024 * 1024;
 interface PlatformAdmin {
   id: string;
   name: string;
@@ -192,6 +194,41 @@ export async function platformRoutes(app: FastifyInstance) {
       .header('content-disposition', `attachment; filename="${backup.fileName}"`)
       .header('cache-control', 'no-store')
       .send(backup.zip);
+  });
+
+  /** Replaces the studio's data with a backup of its own (docs/SUBSCRIPTIONS.md → Restore). Studio must be suspended. */
+  app.post('/api/platform/studios/:id/restore', guarded, async (req) => {
+    const id = idParam(req);
+    if (!req.isMultipart()) throw validation('Upload the backup ZIP as a multipart file');
+    // Same guard as the logo upload: an oversized file can come back TRUNCATED rather than refused.
+    const file = await req.file({ limits: { fileSize: RESTORE_MAX_BYTES + 1, files: 1 } });
+    if (!file) throw validation('Choose the backup ZIP file');
+    let zip: Buffer;
+    try {
+      zip = await file.toBuffer();
+    } catch (e) {
+      if ((e as { code?: string }).code === 'FST_REQ_FILE_TOO_LARGE') throw validation('The backup file must be 20 MB or smaller');
+      throw e;
+    }
+    if (file.file.truncated || zip.length > RESTORE_MAX_BYTES) throw validation('The backup file must be 20 MB or smaller');
+    const admin = adminOf(req);
+    const result = await restoreStudio(id, zip, admin.id, admin.email, req.ip);
+    return ok(result, 'Studio data restored');
+  });
+
+  /** The studio's data as it was before each restore — restoring one of these undoes that restore. */
+  app.get('/api/platform/studios/:id/restore-snapshots', guarded, async (req) => ok(await listRestoreSnapshots(idParam(req))));
+
+  app.get('/api/platform/studios/:id/restore-snapshots/:sid', guarded, async (req, reply) => {
+    const id = idParam(req);
+    const snap = await getRestoreSnapshot(id, uuidOr404((req.params as { sid: string }).sid, 'Snapshot'));
+    const [t] = await db.select({ slug: schema.tenants.slug }).from(schema.tenants).where(eq(schema.tenants.id, id));
+    const stamp = snap.createdAt.toISOString().slice(0, 16).replace(/[:T]/g, '-');
+    return reply
+      .header('content-type', 'application/zip')
+      .header('content-disposition', `attachment; filename="${t?.slug ?? 'studio'}-before-restore-${stamp}.zip"`)
+      .header('cache-control', 'no-store')
+      .send(snap.zip);
   });
 
   app.post('/api/platform/studios/:id/owner-password', guarded, async (req) => {

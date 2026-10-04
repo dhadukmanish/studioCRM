@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, numeric, date, timestamp, boolean, index, uniqueIndex, check } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, numeric, date, timestamp, boolean, index, uniqueIndex, check, customType } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { id, ts, tenantRef } from './core';
 
@@ -81,4 +81,25 @@ export const tenantSubscriptions = pgTable(
     check('tenant_subscriptions_payment_mode_check', sql`${t.paymentMode} IS NULL OR ${t.paymentMode} IN ('CASH', 'UPI', 'BANK', 'CHEQUE', 'OTHER')`),
     check('tenant_subscriptions_cancelled_check', sql`(${t.status} = 'CANCELLED') = (${t.cancelledAt} IS NOT NULL)`),
   ],
+);
+
+const zipBytes = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
+
+/**
+ * The studio's data exactly as it was just before a restore replaced it (a full backup ZIP), so a
+ * wrong restore can be undone by restoring this file. Written in the restore's own transaction.
+ */
+export const studioRestoreSnapshots = pgTable(
+  'studio_restore_snapshots',
+  {
+    id: id(),
+    tenantId: tenantRef(),
+    zip: zipBytes('zip').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    /** exportedAt of the backup that was restored over this snapshot. */
+    restoredFrom: text('restored_from'),
+    createdBy: uuid('created_by').references(() => platformAdmins.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('studio_restore_snapshots_tenant_idx').on(t.tenantId, t.createdAt)],
 );
