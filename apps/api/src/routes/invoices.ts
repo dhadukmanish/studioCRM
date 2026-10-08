@@ -69,7 +69,7 @@ export async function invoiceRoutes(app: FastifyInstance) {
     // WhatsApp opened. Moving a job along is Studio Work edit, whatever permission sharing needs.
     if (body.workStage) {
       if (!req.user.isSuperAdmin && !hasPermission(req.user.grants, 'operations_work', 'update')) throw forbidden();
-      const r = await recordStage(req.user.tenantId, req.user.id, id, 'WHATSAPP', 'DONE', true);
+      const r = await recordStage(req.user.tenantId, req.user.id, id, 'WHATSAPP', 'DONE');
       if (r.changed) await logActivity(req, 'bill', id, 'work_stage_done', `Bill ${r.billLabel} — WhatsApp opened (workflow)`, { stage: 'WHATSAPP', outcome: 'DONE' });
     }
     return ok({ recorded: true });

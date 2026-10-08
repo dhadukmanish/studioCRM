@@ -28,10 +28,11 @@ A job is its **bill**. Every saved bill goes through four stages:
 4. **One click, idempotent.** Recording a stage stores who and when (the business date in the
    company's time zone). Clicking again changes nothing. A mistaken click is corrected with **Mark
    pending** (reopen) — on the bill's Studio Status, or *Mark … pending* in ••• on Today's Work. Every record, skip and undo is in the activity log.
-5. **WhatsApp says only what the app knows.** The WhatsApp stage is marked done only when the share
-   dialog, opened from the workflow's *Share on WhatsApp*, actually opens WhatsApp. It reads
-   "WhatsApp opened" — never sent, delivered, read or seen. By hand it can only be skipped. A plain
-   invoice share (the WhatsApp button on the bill toolbar) does not move the job.
+5. **WhatsApp here is the studio's step, not a message the app sends.** The WhatsApp stage means the
+   edited photos were sent to the customer; the app cannot see WhatsApp, so it is one click on the
+   bill's Status chip and the operator's word, like every other stage (it opens nothing). The WhatsApp
+   button on the bill toolbar shares the invoice link and does not move the job. (Today's Work's
+   WhatsApp button still opens the share dialog, whose opening records the step.)
 6. **Planned vs delivered.** The bill's *Delivery Date* is the **planned** date the studio promised.
    Recording Delivery stores the **delivered** date separately. Only a planned date can make a job
    due today or overdue; a job with none is simply pending.
@@ -90,7 +91,7 @@ Skip the current step, Mark the last recorded step pending (a delivery asks firs
   "Next: Editing" and "Planned delivery … · Delivered …" (two dates, never one). It is where an
   authorised operator records or corrects the ACTUAL progress, on the same rows Today's Work uses:
   a not-done chip is one click to done (any step, any order; no dialog, no Save); the recommended one
-  is highlighted; WhatsApp opens the real share dialog; a done chip opens who/when and **Mark
+  is highlighted; WhatsApp is the same one click; a done chip opens who/when and **Mark
   pending** (Delivery asks first); ••• skips the recommended step. No checkboxes. Without Studio Work
   edit the chips are read-only text; with unsaved bill edits they wait for Save.
 - **Reports → Delivery** and **Reports → Appointments** stay for history, search, CSV and print; daily

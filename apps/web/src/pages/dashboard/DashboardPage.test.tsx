@@ -65,7 +65,7 @@ afterEach(async () => {
 describe('Dashboard', () => {
   it('shows inquiries, orders, the process status, payments and today’s attention — no admin shortcuts', async () => {
     const text = await render({ operations_appointments: ['read'], operations_billing: ['read'], operations_work: ['read'], reports_receivables: ['read'] });
-    for (const s of ['Inquiries', 'Total inquiries', '12', 'Orders', 'Total orders', 'Completed', 'Order process status', 'Selection', 'Editing', 'WhatsApp', 'Delivery due', 'Payments', 'Total outstanding', '₹65,625.00', '6 bills · 4 customers', 'Appointments today', 'Deliveries due today', 'Overdue deliveries', '01-10-2026 – 31-10-2026']) {
+    for (const s of ['Inquiries', 'Total inquiries', '12', 'Bill', 'Total orders', 'Completed', 'Order process status', 'Selection', 'Editing', 'WhatsApp', 'Delivery due', 'Payments', 'Total outstanding', '₹65,625.00', '6 bills · 4 customers', 'Appointments today', 'Deliveries due today', 'Overdue deliveries', '01-10-2026 – 31-10-2026']) {
       expect(text, s).toContain(s);
     }
     for (const s of ['Users', 'Roles', 'Permissions', 'Custom Fields']) expect(text, s).not.toContain(s);

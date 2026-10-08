@@ -29,9 +29,10 @@ const trimmed = (v: unknown) => (typeof v === 'string' ? v.trim() : v);
 const MOBILE_RULE = /^\d{10}$/;
 
 /**
- * The bill's header, in one compact card: the fields a bill cannot be saved without on the first
- * row, the optional ones (baby name, delivery date, next visit, birthdate, remark) directly below —
- * no disclosure to open. Six columns on a desktop, stacking cleanly on a phone.
+ * The bill's header, in one compact card. Row 1 is the document (book, bill no., bill date, delivery
+ * date, next visit, tax mode); row 2 is the customer (mobile, name, baby, birthdate, remark), and a
+ * new bill opens with the cursor on the mobile. Enter moves to the next field (see `lib/enterToNext`) instead of saving.
+ * Six columns on a desktop, stacking cleanly on a phone.
  */
 export function BillHeaderFields({ bill, bookOptions, booksLoading, taxMode, linkedAppointmentNo, canSeeAppointments, onPickAppointment, onClearAppointment, disabled }: Props) {
   const { register, control, watch, setValue, formState: { errors } } = useFormContext<BillFormValues>();
@@ -65,9 +66,27 @@ export function BillHeaderFields({ bill, bookOptions, booksLoading, taxMode, lin
         </Field>
 
         <Field label="Bill Date" required error={errors.billDate?.message}>
-          <Controller control={control} name="billDate" rules={{ required: 'Bill date is required', validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" autoFocus={!bill} disabled={disabled} />} />
+          <Controller control={control} name="billDate" rules={{ required: 'Bill date is required', validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" disabled={disabled} />} />
         </Field>
 
+        <Field label="Delivery Date" error={errors.deliveryDate?.message}>
+          <Controller control={control} name="deliveryDate" rules={{ validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" disabled={disabled} clearable />} />
+        </Field>
+        <Field
+          label="Next Visit Date"
+          error={errors.nextVisitDate?.message}
+          hint={
+            bill?.nextAppointmentNumber ? (
+              <span className="inline-flex items-center gap-1 text-primary-dark">
+                <CalendarPlus className="h-3.5 w-3.5" strokeWidth={1.5} /> Next Appointment #{bill.nextAppointmentNumber}
+              </span>
+            ) : (
+              'Creates next appointment after saving'
+            )
+          }
+        >
+          <Controller control={control} name="nextVisitDate" rules={{ validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" disabled={disabled} clearable aria-label="Next visit date" />} />
+        </Field>
         {/* Decided by the book (a With GST or Without GST series) — shown, never chosen. */}
         <Field label="Tax Mode" error={errors.taxMode?.message}>
           <ReadOnlyValue title={bill ? 'A saved bill keeps the tax mode it was issued with' : 'Set by the selected book'}>
@@ -75,6 +94,9 @@ export function BillHeaderFields({ bill, bookOptions, booksLoading, taxMode, lin
           </ReadOnlyValue>
         </Field>
 
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Field label="Mobile No." required error={errors.mobileNumber?.message}>
           <Controller
             control={control}
@@ -94,6 +116,7 @@ export function BillHeaderFields({ bill, bookOptions, booksLoading, taxMode, lin
                 placeholder="10-digit mobile"
                 aria-label="Mobile number, 10 digits"
                 disabled={disabled}
+                autoFocus={!bill}
                 // Digits only, at most ten — a letter or an eleventh digit never stays in the box.
                 onChange={(e) => field.onChange(sanitizeMobileInput(e.target.value))}
                 // A paste is sanitized WHOLE before maxLength can cut it: "+91 98765 43210" keeps
@@ -113,37 +136,8 @@ export function BillHeaderFields({ bill, bookOptions, booksLoading, taxMode, lin
         <Field label="Customer Name" required error={errors.customerName?.message}>
           <TextInput size="sm" placeholder="Enter customer name" maxLength={BILL_LIMITS.customerName} disabled={disabled} {...register('customerName', { required: 'Customer name is required', setValueAs: trimmed })} />
         </Field>
-      </div>
-
-      {/* The booking strip sits directly under the mobile it follows, full width so a long
-          candidate never squeezes the fields above it. */}
-      {(canSeeAppointments || linkedAppointmentNo !== null) && (
-        <div className="mt-2 min-h-[20px]">
-          <AppointmentSuggestions mobile={canSeeAppointments ? mobileNumber : ''} linked={linkedAppointmentNo} onPick={onPickAppointment} onClear={onClearAppointment} excludeId={bill?.nextAppointmentId} />
-        </div>
-      )}
-
-      <div className="mt-3 grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Field label="Baby Name" error={errors.babyName?.message}>
           <TextInput size="sm" placeholder="Enter baby name" maxLength={BILL_LIMITS.babyName} disabled={disabled} {...register('babyName', { setValueAs: trimmed })} />
-        </Field>
-        <Field label="Planned Delivery" error={errors.deliveryDate?.message}>
-          <Controller control={control} name="deliveryDate" rules={{ validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" disabled={disabled} clearable />} />
-        </Field>
-        <Field
-          label="Next Visit Date"
-          error={errors.nextVisitDate?.message}
-          hint={
-            bill?.nextAppointmentNumber ? (
-              <span className="inline-flex items-center gap-1 text-primary-dark">
-                <CalendarPlus className="h-3.5 w-3.5" strokeWidth={1.5} /> Next Appointment #{bill.nextAppointmentNumber}
-              </span>
-            ) : (
-              'Creates next appointment after saving'
-            )
-          }
-        >
-          <Controller control={control} name="nextVisitDate" rules={{ validate: validDate }} render={({ field }) => <DateInput {...field} size="sm" disabled={disabled} clearable aria-label="Next visit date" />} />
         </Field>
         <Field label="Birthdate">
           <div className="flex h-8 items-center">
@@ -175,11 +169,21 @@ export function BillHeaderFields({ bill, bookOptions, booksLoading, taxMode, lin
           <TextInput size="sm" placeholder="Optional note for this bill" maxLength={BILL_LIMITS.remark} disabled={disabled} {...register('remark', { setValueAs: trimmed })} />
         </Field>
       </div>
+
+      {/* The booking strip sits directly under the mobile it follows, full width so a long
+          candidate never squeezes the fields above it. */}
+      {(canSeeAppointments || linkedAppointmentNo !== null) && (
+        <div className="mt-2 min-h-[20px]">
+          <AppointmentSuggestions mobile={canSeeAppointments ? mobileNumber : ''} linked={linkedAppointmentNo} onPick={onPickAppointment} onClear={onClearAppointment} excludeId={bill?.nextAppointmentId} />
+        </div>
+      )}
+
     </div>
   );
 }
 
 /* --------------------------------------------------------------- controls -- */
+
 
 /** A value the operator may read but not change — same box as an input, visibly inert. */
 const ReadOnlyValue = ({ children, title }: { children: React.ReactNode; title?: string }) => (

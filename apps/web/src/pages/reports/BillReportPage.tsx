@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   BILL_REPORT_TABS,
   BILL_REPORT_TAB_LABELS,
@@ -154,6 +154,7 @@ function SummaryTab(props: TabProps) {
   const { q, resolved, caption, print, empty, actions } = useReportShell('summary', props);
   const fmt = useDateFormatters();
   const canBill = useAuthStore((s) => s.can)('operations_billing');
+  const nav = useNavigate();
   const t = q.data?.totals;
 
   const columns: Column<BillSummaryRow>[] = [
@@ -161,7 +162,7 @@ function SummaryTab(props: TabProps) {
     {
       key: 'billNumber',
       header: 'Bill No.',
-      render: (r) => (canBill ? <Link to={`/modules/billing/${r.id}`} className="link tabular-nums" aria-label={`Open bill ${r.bookNumber}/${r.billNumber}`}>{r.billNumber}</Link> : <span className="tabular-nums">{r.billNumber}</span>),
+      render: (r) => (canBill ? <Link to={`/modules/billing/${r.id}`} className="link tabular-nums" onClick={(e) => e.stopPropagation()} aria-label={`Open bill ${r.bookNumber}/${r.billNumber}`}>{r.billNumber}</Link> : <span className="tabular-nums">{r.billNumber}</span>),
     },
     { key: 'customerName', header: 'Customer Name', render: (r) => <Truncated text={r.customerName} width={136} /> },
     { key: 'mobileNumber', header: 'Mobile', render: (r) => <span className="whitespace-nowrap">{r.mobileNumber}</span> },
@@ -221,6 +222,7 @@ function SummaryTab(props: TabProps) {
         state={list}
         onStateChange={setList}
         rowKey={(r) => r.id}
+        onRowClick={canBill ? (r) => nav(`/modules/billing/${r.id}`) : undefined}
         filterFields={false}
         searchPlaceholder="Search customer, mobile, bill no., item..."
         actions={actions(build)}
@@ -267,6 +269,7 @@ function DetailedTab(props: TabProps) {
   const { q, resolved, caption, print, empty, actions } = useReportShell('detailed', props);
   const fmt = useDateFormatters();
   const canBill = useAuthStore((s) => s.can)('operations_billing');
+  const nav = useNavigate();
   const rows = q.data?.rows ?? [];
   const t: BillDetailTotals | undefined = q.data?.totals;
   const billCell = (render: (r: BillDetailRow) => ReactNode) => (r: BillDetailRow, i: number) => (startsBill(rows, i) ? render(r) : null);
@@ -279,7 +282,7 @@ function DetailedTab(props: TabProps) {
     {
       key: 'billNumber',
       header: 'Bill No.',
-      render: billCell((r) => (canBill ? <Link to={`/modules/billing/${r.billId}`} className="link tabular-nums" aria-label={`Open bill ${r.bookNumber}/${r.billNumber}`}>{r.billNumber}</Link> : <span className="tabular-nums">{r.billNumber}</span>)),
+      render: billCell((r) => (canBill ? <Link to={`/modules/billing/${r.billId}`} className="link tabular-nums" onClick={(e) => e.stopPropagation()} aria-label={`Open bill ${r.bookNumber}/${r.billNumber}`}>{r.billNumber}</Link> : <span className="tabular-nums">{r.billNumber}</span>)),
     },
     { key: 'customerName', header: 'Customer', render: billCell((r) => <Truncated text={r.customerName} width={104} />) },
     { key: 'mobileNumber', header: 'Mobile', hidden: true, render: billCell((r) => <span className="whitespace-nowrap">{r.mobileNumber}</span>) },
@@ -351,6 +354,7 @@ function DetailedTab(props: TabProps) {
         state={list}
         onStateChange={setList}
         rowKey={(r) => r.key}
+        onRowClick={canBill ? (r) => nav(`/modules/billing/${r.billId}`) : undefined}
         rowClassName={(_, i) => i > 0 && startsBill(rows, i) && 'border-t border-t-gray-300'}
         filterFields={false}
         searchPlaceholder="Search customer, mobile, bill no., item..."

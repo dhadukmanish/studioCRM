@@ -138,26 +138,26 @@ describe('New Bill renders for real', () => {
     await renderNewBill();
     expect(uncaught).toEqual([]);
     const today = todayISO();
-    expect(dateField('Planned Delivery').value).toBe(formatDateOnly(addDays(today, 3), 'dd-MM-yyyy'));
+    expect(dateField('Delivery Date').value).toBe(formatDateOnly(addDays(today, 3), 'dd-MM-yyyy'));
     // Changing the bill date moves the suggestion with it…
     await typeInto(dateField('Bill Date'), '28-02-2028');
     await flush();
-    expect(dateField('Planned Delivery').value).toBe('02-03-2028');
+    expect(dateField('Delivery Date').value).toBe('02-03-2028');
     // …until the operator types their own date, which is never overwritten.
-    await typeInto(dateField('Planned Delivery'), '15-03-2028');
+    await typeInto(dateField('Delivery Date'), '15-03-2028');
     await typeInto(dateField('Bill Date'), '01-03-2028');
     await flush();
-    expect(dateField('Planned Delivery').value).toBe('15-03-2028');
+    expect(dateField('Delivery Date').value).toBe('15-03-2028');
   });
 
-  it('no default delivery days: Planned Delivery starts empty', async () => {
+  it('no default delivery days: Delivery Date starts empty', async () => {
     await renderNewBill();
-    expect(dateField('Planned Delivery').value).toBe('');
+    expect(dateField('Delivery Date').value).toBe('');
   });
 
-  it('shows Planned Delivery, Baby Name and Next Visit Date directly — no More details, no helper clutter', async () => {
+  it('shows Delivery Date, Baby Name and Next Visit Date directly — no More details, no helper clutter', async () => {
     await renderNewBill();
-    for (const label of ['Planned Delivery', 'Baby Name', 'Next Visit Date', 'Remark', 'Birthdate']) expect(text()).toContain(label);
+    for (const label of ['Delivery Date', 'Baby Name', 'Next Visit Date', 'Remark', 'Birthdate']) expect(text()).toContain(label);
     expect(text()).toContain('Creates next appointment after saving');
     expect(text()).not.toMatch(/More details/i);
     expect(text()).not.toMatch(/Decides the bill number series/i);

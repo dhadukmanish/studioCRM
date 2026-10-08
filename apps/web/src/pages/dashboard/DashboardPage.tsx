@@ -108,7 +108,7 @@ export default function DashboardPage() {
           </Section>
         )}
         {d?.orders && (
-          <Section title="Orders" tone={2} icon={<ClipboardList />} hint="Bills dated in the period · completed = delivered" link={can('operations_billing') ? { to: '/modules/billing', label: 'Bills' } : undefined}>
+          <Section title="Bill" tone={2} icon={<ClipboardList />} hint="Bills dated in the period · completed = delivered" link={can('operations_billing') ? { to: '/modules/billing', label: 'Bills' } : undefined}>
             <Figures items={[
               { label: 'Total orders', value: d.orders.total, strong: true, tone: TOTAL },
               { label: 'Completed', value: d.orders.completed, tone: DONE },

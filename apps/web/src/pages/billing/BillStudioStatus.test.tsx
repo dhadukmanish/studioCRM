@@ -20,7 +20,6 @@ vi.mock('@/lib/work', async (orig) => ({
   useBillWork: () => ({ data: work, isLoading: false, isError: false }),
   useWorkActions: () => ({ mutate, isPending: false }),
 }));
-vi.mock('@/components/invoice/ShareInvoiceDialog', () => ({ ShareInvoiceDialog: () => <div data-testid="share-dialog" /> }));
 vi.mock('@/lib/settings', () => ({
   useDateFormatters: () => ({ date: (v: string) => v, time: (v: string) => v, stamp: (v: string) => v, stampTime: (v: string) => v }),
 }));
@@ -82,11 +81,11 @@ describe('Studio Status on the bill', () => {
     expect(mutate).toHaveBeenCalledWith({ type: 'record', billId: 'b1', stage: 'DELIVERY' });
   });
 
-  it('WhatsApp is never ticked: its chip opens the real share dialog', async () => {
+  it('WhatsApp (photos sent after editing) is recorded in one click like any step — no share dialog', async () => {
     await render();
     await click(chip('WhatsApp: not done'));
-    expect(mutate).not.toHaveBeenCalled();
-    expect(host.querySelector('[data-testid="share-dialog"]')).not.toBeNull();
+    expect(mutate).toHaveBeenCalledWith({ type: 'record', billId: 'b1', stage: 'WHATSAPP' });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it('a recorded step is corrected from its own menu — who/when, then Mark pending', async () => {

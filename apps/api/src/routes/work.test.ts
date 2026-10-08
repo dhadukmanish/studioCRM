@@ -193,27 +193,21 @@ describe.skipIf(!TEST_DB)('Studio workflow (integration, needs TEST_DATABASE_URL
       expect((await stageOk(A.token, b.id, 'EDITING')).position).toBe('WHATSAPP');
     });
 
-    it('WhatsApp is never marked done by hand — only by opening WhatsApp from the workflow', async () => {
+    it('WhatsApp (photos sent after editing) can be marked done by hand; a plain invoice share records no stage', async () => {
       const b = await bill(A, 1000);
       await stageOk(A.token, b.id, 'SELECTION');
       await stageOk(A.token, b.id, 'EDITING');
-
-      const manual = await stage(A.token, b.id, 'WHATSAPP', 'DONE');
-      expect(manual.statusCode).toBe(400);
-      const manualDefault = await stage(A.token, b.id, 'WHATSAPP');
-      expect(manualDefault.statusCode).toBe(400);
-      expect((await workOf(A.token, b.id)).position).toBe('WHATSAPP');
 
       // A plain invoice share records no stage.
       expect((await shareOpened(A.token, b.id, {})).statusCode).toBe(200);
       expect((await workOf(A.token, b.id)).position).toBe('WHATSAPP');
 
-      expect((await shareOpened(A.token, b.id, { workStage: 'WHATSAPP' })).statusCode).toBe(200);
+      expect((await stageOk(A.token, b.id, 'WHATSAPP', 'DONE')).position).toBe('DELIVERY');
       const w = await workOf(A.token, b.id);
-      expect(w.position).toBe('DELIVERY');
       expect(w.stages.find((s) => s.stage === 'WHATSAPP')).toMatchObject({ outcome: 'DONE', completedOn: today });
 
-      // Sharing again from the workflow is a no-op, not a second record.
+      // Doing it again — by hand or from the share dialog — is a no-op, not a second record.
+      await stageOk(A.token, b.id, 'WHATSAPP', 'DONE');
       expect((await shareOpened(A.token, b.id, { workStage: 'WHATSAPP' })).statusCode).toBe(200);
       expect((await workOf(A.token, b.id)).stages.filter((s) => s.stage === 'WHATSAPP')).toEqual(w.stages.filter((s) => s.stage === 'WHATSAPP'));
       expect((await shareOpened(A.token, b.id, { workStage: 'DELIVERY' })).statusCode).toBe(400);

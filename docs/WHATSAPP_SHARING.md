@@ -17,7 +17,9 @@ customer taps the link ─> GET /i/<token> ─> the invoice PDF, inline, in the 
 
 1. The Share dialog opens with the bill's saved mobile, a template, and the tenant's message. It
    shows the bill's **current link state** — it never creates a link just by opening.
-2. **Create link** (or **Replace link**, see below) asks the server for the link. The server
+2. **The link is created automatically** when the dialog opens on a bill with no live link (never
+   replacing one that exists); **Create link** / **Replace link** (see below) remain for a failure or a
+   template switch, and ask the server for the link. The server
    **reuses** the bill's live link when it is for the same template and the bill has not changed
    since; otherwise it makes a new one. The message then shows the real URL.
 3. **Open WhatsApp** — one click, a real `target="_blank"` link, nothing asynchronous between the

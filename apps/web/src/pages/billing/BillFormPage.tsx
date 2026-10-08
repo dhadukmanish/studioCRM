@@ -423,7 +423,7 @@ function BillForm({ bill }: { bill?: BillRecord }) {
         {bill && <ShareInvoiceDialog billId={bill.id} open={sharing} onClose={() => setSharing(false)} />}
       </div>
 
-      <form onSubmit={submit} className="space-y-3 pb-2">
+      <form onSubmit={submit} data-enter-submit="never" className="space-y-3 pb-2">
         <BillHeaderFields
           bill={bill}
           canSeeAppointments={can('operations_appointments')}
@@ -464,11 +464,11 @@ function BillForm({ bill }: { bill?: BillRecord }) {
         <div className="card flex flex-col gap-4 p-4 lg:flex-row lg:items-start lg:justify-between">
           {/* Beside the totals: the GST detail and — on a saved bill — its Studio Status, side by
               side where there is room (xl), stacked below that. Neither squeezes the totals. */}
-          <div className={cx('grid min-w-0 flex-1 gap-4', taxMode === 'WITH_GST' && bill && 'min-[1400px]:grid-cols-[minmax(0,1fr)_auto]')}>
+          <div className={cx('grid min-w-0 flex-1 gap-4', taxMode === 'WITH_GST' && 'min-[1400px]:grid-cols-[minmax(0,1fr)_auto]')}>
             {/* Only where tax is actually charged. A rate-wise table on a bill that charges
                 nothing would read as a claim that those rates were billed. */}
             {taxMode === 'WITH_GST' && <GstDetails rows={preview.gstSummary} gstTotal={preview.totals.gstAmount} taxableTotal={preview.totals.netTaxable} />}
-            {bill && <BillStudioStatus billId={bill.id} plannedDelivery={bill.deliveryDate} dirty={isDirty} className={cx(taxMode === 'WITH_GST' && 'min-[1400px]:border-l min-[1400px]:border-line min-[1400px]:pl-4')} />}
+            <BillStudioStatus billId={bill?.id ?? null} plannedDelivery={bill?.deliveryDate ?? null} dirty={isDirty} className={cx(taxMode === 'WITH_GST' && 'min-[1400px]:border-l min-[1400px]:border-line min-[1400px]:pl-4')} />
           </div>
 
           <dl className="w-full shrink-0 space-y-1.5 text-[13px] sm:w-[300px]">

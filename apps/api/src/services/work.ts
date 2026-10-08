@@ -107,11 +107,11 @@ export async function getBillWork(tenantId: string, billId: string): Promise<Bil
  * original time and person stay), and the unique key means two clicks at once cannot record it
  * twice. Recording a different outcome (a skipped stage later done) replaces it.
  *
- * WhatsApp is DONE only through `viaShare` — the share dialog actually opening WhatsApp. By hand it
- * can only be skipped: the app never claims a message it did not open.
+ * WhatsApp here is the studio's "photos sent to the customer after editing" step, confirmed by hand
+ * like every other stage — the app cannot see WhatsApp, so it records what the operator says.
+ * Opening the invoice share dialog from the workflow records it too (`routes/invoices.ts`).
  */
-export async function recordStage(tenantId: string, userId: string, billId: string, stage: WorkStage, outcome: WorkStageOutcome, viaShare = false) {
-  if (stage === 'WHATSAPP' && outcome === 'DONE' && !viaShare) throw validation('WhatsApp is marked done by sharing on WhatsApp. Use Skip if it is not needed for this job.');
+export async function recordStage(tenantId: string, userId: string, billId: string, stage: WorkStage, outcome: WorkStageOutcome) {
   const bill = await billOf(tenantId, billId);
   const completedOn = await businessToday(tenantId);
   const now = new Date();

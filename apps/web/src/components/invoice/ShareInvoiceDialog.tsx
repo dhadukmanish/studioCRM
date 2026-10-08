@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Link2, MessageCircle } from 'lucide-react';
 import { INVOICE_LINK_PLACEHOLDER, fillInvoiceLink, isTemplateCompatible, whatsappChatUrl, whatsappDestination, type PreparedPublicInvoiceLink } from '@erp/shared';
@@ -20,6 +20,8 @@ import { WORK_INVALIDATES } from '@/lib/work';
  *
  * "Open WhatsApp" opens click-to-chat with the number and the message; the operator presses Send.
  * Nothing here claims the message was sent, delivered or read.
+ *
+ * A bill without a live link gets one the moment the dialog opens (never replacing an existing one).
  *
  * The number defaults to the bill's saved mobile; changing it here affects this share only — the
  * bill is never edited. The template defaults to the one the preview shows (or the default).
@@ -116,6 +118,22 @@ export function ShareInvoiceDialog({ billId, open, onClose, templateId, workStag
       setRevoking(false);
     }
   };
+
+  // Opening the dialog on a bill with no live link makes one — the operator's next click is Open
+  // WhatsApp, not "Create link". It never replaces a link that already exists (that one may have
+  // been sent): a template switch still asks. Once per opening, so a failure shows its message
+  // and a Create link button instead of retrying in a loop.
+  const autoTried = useRef(false);
+  useEffect(() => {
+    if (!open) autoTried.current = false;
+  }, [open]);
+  useEffect(() => {
+    if (!open || !billId || autoTried.current || !ctx.data || lookup.isLoading || linkState.isLoading || !chosen) return;
+    if (linkState.data?.active || prepared) return;
+    autoTried.current = true;
+    void createLink();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, billId, ctx.data, lookup.isLoading, linkState.isLoading, linkState.data, chosen, prepared]);
 
   const onOpenWhatsApp = () => {
     if (!chatUrl) return;

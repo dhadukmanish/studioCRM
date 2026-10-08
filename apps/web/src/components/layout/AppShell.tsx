@@ -9,6 +9,7 @@ import { useUiStore } from '@/store/ui';
 import { cx } from '@/lib/format';
 import { api } from '@/lib/api';
 import { Icon } from '@/lib/icons';
+import { useEnterToNext } from '@/lib/enterToNext';
 import { useCompanyLogo, useCompanyProfile } from '@/lib/settings';
 import { SubscriptionBanner } from './SubscriptionBanner';
 
@@ -143,6 +144,7 @@ function UserMenu() {
 }
 
 export default function AppShell() {
+  useEnterToNext();
   const { sidebarCollapsed, toggleSidebar, mobileOpen, setMobileOpen } = useUiStore();
   const { pathname } = useLocation();
   const nav = useVisibleNav();
